@@ -835,7 +835,7 @@ def prepare_dataset(
 
 if __name__ == "__main__":
     # ---- Step 1: physical layout of the panel ---------------------------
-    # Matches the columns produced by Datastet_building.py:
+    # Matches the columns produced by dataset_building.py:
     #   Id, year, week, Transactions, Gender, Income, high.season
     DATA_CONFIG = {
         "id_col":           "Id",
@@ -878,7 +878,7 @@ if __name__ == "__main__":
     # Point `csv_path` at any panel CSV with the columns referenced in
     # DATA_CONFIG and FEATURE_SCHEMA. How the panel was built is out of
     # scope for this file — produce it from raw transactions (e.g. via
-    # Datastet_building.py), from your data-integration notebook, or by
+    # dataset_building.py), from your data-integration notebook, or by
     # hand.
     csv_path = "Datasets/electronic_panel.csv"
     panel = pd.read_csv(csv_path)
