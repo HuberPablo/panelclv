@@ -77,8 +77,12 @@ the sampling-and-averaging simulator — not a single deterministic forward pass
 
 - `Models/` — the package. `multinomial_lstm.py`, `multinomial_transformer.py`,
   `pareto_nbd.py`, `pareto_paper.py`, `monte_carlo_forecasting.py`, `training_utils.py`,
-  `losses.py`, `evaluation_utils.py`, `optuna_tuning.py`, `plot_utils.py`. `__init__.py`
-  is the public API (note `mc_forecast` is an alias for `run_monte_carlo_forecast`).
+  `losses.py`, `evaluation_utils.py`, `optuna_tuning.py`, `plot_utils.py`,
+  `experiment_utils.py` (thin orchestration helpers: `make_loaders`,
+  `make_data_builder`, `build_inference_from_trial` — the glue notebooks call).
+  `__init__.py` is the public API; its `__all__` is a curated ~16-name headline set
+  (the rest stay importable by explicit name). Note `mc_forecast` is an alias for
+  `run_monte_carlo_forecast`.
 
   **Two Pareto/NBD benchmarks** (same `(train_panel, holdout_length, ...) → (N, H)`
   contract, drop-in interchangeable):
@@ -91,12 +95,14 @@ the sampling-and-averaging simulator — not a single deterministic forward pass
     ~0.99). In `plot_weekly_aggregated` / `metrics_table` pass `pareto_nbd_benchmark=True`
     (MLE, "Pareto/NBD") and/or `pareto_paper_benchmark=True` (HB, "Pareto/NBD (HB)").
 - `Data_preparation/` — `dynamic_panel_dataset.py` (`prepare_dataset` → model-ready
-  `data` dict) and `Datastet_building.py` (raw → panel).
+  `data` dict) and `dataset_building.py` (raw → panel). Has an `__init__.py` so it
+  imports as a real package after `pip install -e .`.
 - `configs/` — `transformations_spec.py`: INPUT_SPEC validation + JSON save/load.
 - `inputs_configs/` — saved INPUT_SPEC JSONs (e.g. `full_transactions_gender.json`).
 - `Datasets/` — source panels (`.Rdata`, `.csv`, `.npz`).
-- `Data_integration_LSTM.ipynb`, `Data_integration_TRANSFORMER.ipynb`,
-  `Data_integration.ipynb` — orchestration / experiment notebooks (thin glue over `Models/`).
+- `Data_integration_LSTM_v2.ipynb`, `Data_integration_TRANSFORMER_v2.ipynb` — the
+  current helper-based orchestration notebooks (thin glue over `Models/`). The
+  un-suffixed `Data_integration_{LSTM,TRANSFORMER}.ipynb` are kept as reference.
 - `Fine_tuning_optuna/` — Optuna study databases.
 - `Original_paper_model/` — reference notebooks for the paper's setup.
 
@@ -155,11 +161,11 @@ and `val_idx=`; default `rollout_horizon=52` (match the real holdout length).
 
 ## Gotchas
 
-- **Hardcoded path:** `configs/transformations_spec.py` sets
-  `DEFAULT_INPUT_SPEC_DIR` to a local absolute path
-  (`/home/virthian/Desktop/Thesis/Package_Notebook/inputs_configs`). On any other machine,
-  pass `directory=` explicitly to `save_input_spec` / `load_input_spec` / `list_input_specs`,
-  or fix the constant.
+- **INPUT_SPEC directory:** `configs/transformations_spec.py` has no default location
+  (`DEFAULT_INPUT_SPEC_DIR = None`). `save_input_spec` / `load_input_spec` /
+  `list_input_specs` therefore **require** an explicit `directory=` (e.g. the repo's
+  `inputs_configs/`) and raise a clear `ValueError` if it is omitted. (This replaced a
+  previously hardcoded absolute path that only resolved on one machine.)
 - **Target column rules:** `target_col` must be in **both** `seq_cols` and
   `input_spec["embedded_cols"]`; its cardinality sets the softmax head size (`max_trans`).
   If you use `clip_target_upper`, it must be strictly less than that cardinality.
@@ -168,9 +174,10 @@ and `val_idx=`; default `rollout_horizon=52` (match the real holdout length).
 
 ## Dependencies
 
-`torch`, `numpy`, `pandas`, `scikit-learn`, `optuna`; `lifetimes` for the MLE
-Pareto/NBD; `wandb` optional (lazily imported). There is no `requirements.txt`/
-`pyproject.toml` yet.
+`torch`, `numpy`, `pandas`, `scikit-learn`, `optuna`, `matplotlib`; `lifetimes` for the
+MLE Pareto/NBD; `wandb` optional (lazily imported; the `wandb` extra). These are declared
+in **`pyproject.toml`** — `pip install -e .` from the repo root makes `Models`,
+`Data_preparation`, and `configs` importable with no `sys.path` hacks.
 
 `Models/pareto_paper.py` (the HB-MCMC Pareto/NBD) is **pure NumPy/SciPy — no R needed
 at run time**. R is only needed to *re-validate* the port: `scripts/validate_pareto_paper.py`
