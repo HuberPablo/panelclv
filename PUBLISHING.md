@@ -75,7 +75,7 @@ twine check dist/*                               # validate metadata
    ```
 
 ### Before the first real PyPI upload — check these
-- **Name availability:** `customer-base-forecasting` must be free on PyPI. If taken,
+- **Name availability:** `panelclv` must be free on PyPI. If taken,
   change `project.name` in `pyproject.toml`.
 - **Heavy deps:** `dependencies` includes `torch`. PyPI installs the default CPU/CUDA
   build; this repo's dev env is ROCm. Consider documenting that users pick their own
