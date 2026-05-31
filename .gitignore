@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 
+# Build artifacts (sdist / wheel / egg-info)
+dist/
+build/
+*.egg-info/
+
 # Jupyter
 .ipynb_checkpoints/
 
