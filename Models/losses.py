@@ -1,0 +1,143 @@
+"""Alternative losses for the multinomial baselines.
+
+All criterions take (logits, targets) — same call signature as
+`nn.CrossEntropyLoss`, with shapes `(B*T, K)` and `(B*T,)` (long indices) —
+so they're drop-in replacements inside `training_utils.fit_model`.
+
+Selectable via `loss_type` strings:
+
+    "cross_entropy"  plain CE (default)
+    "weighted_ce"    CE with per-class weights (inverse-frequency, etc.)
+    "focal"          Focal Loss with optional class weights (`alpha`)
+    "emd"            Squared Earth Mover's Distance — ordinal-aware
+
+References
+----------
+- Lin, Goyal, Girshick, He, Dollár (2017),
+  "Focal Loss for Dense Object Detection", ICCV.
+- Hou, Yu, Samaras (2016),
+  "Squared Earth Mover's Distance-based Loss for Training Deep Neural Networks".
+"""
+
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# ---------------------------------------------------------------------------
+# Focal Loss
+# ---------------------------------------------------------------------------
+
+
+class FocalLoss(nn.Module):
+    """Multi-class focal loss: `(1 - p_t)^gamma * CE`.
+
+    `alpha` (optional) is a per-class weight tensor of shape (num_classes,) —
+    typically inverse-frequency weights from `compute_class_weights(...)`.
+    `gamma=0` reduces to plain (optionally weighted) CE.
+    """
+
+    def __init__(
+        self,
+        alpha: torch.Tensor | None = None,
+        gamma: float = 2.0,
+    ) -> None:
+        super().__init__()
+        if alpha is not None:
+            self.register_buffer("alpha", alpha.float())
+        else:
+            self.alpha = None
+        self.gamma = float(gamma)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        log_probs = F.log_softmax(logits, dim=-1)
+        log_pt = log_probs.gather(1, targets.unsqueeze(-1)).squeeze(-1)
+        pt = log_pt.exp()
+        loss = -((1.0 - pt) ** self.gamma) * log_pt
+        if self.alpha is not None:
+            loss = loss * self.alpha[targets]
+        return loss.mean()
+
+
+# ---------------------------------------------------------------------------
+# Squared EMD (ordinal-aware)
+# ---------------------------------------------------------------------------
+
+
+class SquaredEMDLoss(nn.Module):
+    """Squared Earth Mover's Distance between predicted and true CDFs.
+
+    For ordinal classes `0 < 1 < ... < K-1`, penalises a wrong prediction
+    by the squared L1 distance between cumulative distributions — so
+    "predict 0 when actual is 10" is much worse than "predict 0 when
+    actual is 1". Same input/output signature as CE.
+    """
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        K = logits.shape[-1]
+        probs = F.softmax(logits, dim=-1)
+        target_onehot = F.one_hot(targets, num_classes=K).float()
+        cdf_pred = probs.cumsum(dim=-1)
+        cdf_true = target_onehot.cumsum(dim=-1)
+        return ((cdf_pred - cdf_true) ** 2).sum(dim=-1).mean()
+
+
+# ---------------------------------------------------------------------------
+# Class-weight helper
+# ---------------------------------------------------------------------------
+
+
+def compute_class_weights(
+    targets,
+    num_classes: int,
+) -> torch.Tensor:
+    """Inverse-frequency per-class weights, normalised to sum to `num_classes`.
+
+    `targets` can be any array-like of integer class labels. Classes that
+    don't appear in `targets` get a count of 1 (so their weight stays finite).
+    The normalisation keeps the average weight at 1, so the loss scale stays
+    comparable to plain CE.
+    """
+    t = torch.as_tensor(targets).flatten().long()
+    counts = torch.bincount(t, minlength=num_classes).float().clamp(min=1.0)
+    weights = 1.0 / counts
+    weights = weights * (num_classes / weights.sum())
+    return weights
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def build_criterion(
+    loss_type: str = "cross_entropy",
+    *,
+    class_weights: torch.Tensor | None = None,
+    focal_gamma: float = 2.0,
+) -> nn.Module:
+    """Build a loss module from a string name.
+
+    `class_weights` is consumed by `weighted_ce` and (optionally) `focal`.
+    `focal_gamma` is consumed by `focal` only. Other args are ignored
+    where they don't apply.
+    """
+    if loss_type == "cross_entropy":
+        return nn.CrossEntropyLoss()
+    if loss_type == "weighted_ce":
+        if class_weights is None:
+            raise ValueError(
+                "loss_type='weighted_ce' requires class_weights "
+                "(see compute_class_weights)"
+            )
+        return nn.CrossEntropyLoss(weight=class_weights)
+    if loss_type == "focal":
+        return FocalLoss(alpha=class_weights, gamma=focal_gamma)
+    if loss_type == "emd":
+        return SquaredEMDLoss()
+    raise ValueError(
+        f"Unknown loss_type={loss_type!r}. "
+        f"Options: 'cross_entropy', 'weighted_ce', 'focal', 'emd'"
+    )

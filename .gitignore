@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+
+# Model files / checkpoints
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Results that can be regenerated
+optuna_summaries/
+plots/
+utils/Predictions/
+
+Datasets/Kaggle/online_retail_II.csv
+Datasets/Kaggle/
+
+# Editor local history
+.history/
+
+# Local reference PDFs (not for git)
+Papers/

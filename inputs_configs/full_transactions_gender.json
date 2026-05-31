@@ -1,0 +1,6 @@
+{
+  "embedded_cols": {
+    "Gender": 2,
+    "Transactions": 10
+  }
+}
