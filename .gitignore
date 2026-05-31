@@ -30,3 +30,10 @@ Datasets/Kaggle/
 
 # Local reference PDFs (not for git)
 Papers/
+
+# Datasets (data is not part of the package)
+Datasets/
+
+# Optuna study databases
+Fine_tuning_optuna/
+*.db
