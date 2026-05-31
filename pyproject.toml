@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "customer-base-forecasting"
+version = "0.1.0"
+description = "Modular customer-base forecasting: multinomial LSTM / Transformer + Pareto/NBD benchmarks for per-customer transaction-count prediction."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "torch",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "optuna",
+    "lifetimes",
+    "matplotlib",
+]
+
+# wandb is imported lazily and only when experiment logging is enabled, so it is an
+# optional extra rather than a hard dependency. The HB-MCMC Pareto/NBD port runs on
+# pure NumPy/SciPy; R is only needed to *re-validate* it (see scripts/), never at run time.
+[project.optional-dependencies]
+wandb = ["wandb"]
+
+# Only the importable source packages ship. `utils/` and `scripts/` are loose helper
+# scripts (no __init__), and bank_lstm_vs_pareto.py is a one-off — none are packaged.
+[tool.setuptools]
+packages = ["Models", "Data_preparation", "configs"]

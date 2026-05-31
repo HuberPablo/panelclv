@@ -10,8 +10,9 @@ each embedding table should be. Minimal format:
         }
     }
 
-Specs live as JSON on disk under DEFAULT_INPUT_SPEC_DIR so notebooks and
-training scripts can reference them by name.
+Specs live as JSON on disk so notebooks and training scripts can reference them
+by name. There is no machine-agnostic default location, so the save/load/list
+helpers require an explicit ``directory=`` (e.g. the repo's ``inputs_configs/``).
 
 Standard library only — no third-party dependencies.
 """
@@ -27,9 +28,24 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_INPUT_SPEC_DIR: Path = Path(
-    "/home/virthian/Desktop/Thesis/Package_Notebook/inputs_configs"
-)
+# No machine-agnostic default exists, so this is intentionally None: callers must
+# pass `directory=` explicitly (e.g. the repo's `inputs_configs/`). This replaces a
+# previously hardcoded absolute path that only resolved on one machine.
+DEFAULT_INPUT_SPEC_DIR: Path | None = None
+
+
+def _require_directory(directory: Path | None) -> Path:
+    """Resolve a caller-supplied INPUT_SPEC directory, failing loudly if omitted.
+
+    There is no sensible default (see DEFAULT_INPUT_SPEC_DIR), so a missing
+    directory is a usage error rather than something to guess at.
+    """
+    if directory is None:
+        raise ValueError(
+            "No INPUT_SPEC directory given. Pass directory= explicitly "
+            "(e.g. the repo's 'inputs_configs/') — there is no default location."
+        )
+    return Path(directory)
 
 
 # ---------------------------------------------------------------------------
@@ -91,17 +107,18 @@ def _resolve_path(name: str, directory: Path) -> Path:
 def save_input_spec(
     input_spec: dict,
     name: str,
-    directory: Path = DEFAULT_INPUT_SPEC_DIR,
+    directory: Path | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Validate and persist an INPUT_SPEC as JSON.
 
-    The target directory is created if it doesn't exist. Refuses to clobber
-    an existing file unless `overwrite=True`. Returns the path written to.
+    `directory` is required (no default location). The target directory is created
+    if it doesn't exist. Refuses to clobber an existing file unless `overwrite=True`.
+    Returns the path written to.
     """
     validate_input_spec(input_spec)
 
-    directory = Path(directory)
+    directory = _require_directory(directory)
     directory.mkdir(parents=True, exist_ok=True)
 
     path = _resolve_path(name, directory)
@@ -118,15 +135,15 @@ def save_input_spec(
 
 def load_input_spec(
     name: str,
-    directory: Path = DEFAULT_INPUT_SPEC_DIR,
+    directory: Path | None = None,
     validate: bool = True,
 ) -> dict:
     """Load an INPUT_SPEC JSON file by name.
 
-    If `validate` is True, the loaded dict is passed through
-    `validate_input_spec` before being returned.
+    `directory` is required (no default location). If `validate` is True, the loaded
+    dict is passed through `validate_input_spec` before being returned.
     """
-    path = _resolve_path(name, Path(directory))
+    path = _resolve_path(name, _require_directory(directory))
     if not path.exists():
         raise FileNotFoundError(f"No INPUT_SPEC at {path}")
 
@@ -139,13 +156,14 @@ def load_input_spec(
 
 
 def list_input_specs(
-    directory: Path = DEFAULT_INPUT_SPEC_DIR,
+    directory: Path | None = None,
 ) -> list[str]:
     """Return sorted INPUT_SPEC names (without the .json extension).
 
-    Returns an empty list if the directory does not exist.
+    `directory` is required (no default location). Returns an empty list if the
+    directory does not exist.
     """
-    directory = Path(directory)
+    directory = _require_directory(directory)
     if not directory.exists():
         return []
     return sorted(p.stem for p in directory.glob("*.json"))
