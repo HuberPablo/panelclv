@@ -51,15 +51,18 @@ dependencies = [
 # pure NumPy/SciPy; R is only needed to *re-validate* it (see scripts/), never at run time.
 [project.optional-dependencies]
 wandb = ["wandb"]
+# Dev tooling: `pip install -e ".[dev]"` to get the test runner.
+dev = ["pytest"]
 
 [project.urls]
 Homepage = "https://github.com/HuberPablo/panelclv"
 Repository = "https://github.com/HuberPablo/panelclv"
 Issues = "https://github.com/HuberPablo/panelclv/issues"
 
-# Everything importable now lives under the single top-level `panelclv` package
-# (panelclv.models / panelclv.data_preparation / panelclv.configs), so the wheel no
-# longer drops generic `Models`/`configs` folders into site-packages. `utils/` and
-# `scripts/` are loose helper scripts (no __init__) and are intentionally not shipped.
+# src-layout: the importable package lives under `src/panelclv`, so the repo root
+# is never on `sys.path` by accident — you must install the package to import it,
+# which surfaces packaging bugs before they ship. `notebooks/`, `scripts/` and
+# `tests/` sit outside `src/` and are intentionally not part of the wheel.
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["panelclv*"]

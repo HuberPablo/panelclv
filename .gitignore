@@ -20,7 +20,7 @@ checkpoints/
 # Results that can be regenerated
 optuna_summaries/
 plots/
-utils/Predictions/
+Predictions/
 
 Datasets/Kaggle/online_retail_II.csv
 Datasets/Kaggle/
@@ -37,3 +37,7 @@ Datasets/
 # Optuna study databases
 Fine_tuning_optuna/
 *.db
+
+# Local-only: agent guidance + the paper's reference notebooks (not part of the package)
+CLAUDE.md
+Original_paper_model/

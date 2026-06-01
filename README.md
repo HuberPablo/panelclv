@@ -4,7 +4,7 @@ Modular **LSTM** and **Transformer** models for customer-base transaction-count
 forecasting, with **Pareto/NBD** benchmarks. The thesis target is the Valendin et al.
 workflow: the models are *classifiers over transaction-count classes* that forecast by
 **autoregressive Monte Carlo simulation** (sample a count per period, feed it back,
-average many paths) — not point regressors. See `CLAUDE.md` for the modeling details.
+average many paths) — not point regressors.
 
 ## Install
 
@@ -14,9 +14,13 @@ From the repo root (use your PyTorch venv):
 pip install -e .
 ```
 
-This installs the single top-level `panelclv` package (with the `panelclv.models`,
-`panelclv.data_preparation`, and `panelclv.configs` subpackages), so
-`from panelclv.models import ...` works anywhere — no `sys.path` hacks.
+The project uses a **src-layout** (the package lives in `src/panelclv/`), so installing
+it is what puts `panelclv` on the path — there are no `sys.path` hacks. It is split by
+concern into subpackages: `panelclv.models`, `panelclv.training`, `panelclv.tuning`,
+`panelclv.evaluation`, `panelclv.benchmarks`, `panelclv.experiments`,
+`panelclv.data_preparation`, `panelclv.configs`. Import from the relevant one, e.g.
+`from panelclv.tuning import run_optuna_study`. For the test runner, use
+`pip install -e ".[dev]"` and run `pytest`.
 
 ## Quickstart
 
@@ -72,7 +76,10 @@ Swap `model_type="lstm"` / `"transformer"` (and `mc_forecast` /
 
 ## Notebooks
 
-`Data_integration_LSTM_v2.ipynb` and `Data_integration_TRANSFORMER_v2.ipynb` are the
-runnable, annotated walkthroughs of the flow above (built on the helpers). The
-original `Data_integration_LSTM.ipynb` / `Data_integration_TRANSFORMER.ipynb` are kept
-for reference.
+All notebooks live in `notebooks/`. `notebooks/Data_integration_LSTM_v2.ipynb` and
+`notebooks/Data_integration_TRANSFORMER_v2.ipynb` are the runnable, annotated
+walkthroughs of the flow above (built on the helpers); the un-suffixed
+`Data_integration_{LSTM,TRANSFORMER}.ipynb` are kept for reference, and
+`dataset_building.ipynb` builds the clean panels from raw data. Each notebook opens with
+a small bootstrap cell that locates the repo root and makes `panelclv` importable, so
+they run whether or not the package is pip-installed.

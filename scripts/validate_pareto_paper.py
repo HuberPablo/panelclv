@@ -21,7 +21,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# src-layout: the package lives under <repo>/src, so add that to the path as a
+# fallback for running this script without an editable install.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from panelclv.benchmarks.pareto_paper import compute_pareto_paper_predictions  # noqa: E402
 
 PERIOD_DAYS = 7.0
