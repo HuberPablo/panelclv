@@ -655,7 +655,7 @@ def run_optuna_study(
     storage: str | None = None,
     direction: str = "minimize",
     sampler: optuna.samplers.BaseSampler | None = None,
-    pruner: optuna.pruners.BasePruner | None = None,
+    pruner: optuna.pruners.BasePruner | bool | None = True,
     summary_dir: str | Path = "./optuna_summaries",
     append_timestamp: bool = True,
     removable_features: Sequence[str | Sequence[str]] = (),
@@ -663,7 +663,7 @@ def run_optuna_study(
     rollout_data: dict[str, Any] | None = None,
     val_idx: Sequence[int] | None = None,
     rollout_horizon: int = 52,
-    rollout_n_simulations: int = 20,
+    rollout_n_simulations: int = 100,
     rollout_seed: int = 42,
     rollout_mape_clip: float = 300.0,
     rollout_min_actual_for_mape: float = 5.0,
@@ -705,6 +705,15 @@ def run_optuna_study(
     summary files, so separate runs never overwrite each other. The resolved
     name is available afterwards as `study.study_name`. Pass False to keep a
     stable name (e.g. to resume via `storage=`).
+
+    `pruner` controls early stopping of unpromising trials. `True` (default) uses
+    the standard `MedianPruner` on the per-epoch cross-entropy `fit_model` reports;
+    `False` disables pruning (`NopPruner`) so every trial trains fully. Prefer
+    `False` with `selection_metric="rollout_composite"`: the pruner acts on CE,
+    not the rollout score, so leaving it on can cut a trial before it is rolled
+    out and scored (and bias the sampler toward the low-CE region the rollout
+    metric is meant to look past). You may also pass a concrete `optuna` pruner
+    instance for full control; it is used as-is.
 
     `removable_features` lists the covariates Optuna is allowed to drop. Each
     entry is a column name (its own toggle) or a group of names toggled together
@@ -799,8 +808,17 @@ def run_optuna_study(
     base_ckpt = Path(data_info.get("checkpoint_dir", "./checkpoints"))
     data_info = {**data_info, "checkpoint_dir": str(base_ckpt / run_name)}
 
-    if pruner is None:
+    # Resolve the pruner. `True` (default) / `None` keep the historical
+    # early-stopping behaviour (MedianPruner on the per-epoch CE fit_model
+    # reports); `False` disables pruning entirely (NopPruner). A concrete
+    # BasePruner instance is honoured as-is. Disabling is recommended for
+    # selection_metric="rollout_composite": there the pruner acts on CE, not the
+    # rollout score, so it can cut a trial before it is ever rolled out and
+    # scored — see the module docstring.
+    if pruner is True or pruner is None:
         pruner = optuna.pruners.MedianPruner(n_warmup_steps=3)
+    elif pruner is False:
+        pruner = optuna.pruners.NopPruner()
     if sampler is None:
         sampler = optuna.samplers.TPESampler(seed=data_info.get("seed", 42))
 
