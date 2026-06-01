@@ -1,25 +1,77 @@
 """Optuna tuning for the multinomial LSTM / Transformer baselines.
 
-One file, two search spaces. The objective for both models is validation
-cross-entropy (same scale across architectures, same objective the training
-loop optimises). Pruning and feature-group selection are handled here; the
-heavy lifting (loss curve, early stopping) lives in `training_utils.fit_model`.
+One file, two search spaces (`suggest_lstm_params` / `suggest_transformer_params`),
+one shared `objective`. Each trial samples an architecture + training HPs (and,
+optionally, a covariate subset), trains via `training_utils.fit_model` — which
+always optimises classification cross-entropy and owns the loss curve, early
+stopping, and per-epoch pruning reports — then returns a score to Optuna. What
+that returned score IS depends on `selection_metric` (see below); the training
+objective is CE either way.
 
-The caller supplies a `data_builder` function. This keeps Optuna decoupled
-from how features are actually constructed from the raw dataframe.
+data_builder contract
+---------------------
+The caller supplies a `data_builder`, so Optuna never touches the raw dataframe
+or re-runs data prep per trial:
 
     train_loader, val_loader, metadata = data_builder(
-        feature_config=feature_config,
+        feature_config=feature_config,   # list of column names to DROP this trial
         batch_size=batch_size,
     )
 
-`metadata` must contain at least:
-    seq_cols     list[str]   column names matching the input tensor's last axis
-    input_spec   dict        {"embedded_cols": {col: cardinality, ...}}
-    target_col   str         which column is the AR target (default "Transactions")
-Optionally:
-    seq_len      int         used by the Transformer for fixed-length mask caching
-                             (LSTM ignores it)
+`metadata` must contain `seq_cols` (list[str] matching the input tensor's last
+axis), `input_spec` ({"embedded_cols": {col: cardinality}}), and `target_col`
+(the AR target, default "Transactions"); optionally `seq_len` (Transformer
+fixed-length mask cache; the LSTM ignores it).
+
+Feature-group selection
+-----------------------
+`removable_features` lists covariates Optuna may drop. An entry is one column
+(its own on/off toggle) or a group toggled as a unit — e.g. `("week_sin",
+"week_cos")`, since a cyclical pair is meaningless split. Per trial,
+`suggest_covariate_selection` samples the toggles and hands the dropped set to
+`data_builder`; `select_features` then slices the precomputed `(N,T,F)` tensors
+(no data re-prep) and rebuilds `samples`/`targets`/`target_idx`/`embedded_cols`
+for the reduced layout. The target is never removable. Each trial records its
+`selected_features` / `dropped_features` user-attrs so the summary CSV/JSON is
+self-documenting and the winner can be rebuilt with `select_features_for_trial`.
+
+ar_features stay in lockstep: the autoregressive target-derived columns
+(recency / frequency / tenure / rate) live in `data["ar_features"]`, and
+`select_features` filters that list to the surviving columns. So if a trial
+drops an AR covariate, it is removed from `ar_features` too — otherwise the
+Monte-Carlo rollout would try to look it up by `seq_cols.index(name)` and raise.
+
+Selection metric (what Optuna minimises)
+----------------------------------------
+- "val_loss" (default): teacher-forced next-step validation cross-entropy.
+  Cheap and on one scale across architectures, but blind to the autoregressive
+  sampling rollout the real forecast uses, so it can favour feature sets that
+  drift at forecast time.
+- "rollout_composite": after training, score the trial with a LEAK-FREE
+  validation Monte-Carlo rollout (`weekly_aggregate_rollout_metrics`). For the
+  validation customers, the last `rollout_horizon` weeks of CALIBRATION are
+  carved off as a pseudo-holdout (the real `data["holdout"]` is never read in
+  tuning); the model warms up on the prefix and autoregressively rolls the
+  pseudo-holdout over `rollout_n_simulations` paths. Metrics are computed on the
+  WEEKLY AGGREGATE (sum over customers per step) and combined into one
+  scale-normalised composite:
+
+      rmse_norm = aggregate_RMSE / mean_weekly_volume
+      mape_norm = masked_clipped_MAPE / 100   (weeks below a volume floor skipped)
+      bias_norm = |aggregate_bias_percent| / 100
+      score     = w_rmse*rmse_norm + w_mape*mape_norm + w_bias*bias_norm
+
+  Defaults w_rmse=1.0, w_mape=0.5, w_bias=0.3; lower is better, so the study
+  stays direction="minimize". The normalisation makes the score comparable
+  across datasets of very different volume. CE is still logged as `val_loss`,
+  and every sub-metric (`rollout_rmse/mape/bias_percent/score`) as a user-attr.
+
+  Two caveats: (a) the composite is on a DIFFERENT scale than CE, so a rollout
+  run needs its OWN fresh study/storage — never a val_loss study's DB; (b) the
+  pruner still acts on per-epoch CE, so it only prunes clearly bad-CE trials
+  early — surviving trials are always rolled out and scored. Requires
+  `rollout_data` (the full prepare_dataset dict) and `val_idx`; `rollout_horizon`
+  is validated up front (0 < horizon < T_CAL, with a short-warm-up warning).
 """
 
 from __future__ import annotations
