@@ -41,3 +41,7 @@ Fine_tuning_optuna/
 # Local-only: agent guidance + the paper's reference notebooks (not part of the package)
 CLAUDE.md
 Original_paper_model/
+
+# Editor config + stray scratch notes (not part of the package)
+*.code-workspace
+/instruction
