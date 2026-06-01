@@ -91,15 +91,65 @@ class SquaredEMDLoss(nn.Module):
 
 def compute_class_weights(
     targets,
-    num_classes: int,
+    num_classes: int | None = None,
+    *,
+    train_idx=None,
 ) -> torch.Tensor:
     """Inverse-frequency per-class weights, normalised to sum to `num_classes`.
 
-    `targets` can be any array-like of integer class labels. Classes that
-    don't appear in `targets` get a count of 1 (so their weight stays finite).
-    The normalisation keeps the average weight at 1, so the loss scale stays
-    comparable to plain CE.
+    `targets` may be given two ways:
+
+    * an **array-like of integer class labels** (the original form) — then
+      `num_classes` is required; or
+    * a **`prepare_dataset` data dict** — then the labels are read from
+      `data["targets"]` and, unless `num_classes` is passed, the class count is
+      derived from the resolved target embedding
+      (`data["input_spec"]["embedded_cols"][data["target_col"]]`, i.e. the same
+      `max_trans` the softmax head uses). This folds the old notebook
+      boilerplate (squeeze the target axis, look up `max_trans`) into one call.
+      Pass `train_idx` to weight on the **training customers only** — recommended,
+      so the validation split's class mix never leaks into the loss; omit it to
+      use every customer. (`train_idx` is only meaningful with the dict form.)
+
+    Classes absent from the labels get a count of 1 (so their weight stays
+    finite). The normalisation keeps the average weight at 1, so the loss scale
+    stays comparable to plain CE.
     """
+    # Convenience overload: unpack a prepare_dataset data dict into its labels
+    # (+ a default num_classes) using the dict's documented keys.
+    if isinstance(targets, dict):
+        data = targets
+        if "targets" not in data:
+            raise KeyError(
+                "compute_class_weights got a dict without a 'targets' key; pass "
+                "a prepare_dataset data dict, or an array of class labels."
+            )
+        # (N, T-1, 1) float32 -> (N, T-1); long() happens below with the array path.
+        labels = torch.as_tensor(data["targets"]).squeeze(-1)
+        if train_idx is not None:
+            labels = labels[list(train_idx)]            # training customers only
+        if num_classes is None:
+            spec = data.get("input_spec") or {}
+            embedded = spec.get("embedded_cols", {}) if isinstance(spec, dict) else {}
+            target_col = data.get("target_col")
+            if target_col not in embedded:
+                raise ValueError(
+                    "could not infer num_classes from the data dict (its target "
+                    "is not an embedded column); pass num_classes explicitly."
+                )
+            num_classes = int(embedded[target_col])
+        targets = labels
+    elif train_idx is not None:
+        raise TypeError(
+            "train_idx is only valid when `targets` is a prepare_dataset data dict; "
+            "for an array of labels, slice it yourself before calling."
+        )
+
+    if num_classes is None:
+        raise ValueError(
+            "num_classes is required when `targets` is an array of class labels."
+        )
+
     t = torch.as_tensor(targets).flatten().long()
     counts = torch.bincount(t, minlength=num_classes).float().clamp(min=1.0)
     weights = 1.0 / counts
