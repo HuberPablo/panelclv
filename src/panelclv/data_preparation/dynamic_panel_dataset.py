@@ -1,81 +1,56 @@
-"""Prepare a customer-period panel into model-ready arrays.
+"""Turn a customer-period panel into the model-ready tensors `prepare_dataset` returns.
 
-Pipeline
---------
-    pd.read_csv ──► prepare_dataset(panel, DATA_CONFIG, FEATURE_SCHEMA,
-                                    TIME_FEATURES) ──► data dict
+`prepare_dataset(panel, config, schema, time_features)` is the single entry point.
+It takes a DataFrame with ONE ROW PER (customer, period) and returns the `data`
+dict consumed by the training loop (`samples`/`targets`) and the Monte-Carlo
+simulator (`calibration`/`holdout`). All model-facing arrays are (N, T, F)
+float32; the channel order is fixed: target → time → known_future →
+observed_past → static → ar_features.
 
+What it does, in order: engineer the requested calendar features and the causal
+AR target-features → add a `period_start` anchor → slice the calibration and
+holdout date windows → apply the Valendin "active during calibration" cohort
+filter to both windows → (optionally) clip the training target → resolve
+embedding cardinalities → reshape each window and build the next-step AR
+`(samples, targets)` pair. It validates aggressively and fails *early* (before
+any tensor is built): missing id/target/schema columns, non-numeric columns,
+ragged per-customer period counts, train/holdout cohorts that differ or are
+mis-ordered, NaNs in a selected column, and empty date windows all raise.
 
-Input: panel DataFrame
-----------------------
-Already shaped as ONE ROW PER (customer, time period). Must contain at
-least:
-    - the id column                       (DATA_CONFIG["id_col"])
-    - the target column                   (DATA_CONFIG["target_col"])
-    - the time-index columns              (DATA_CONFIG["time_cols"] for
-                                           weekly/monthly, or
-                                           DATA_CONFIG["date_col"] for daily)
-Any other column is optional and only used if the schema asks for it.
+THREE caller-controlled configs
+--------------------------------
+DATA_CONFIG — physical layout: `id_col`, `target_col`, `frequency`
+    ∈ {weekly, monthly, daily}, `time_cols=[year, period]` (weekly/monthly) or
+    `date_col` (daily), `periods_per_year` (week sin/cos divisor, default 52),
+    `training_start/end`, `holdout_start/end`, optional `clip_target_upper`
+    (train-only clip) and `require_calibration_activity` (cohort filter, default on).
+TIME_FEATURES — calendar-column toggles: `add_year_idx`, `add_week_sin_cos`,
+    `add_month_sin_cos`, `add_dayofyear_sin_cos`. A column is created only when
+    its flag is on AND the frequency supports it, else a clear error is raised.
+FEATURE_SCHEMA — TFT-style roles; ONLY listed columns enter the tensor:
+    `target` (exactly one), `time` (engineered calendar), `known_future_…`
+    (values known per step in advance — embeddings may be sized over both
+    windows without leakage), `observed_past_…` (history-only — NOT YET
+    SUPPORTED: dropped with a warning, since the AR simulator has no future for
+    them and feeding it would leak), `static_covariates` (one value per
+    customer, already broadcast across that customer's rows).
+`ar_features` (recency / frequency / tenure / rate) are passed separately and
+appended last; being causal functions of the target's own past, their holdout
+values are recomputed from the SAMPLED target during the rollout, so they leak
+nothing. A `PanelConfig` may be passed as `config` to bundle all of the above.
 
-
-Three config dicts the caller controls
---------------------------------------
-DATA_CONFIG — physical layout of the panel:
-    id_col, target_col,
-    frequency           ∈ {"weekly", "monthly", "daily"},
-    periods_per_year    (weekly: divisor for week_sin/cos; default 52),
-    time_cols           e.g. ["year", "week"]  (weekly/monthly only),
-    date_col            (daily only),
-    training_start, training_end, holdout_start, holdout_end.
-
-TIME_FEATURES — toggles for the engineered calendar columns:
-    add_year_idx, add_week_sin_cos, add_month_sin_cos, add_dayofyear_sin_cos
-Each engineered column is only created when its flag is True AND the
-frequency supports it; otherwise a clear error is raised.
-
-FEATURE_SCHEMA — TFT-style covariate roles. Only columns listed here enter
-the (N, T, F) tensor; everything else is dropped:
-    target                              — exactly one column
-    time                                — engineered calendar features
-    known_future_time_varying_inputs    — values known in advance per step
-    observed_past_time_varying_inputs   — values only known historically;
-                                          NOT YET SUPPORTED: currently dropped
-                                          with a warning (the AR simulator has
-                                          no future for them — would leak)
-    static_covariates                   — one value per customer; the panel
-                                          must already broadcast them across
-                                          time steps (one row per period)
-
-Channel order in the output tensor follows:
-    target → time → known_future → observed_past → static
-
-
-Output: dict
-------------
-    calibration     (N, T_CAL,     F) float32   training window
-    holdout         (N, T_HOLD,    F) float32   holdout window
-    samples         (N, T_CAL - 1, F) float32   AR inputs
-    targets         (N, T_CAL - 1, 1) float32   AR labels (next-step target)
-    seq_cols        list[str]                   channel names matching axis -1
-    target_col      str                         name of the target column
-    target_idx      int                         seq_cols.index(target_col)
-    N               int                         number of customers
-    T_CAL, T_HOLD   int                         periods per customer per window
-    F               int                         len(seq_cols)
-    ids             list                        customer ids (sort order of the tensors)
-    panel           DataFrame                   panel after engineered features were added
-    train_panel     DataFrame                   subset for the training window
-    holdout_panel   DataFrame                   subset for the holdout window
-
-
-Validation
-----------
-prepare_dataset raises ValueError/KeyError/TypeError early on:
-    - missing id_col / target_col / schema columns,
-    - non-numeric schema columns,
-    - inconsistent per-customer period counts in either window,
-    - train and holdout customer sets in different order,
-    - NaN in any selected column.
+Output dict (full key list at the end of `prepare_dataset`)
+-----------------------------------------------------------
+    calibration   (N, T_CAL,     F) float32   training-window tensor
+    holdout       (N, T_HOLD,    F) float32   holdout-window tensor
+    samples       (N, T_CAL - 1, F) float32   AR inputs  (steps 0..T-2)
+    targets       (N, T_CAL - 1, 1) float32   AR labels  (next-step target)
+    seq_cols, target_col, target_idx          channel names / target position
+    input_spec                                resolved {col: cardinality} embeddings
+    ar_features                               the AR feature names that were added
+    N, T_CAL, T_HOLD, F, ids                  shapes + customer order of the tensors
+    panel, train_panel, holdout_panel         engineered panel + the two slices
+                                              (train_panel feeds the Pareto/NBD benchmark)
 """
 
 from __future__ import annotations
