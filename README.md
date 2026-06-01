@@ -1,4 +1,4 @@
-# Modular_Models
+# panelclv
 
 Modular **LSTM** and **Transformer** models for customer-base transaction-count
 forecasting, with **Pareto/NBD** benchmarks. The thesis target is the Valendin et al.
