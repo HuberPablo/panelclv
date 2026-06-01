@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from Models.pareto_paper import compute_pareto_paper_predictions  # noqa: E402
+from panelclv.benchmarks.pareto_paper import compute_pareto_paper_predictions  # noqa: E402
 
 PERIOD_DAYS = 7.0
 T_CAL_W = 78          # 1.5y calibration

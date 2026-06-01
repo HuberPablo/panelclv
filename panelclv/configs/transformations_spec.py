@@ -172,7 +172,7 @@ def list_input_specs(
 # ---------------------------------------------------------------------------
 # Example usage (do not execute — kept here as a quick reference)
 # ---------------------------------------------------------------------------
-# from configs.transformations_spec import (
+# from panelclv.configs.transformations_spec import (
 #     save_input_spec, load_input_spec, list_input_specs,
 # )
 #

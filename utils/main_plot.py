@@ -20,10 +20,12 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from Models import (
+from panelclv.models import (
     InferenceMultinomialLSTMModel,
     InferenceMultinomialTransformerModel,
-    compute_pareto_predictions,
+)
+from panelclv.benchmarks import compute_pareto_predictions
+from panelclv.evaluation import (
     forecast_from_checkpoint,
     load_predictions_from_csv,
     metrics_table,

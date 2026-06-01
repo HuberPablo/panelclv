@@ -86,8 +86,8 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from configs.panel_config import PanelConfig, normalize_embedded_cols
-from Data_preparation.ar_features import (
+from panelclv.configs.panel_config import PanelConfig, normalize_embedded_cols
+from panelclv.data_preparation.ar_features import (
     compute_ar_feature_columns,
     validate_ar_features,
 )

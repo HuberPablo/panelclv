@@ -8,7 +8,34 @@ version = "0.1.0"
 description = "Modular customer-base forecasting: multinomial LSTM / Transformer + Pareto/NBD benchmarks for per-customer transaction-count prediction."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Pablo Huber", email = "pablohuber.ge@gmail.com" },
+]
+keywords = [
+    "customer-base-analysis",
+    "clv",
+    "forecasting",
+    "pareto-nbd",
+    "lstm",
+    "transformer",
+    "time-series",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+# torch ships as a hard dependency by design: pip leaves an already-installed
+# torch (ROCm / CUDA / CPU) untouched, and only pulls the default build into an
+# environment that has none. numpy/pandas/scikit-learn/optuna/lifetimes/matplotlib
+# are all required at import or run time by the model and data-prep modules.
 dependencies = [
     "torch",
     "numpy",
@@ -25,7 +52,14 @@ dependencies = [
 [project.optional-dependencies]
 wandb = ["wandb"]
 
-# Only the importable source packages ship. `utils/` and `scripts/` are loose helper
-# scripts (no __init__), and bank_lstm_vs_pareto.py is a one-off — none are packaged.
-[tool.setuptools]
-packages = ["Models", "Data_preparation", "configs"]
+[project.urls]
+Homepage = "https://github.com/HuberPablo/panelclv"
+Repository = "https://github.com/HuberPablo/panelclv"
+Issues = "https://github.com/HuberPablo/panelclv/issues"
+
+# Everything importable now lives under the single top-level `panelclv` package
+# (panelclv.models / panelclv.data_preparation / panelclv.configs), so the wheel no
+# longer drops generic `Models`/`configs` folders into site-packages. `utils/` and
+# `scripts/` are loose helper scripts (no __init__) and are intentionally not shipped.
+[tool.setuptools.packages.find]
+include = ["panelclv*"]

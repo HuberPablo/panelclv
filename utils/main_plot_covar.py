@@ -21,8 +21,8 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from Models import (
-    InferenceMultinomialTransformerModel,
+from panelclv.models import InferenceMultinomialTransformerModel
+from panelclv.evaluation import (
     forecast_from_checkpoint,
     load_predictions_from_csv,
     metrics_table,
@@ -33,7 +33,7 @@ from Models import (
 # `holdout_actuals_NT` returns the per-customer (N, T_HOLD) array that
 # `metrics_table` now expects — `weekly_actuals` keeps producing the (T_HOLD,)
 # aggregate that `plot_weekly_aggregated` consumes.
-from Models.plot_utils import holdout_actuals_NT
+from panelclv.evaluation.plot_utils import holdout_actuals_NT
 
 
 # ---------------------------------------------------------------------------

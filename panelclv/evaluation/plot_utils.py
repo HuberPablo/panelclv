@@ -30,8 +30,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .evaluation_utils import compute_metrics
-from .monte_carlo_forecasting import (
+from .evaluation_utils import compute_metrics  # same (evaluation) package
+# The Monte Carlo simulator stays in `panelclv.models` (it is the model's forecast
+# mechanism), so this is a cross-package import after the split.
+from panelclv.models.monte_carlo_forecasting import (
     compute_forecast_metrics,
     run_monte_carlo_forecast as _mc_forecast,
 )
@@ -266,7 +268,7 @@ def _pareto_from_data(data: dict[str, Any] | None, variant: str = "mle") -> np.n
             f"known frequencies: {sorted(_PERIOD_IN_DAYS)}."
         )
     if variant == "paper":
-        from .pareto_paper import compute_pareto_paper_predictions
+        from panelclv.benchmarks.pareto_paper import compute_pareto_paper_predictions
         pred, _ = compute_pareto_paper_predictions(
             data["train_panel"],
             holdout_length=data["T_HOLD"],
@@ -278,7 +280,7 @@ def _pareto_from_data(data: dict[str, Any] | None, variant: str = "mle") -> np.n
         return pred
     if variant != "mle":
         raise ValueError(f"unknown Pareto variant {variant!r}; use 'mle' or 'paper'.")
-    from .pareto_nbd import compute_pareto_predictions
+    from panelclv.benchmarks.pareto_nbd import compute_pareto_predictions
     pareto_pred, _ = compute_pareto_predictions(
         data["train_panel"],
         holdout_length=data["T_HOLD"],

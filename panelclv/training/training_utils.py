@@ -25,7 +25,9 @@ import torch.optim as optim
 from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader
 
-from .losses import build_criterion
+# Losses are part of the model definition and stay in `panelclv.models`, so this
+# is now a cross-package (absolute) import after the subpackage split.
+from panelclv.models.losses import build_criterion
 
 
 # ---------------------------------------------------------------------------

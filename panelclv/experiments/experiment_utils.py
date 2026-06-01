@@ -19,9 +19,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from .multinomial_lstm import InferenceMultinomialLSTMModel
-from .multinomial_transformer import InferenceMultinomialTransformerModel
-from .optuna_tuning import select_features, select_features_for_trial
+# This orchestration glue sits above the model + tuning layers, so it imports
+# them by absolute path: inference wrappers from `panelclv.models`, the feature
+# selection helpers from `panelclv.tuning`.
+from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
+from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
+from panelclv.tuning.optuna_tuning import select_features, select_features_for_trial
 
 if TYPE_CHECKING:  # optuna only needed for the type hint; avoid an import-time dep here
     import optuna

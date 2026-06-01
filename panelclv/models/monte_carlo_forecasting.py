@@ -42,7 +42,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import torch
 
-from Data_preparation.ar_features import ARFeatureState
+from panelclv.data_preparation.ar_features import ARFeatureState
 
 
 # ---------------------------------------------------------------------------
@@ -449,10 +449,10 @@ def compute_forecast_metrics(
 # ---------------------------------------------------------------------------
 
 # LSTM:
-# from Models.monte_carlo_forecasting import (
+# from panelclv.models.monte_carlo_forecasting import (
 #     run_monte_carlo_forecast, compute_forecast_metrics,
 # )
-# from Models.multinomial_lstm import InferenceMultinomialLSTMModel
+# from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
 #
 # inference_model = InferenceMultinomialLSTMModel(
 #     seq_cols=data["seq_cols"], input_spec=data["input_spec"],
@@ -462,8 +462,8 @@ def compute_forecast_metrics(
 # forecast = run_monte_carlo_forecast(inference_model, data, n_simulations=30)
 #
 # Transformer:
-# from Models.monte_carlo_forecasting import run_monte_carlo_forecast_transformer
-# from Models.multinomial_transformer import InferenceMultinomialTransformerModel
+# from panelclv.models.monte_carlo_forecasting import run_monte_carlo_forecast_transformer
+# from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
 #
 # inference_model = InferenceMultinomialTransformerModel(
 #     seq_cols=data["seq_cols"], input_spec=data["input_spec"],

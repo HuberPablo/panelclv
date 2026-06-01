@@ -28,8 +28,10 @@ When choices conflict, resolve them in this order:
 1. **Correctness** — the model trains and simulates the way Valendin et al. describe.
 2. **Reproducibility** — same config + seed → same result; nothing depends on notebook
    cell run-order.
-3. **Package quality** — importable modules under `Models/`, `Data_preparation/`,
-   `configs/`; no logic that only lives in a notebook.
+3. **Package quality** — importable modules under `panelclv/models/`, `panelclv/training/`,
+   `panelclv/tuning/`, `panelclv/evaluation/`, `panelclv/benchmarks/`, `panelclv/experiments/`,
+   `panelclv/data_preparation/`, `panelclv/configs/`; no logic that only lives in a
+   notebook.
 4. **Clear interfaces** — schema-driven, dataset-agnostic (`seq_cols`, `input_spec`,
    `FEATURE_SCHEMA`), not column names baked into model code.
 5. **Simplicity** — prefer the smallest design that satisfies the above.
@@ -50,8 +52,8 @@ code reads as a thesis-quality explanation, not just a working script.
 
 Primary metrics: **RMSE**, **MAPE** (where a positive denominator makes it meaningful —
 see `mape_positive` / `cumulative_mape`), and **aggregate bias / tracking quality**
-(`aggregate_bias`, `bias_percent`). These live in `Models/evaluation_utils.py` and
-`Models/monte_carlo_forecasting.py`.
+(`aggregate_bias`, `bias_percent`). These live in `panelclv/evaluation/evaluation_utils.py`
+and `panelclv/models/monte_carlo_forecasting.py`.
 
 ## Critical modeling distinction
 
@@ -61,9 +63,10 @@ Monte Carlo simulator**:
 - The model outputs a **softmax over transaction-count classes** `P(y=0..K-1)` at each
   step (`MultinomialLSTMModel`, logits `(B, T, max_trans)`).
 - It is trained by **classification loss** — cross-entropy / NLL (optionally weighted CE,
-  focal, or squared-EMD), not MSE (`Models/training_utils.py`, `Models/losses.py`).
+  focal, or squared-EMD), not MSE (`panelclv/training/training_utils.py`,
+  `panelclv/models/losses.py`).
 - Forecasting = **autoregressive Monte Carlo simulation**
-  (`Models/monte_carlo_forecasting.py`): warm up the LSTM state on the full calibration
+  (`panelclv/models/monte_carlo_forecasting.py`): warm up the LSTM state on the full calibration
   window, then step through the holdout one period at a time, **sampling** a count class
   from the multinomial output and feeding that sample back as the next step's input
   (true holdout targets are never fed in). Average many simulated paths to get the
@@ -75,17 +78,32 @@ the sampling-and-averaging simulator — not a single deterministic forward pass
 
 ## Repository layout
 
-- `Models/` — the package. `multinomial_lstm.py`, `multinomial_transformer.py`,
-  `pareto_nbd.py`, `pareto_paper.py`, `monte_carlo_forecasting.py`, `training_utils.py`,
-  `losses.py`, `evaluation_utils.py`, `optuna_tuning.py`, `plot_utils.py`,
-  `experiment_utils.py` (thin orchestration helpers: `make_loaders`,
-  `make_data_builder`, `build_inference_from_trial` — the glue notebooks call).
-  `__init__.py` is the public API; its `__all__` is a curated ~16-name headline set
-  (the rest stay importable by explicit name). Note `mc_forecast` is an alias for
-  `run_monte_carlo_forecast`.
+Everything importable lives under the single top-level **`panelclv`** package, split
+by *altitude* into subpackages so each holds one concern, so the installed wheel never
+drops generic `Models/`/`configs/` folders into `site-packages`. Each subpackage has an
+`__init__.py` re-exporting its public names — import from the subpackage root, e.g.
+`from panelclv.tuning import run_optuna_study`, `from panelclv.evaluation import
+plot_weekly_aggregated`. There is **no umbrella re-export** across subpackages; a name
+lives in exactly one of them.
 
-  **Two Pareto/NBD benchmarks** (same `(train_panel, holdout_length, ...) → (N, H)`
-  contract, drop-in interchangeable):
+- `panelclv/models/` — the **model definition only**: `multinomial_lstm.py`,
+  `multinomial_transformer.py`, `losses.py`, and `monte_carlo_forecasting.py` (the AR
+  simulator stays here because, per the Valendin design, the simulator *is* the model's
+  forecast mechanism, not a post-hoc step). `__init__.py`'s `__all__` is a curated
+  headline set for the model family; the rest stay importable by explicit name. Note
+  `mc_forecast` is an alias for `run_monte_carlo_forecast` (both names exported).
+- `panelclv/training/` — `training_utils.py`: the training loop (`fit_model`,
+  `train_one_epoch`, `validate_one_epoch`, `FitResult`).
+- `panelclv/tuning/` — `optuna_tuning.py`: Optuna architecture / covariate-subset search
+  (`run_optuna_study`, `select_features`, ...). Model-aware but a layer above the model.
+- `panelclv/evaluation/` — metrics + diagnostics: `evaluation_utils.py` (`compute_metrics`,
+  `rmse`, `mae`, `mape_positive`, `aggregate_bias`) and `plot_utils.py` (weekly aggregation,
+  `plot_weekly_aggregated`, `metrics_table`, `alignment_check`, prediction CSV I/O).
+- `panelclv/experiments/` — `experiment_utils.py`: thin orchestration glue
+  (`make_loaders`, `make_data_builder`, `build_inference_from_trial`) tying
+  `prepare_dataset` → Optuna → forecast. Sits on top of `models` + `tuning`.
+- `panelclv/benchmarks/` — the non-neural comparators. **Two Pareto/NBD benchmarks**
+  (same `(train_panel, holdout_length, ...) → (N, H)` contract, drop-in interchangeable):
   - `pareto_nbd.compute_pareto_predictions` — frequentist **MLE** via `lifetimes`
     (fast; the default benchmark).
   - `pareto_paper.compute_pareto_paper_predictions` — **hierarchical-Bayes MCMC**, a
@@ -94,14 +112,15 @@ the sampling-and-averaging simulator — not a single deterministic forward pass
     `scripts/validate_pareto_paper.py` (aggregate within ~0.25%, per-customer corr
     ~0.99). In `plot_weekly_aggregated` / `metrics_table` pass `pareto_nbd_benchmark=True`
     (MLE, "Pareto/NBD") and/or `pareto_paper_benchmark=True` (HB, "Pareto/NBD (HB)").
-- `Data_preparation/` — `dynamic_panel_dataset.py` (`prepare_dataset` → model-ready
-  `data` dict) and `dataset_building.py` (raw → panel). Has an `__init__.py` so it
-  imports as a real package after `pip install -e .`.
-- `configs/` — `transformations_spec.py`: INPUT_SPEC validation + JSON save/load.
+- `panelclv/data_preparation/` — `dynamic_panel_dataset.py` (`prepare_dataset` →
+  model-ready `data` dict) and `dataset_building.py` (raw → panel).
+- `panelclv/configs/` — `transformations_spec.py`: INPUT_SPEC validation + JSON
+  save/load; `panel_config.py`: the `PanelConfig` dataclass.
 - `inputs_configs/` — saved INPUT_SPEC JSONs (e.g. `full_transactions_gender.json`).
 - `Datasets/` — source panels (`.Rdata`, `.csv`, `.npz`).
 - `Data_integration_LSTM_v2.ipynb`, `Data_integration_TRANSFORMER_v2.ipynb` — the
-  current helper-based orchestration notebooks (thin glue over `Models/`). The
+  current helper-based orchestration notebooks (thin glue over the `panelclv`
+  subpackages). The
   un-suffixed `Data_integration_{LSTM,TRANSFORMER}.ipynb` are kept as reference.
 - `Fine_tuning_optuna/` — Optuna study databases.
 - `Original_paper_model/` — reference notebooks for the paper's setup.
@@ -121,7 +140,7 @@ the sampling-and-averaging simulator — not a single deterministic forward pass
 The Transformer mirrors this exact contract (`MultinomialTransformerModel` /
 `InferenceMultinomialTransformerModel`), so the data, training loop, and simulator are shared.
 
-## Optuna model selection (`Models/optuna_tuning.py`)
+## Optuna model selection (`panelclv/tuning/optuna_tuning.py`)
 
 `run_optuna_study(...)` tunes architecture + (optionally) the covariate subset
 (`removable_features`). The **selection objective** is configurable:
@@ -161,7 +180,7 @@ and `val_idx=`; default `rollout_horizon=52` (match the real holdout length).
 
 ## Gotchas
 
-- **INPUT_SPEC directory:** `configs/transformations_spec.py` has no default location
+- **INPUT_SPEC directory:** `panelclv/configs/transformations_spec.py` has no default location
   (`DEFAULT_INPUT_SPEC_DIR = None`). `save_input_spec` / `load_input_spec` /
   `list_input_specs` therefore **require** an explicit `directory=` (e.g. the repo's
   `inputs_configs/`) and raise a clear `ValueError` if it is omitted. (This replaced a
@@ -176,10 +195,14 @@ and `val_idx=`; default `rollout_horizon=52` (match the real holdout length).
 
 `torch`, `numpy`, `pandas`, `scikit-learn`, `optuna`, `matplotlib`; `lifetimes` for the
 MLE Pareto/NBD; `wandb` optional (lazily imported; the `wandb` extra). These are declared
-in **`pyproject.toml`** — `pip install -e .` from the repo root makes `Models`,
-`Data_preparation`, and `configs` importable with no `sys.path` hacks.
+in **`pyproject.toml`** — `pip install -e .` from the repo root makes the `panelclv`
+package and all its subpackages (`panelclv.models`, `panelclv.training`, `panelclv.tuning`,
+`panelclv.evaluation`, `panelclv.benchmarks`, `panelclv.experiments`,
+`panelclv.data_preparation`, `panelclv.configs`) importable with no `sys.path` hacks. The
+`[tool.setuptools.packages.find]` `include = ["panelclv*"]` auto-discovers new subpackages,
+so adding one needs no packaging edits.
 
-`Models/pareto_paper.py` (the HB-MCMC Pareto/NBD) is **pure NumPy/SciPy — no R needed
+`panelclv/benchmarks/pareto_paper.py` (the HB-MCMC Pareto/NBD) is **pure NumPy/SciPy — no R needed
 at run time**. R is only needed to *re-validate* the port: `scripts/validate_pareto_paper.py`
 shells out to `Rscript` with the **BTYDplus** package (installed here: R 4.6,
 `~/R/x86_64-pc-linux-gnu-library/4.6`). Skip that script and `pareto_paper` runs anywhere.

@@ -32,7 +32,7 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
-from Data_preparation.ar_features import validate_ar_features
+from panelclv.data_preparation.ar_features import validate_ar_features
 
 
 # ---------------------------------------------------------------------------

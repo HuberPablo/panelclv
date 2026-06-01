@@ -1,43 +1,26 @@
 # Publishing this package
 
-The package is build-ready: `pyproject.toml` is valid, the three importable
-packages (`Models`, `Data_preparation`, `configs`) build into a correct wheel, and
-`LICENSE` / `README.md` are in place. What remains needs your accounts / tooling and
-is listed below as copy-paste steps.
+The package is build-ready: `pyproject.toml` is valid, the single top-level
+`panelclv` package (with `panelclv.models`, `panelclv.data_preparation`,
+`panelclv.configs` subpackages) builds into a correct wheel that ships nothing into
+`site-packages` except `panelclv/`, and `LICENSE` / `README.md` are in place. What
+remains needs your accounts / tooling and is listed below as copy-paste steps.
 
-This repo currently has a placeholder `origin` pointing at a local bundle
-(`packagingrefactor.bundle`) — that is how the remote build session handed results
-back. Part A repoints it at a real GitHub repo.
+The repo's `origin` already points at the real GitHub repo
+(`https://github.com/HuberPablo/panelclv.git`), so there is no repo-creation step —
+just push the branch.
 
-## A. Put it on GitHub (fresh repo)
+## A. Push to GitHub
 
-`gh` (GitHub CLI) is **not installed** on this machine, so create the empty repo in
-the browser first:
+The packaging work lives on the `pypi-restructure` branch. Push it and open a PR (or
+push straight to `main` if you prefer):
 
-1. Go to https://github.com/new → create an **empty** repo (no README/license/
-   .gitignore — this repo already has them). Note its URL, e.g.
-   `https://github.com/<you>/customer-base-forecasting.git`.
-
-2. Repoint this repo's remote and push the branch:
-
-   ```bash
-   cd /home/virthian/Desktop/Thesis/Package_Notebook_refactored
-   git remote rename origin bundle          # keep the bundle remote, out of the way
-   git remote add origin https://github.com/<you>/customer-base-forecasting.git
-   git push -u origin packaging-refactor
-   ```
-
-3. (Optional) make `packaging-refactor` the default branch on GitHub, or open a PR
-   and merge it into `main`/`master`.
-
-   If you prefer the published history to live on `main`:
-   ```bash
-   git branch -m packaging-refactor main
-   git push -u origin main
-   ```
-
-> Tip: to install `gh` later and automate step 1:
-> `sudo apt install gh && gh auth login && gh repo create customer-base-forecasting --private --source=. --push`
+```bash
+cd /home/virthian/Desktop/Thesis/Package_Notebook_refactored
+git push -u origin pypi-restructure       # then open a PR into main on GitHub
+# or, to publish the history directly on main:
+# git checkout main && git merge pypi-restructure && git push origin main
+```
 
 ## B. Make it pip-installable / publish to PyPI
 
@@ -51,17 +34,24 @@ pip install -e .            # editable install for development
 pip install .              # regular install
 ```
 
-Then `from Models import ...` works from anywhere.
+Then `from panelclv.models import ...` works from anywhere.
 
 ### Build the distribution artifacts
-`build` and `twine` are not in the `thesis_rocm` venv (and it must not be modified).
-Use any other environment:
+The `thesis_rocm` venv already has `build` + setuptools 82, so you can build without
+installing anything new (do NOT modify that venv):
 
 ```bash
-python -m pip install --upgrade build twine     # in a throwaway/other env
 cd /home/virthian/Desktop/Thesis/Package_Notebook_refactored
-python -m build                                  # writes dist/*.whl and dist/*.tar.gz
-twine check dist/*                               # validate metadata
+/home/virthian/Desktop/Thesis/venvs/thesis_rocm/bin/python -m build --no-isolation
+# writes dist/panelclv-0.1.0-py3-none-any.whl and dist/panelclv-0.1.0.tar.gz
+```
+
+To validate metadata you need `twine` (not in `thesis_rocm`). Install it into a
+throwaway/other env and run:
+
+```bash
+python -m pip install --upgrade twine      # in a throwaway/other env
+twine check dist/*
 ```
 
 ### Publish to PyPI
@@ -75,13 +65,13 @@ twine check dist/*                               # validate metadata
    ```
 
 ### Before the first real PyPI upload — check these
-- **Name availability:** `panelclv` must be free on PyPI. If taken,
-  change `project.name` in `pyproject.toml`.
-- **Heavy deps:** `dependencies` includes `torch`. PyPI installs the default CPU/CUDA
-  build; this repo's dev env is ROCm. Consider documenting that users pick their own
-  torch build, or move `torch` to an optional extra so `pip install` doesn't pull an
-  unwanted wheel.
-- **Notebooks/datasets are not packaged** (only the three source packages ship), which
-  is correct — keep large data out of the distribution.
+- **Name availability:** `panelclv` is currently **free** on PyPI (verified — the
+  project page returns 404). If someone registers it before you upload, change
+  `project.name` in `pyproject.toml`.
+- **Heavy deps:** `dependencies` includes `torch` (by design). `pip install panelclv`
+  leaves an already-installed torch (ROCm / CUDA / CPU) untouched and only pulls the
+  default build into an env that has none — so existing environments are unaffected.
+- **Notebooks/datasets are not packaged** (only the `panelclv` package ships), which is
+  correct — keep large data out of the distribution.
 - Bump `version` in `pyproject.toml` for every release (PyPI rejects re-uploads of an
   existing version).

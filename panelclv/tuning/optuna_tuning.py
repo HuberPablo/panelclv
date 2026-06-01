@@ -34,16 +34,19 @@ import numpy as np
 import optuna
 import torch
 
-from .multinomial_lstm import MultinomialLSTMModel, InferenceMultinomialLSTMModel
-from .multinomial_transformer import (
+# Model definitions and the Monte Carlo simulator live in `panelclv.models`; the
+# training loop lives in `panelclv.training`. After the subpackage split these are
+# cross-package imports, so they are absolute rather than relative.
+from panelclv.models.multinomial_lstm import MultinomialLSTMModel, InferenceMultinomialLSTMModel
+from panelclv.models.multinomial_transformer import (
     MultinomialTransformerModel,
     InferenceMultinomialTransformerModel,
 )
-from .monte_carlo_forecasting import (
+from panelclv.models.monte_carlo_forecasting import (
     run_monte_carlo_forecast,
     run_monte_carlo_forecast_transformer,
 )
-from .training_utils import fit_model
+from panelclv.training.training_utils import fit_model
 
 
 # ---------------------------------------------------------------------------

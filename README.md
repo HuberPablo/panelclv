@@ -14,8 +14,9 @@ From the repo root (use your PyTorch venv):
 pip install -e .
 ```
 
-This installs the `Models`, `Data_preparation`, and `configs` packages, so
-`from Models import ...` works anywhere — no `sys.path` hacks.
+This installs the single top-level `panelclv` package (with the `panelclv.models`,
+`panelclv.data_preparation`, and `panelclv.configs` subpackages), so
+`from panelclv.models import ...` works anywhere — no `sys.path` hacks.
 
 ## Quickstart
 
@@ -29,9 +30,9 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from configs.panel_config import PanelConfig
-from Data_preparation import dynamic_panel_dataset
-from Models import make_data_builder, build_inference_from_trial, run_optuna_study, \
+from panelclv.configs.panel_config import PanelConfig
+from panelclv.data_preparation import dynamic_panel_dataset
+from panelclv.models import make_data_builder, build_inference_from_trial, run_optuna_study, \
     mc_forecast, mc_compute_metrics
 
 # 1. Panel -> model-ready tensors (calibration/holdout/samples/targets/seq_cols/...).
