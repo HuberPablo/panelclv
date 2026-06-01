@@ -25,7 +25,7 @@ concern into subpackages: `panelclv.models`, `panelclv.training`, `panelclv.tuni
 ## Quickstart
 
 The whole flow is: build/load a panel → prepare tensors → tune (Optuna) → rebuild the
-winning model → Monte Carlo forecast → report. The three `experiment_utils` helpers
+winning model → Monte Carlo forecast → report. The three `panelclv.experiments` helpers
 (`make_data_builder`, `build_inference_from_trial`, and `make_loaders`) absorb the
 mechanical glue so the notebook stays in control of every modeling choice.
 
@@ -36,8 +36,9 @@ from sklearn.model_selection import train_test_split
 
 from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation import dynamic_panel_dataset
-from panelclv.models import make_data_builder, build_inference_from_trial, run_optuna_study, \
-    mc_forecast, mc_compute_metrics
+from panelclv.tuning import run_optuna_study
+from panelclv.experiments import make_data_builder, build_inference_from_trial
+from panelclv.models import mc_forecast, mc_compute_metrics
 
 # 1. Panel -> model-ready tensors (calibration/holdout/samples/targets/seq_cols/...).
 panel = pd.read_csv("Datasets/Dataset_clean/electronics_customer_week_panel.csv")
