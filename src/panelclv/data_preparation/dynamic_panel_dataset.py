@@ -1,11 +1,17 @@
 """Turn a customer-period panel into the model-ready tensors `prepare_dataset` returns.
 
-`prepare_dataset(panel, config, schema, time_features)` is the single entry point.
-It takes a DataFrame with ONE ROW PER (customer, period) and returns the `data`
-dict consumed by the training loop (`samples`/`targets`) and the Monte-Carlo
-simulator (`calibration`/`holdout`). All model-facing arrays are (N, T, F)
-float32; the channel order is fixed: target → time → known_future →
-observed_past → static → ar_features.
+`prepare_dataset(panel, config)` is the single entry point. It takes a DataFrame
+with ONE ROW PER (customer, period) and returns the `data` dict consumed by the
+training loop (`samples`/`targets`) and the Monte-Carlo simulator
+(`calibration`/`holdout`). All model-facing arrays are (N, T, F) float32; the
+channel order is fixed: target → time → known_future → observed_past → static →
+ar_features.
+
+`config` is a `PanelConfig` — the single validated object that bundles the
+layout, calendar toggles, feature roles, embeddings and AR features.
+`prepare_dataset` reads everything from it (`.data_config`, `.schema`,
+`.time_features`, `.input_spec`, `.ar_features`); see "what a PanelConfig
+declares" below for the pieces.
 
 What it does, in order: engineer the requested calendar features and the causal
 AR target-features → add a `period_start` anchor → slice the calibration and
@@ -17,27 +23,28 @@ any tensor is built): missing id/target/schema columns, non-numeric columns,
 ragged per-customer period counts, train/holdout cohorts that differ or are
 mis-ordered, NaNs in a selected column, and empty date windows all raise.
 
-THREE caller-controlled configs
---------------------------------
-DATA_CONFIG — physical layout: `id_col`, `target_col`, `frequency`
+What a PanelConfig declares (and how prepare_dataset consumes it)
+----------------------------------------------------------------
+Physical layout (→ `.data_config`): `id_col`, `target_col`, `frequency`
     ∈ {weekly, monthly, daily}, `time_cols=[year, period]` (weekly/monthly) or
     `date_col` (daily), `periods_per_year` (week sin/cos divisor, default 52),
     `training_start/end`, `holdout_start/end`, optional `clip_target_upper`
     (train-only clip) and `require_calibration_activity` (cohort filter, default on).
-TIME_FEATURES — calendar-column toggles: `add_year_idx`, `add_week_sin_cos`,
+Calendar toggles (→ `.time_features`): `add_year_idx`, `add_week_sin_cos`,
     `add_month_sin_cos`, `add_dayofyear_sin_cos`. A column is created only when
     its flag is on AND the frequency supports it, else a clear error is raised.
-FEATURE_SCHEMA — TFT-style roles; ONLY listed columns enter the tensor:
-    `target` (exactly one), `time` (engineered calendar), `known_future_…`
+Feature roles (→ `.schema`) — TFT-style; ONLY listed columns enter the tensor:
+    `target` (exactly one), `time` (cyclical calendar), `known_future_…`
     (values known per step in advance — embeddings may be sized over both
     windows without leakage), `observed_past_…` (history-only — NOT YET
     SUPPORTED: dropped with a warning, since the AR simulator has no future for
     them and feeding it would leak), `static_covariates` (one value per
     customer, already broadcast across that customer's rows).
-`ar_features` (recency / frequency / tenure / rate) are passed separately and
-appended last; being causal functions of the target's own past, their holdout
-values are recomputed from the SAMPLED target during the rollout, so they leak
-nothing. A `PanelConfig` may be passed as `config` to bundle all of the above.
+AR features (→ `.ar_features`, recency / frequency / tenure / rate) are appended
+    last; being causal functions of the target's own past, their holdout values
+    are recomputed from the SAMPLED target during the rollout, so they leak nothing.
+Embeddings (→ `.input_spec`): which columns to embed and their cardinalities
+    (pinned int or `"auto"`, resolved here against the data).
 
 Output dict (full key list at the end of `prepare_dataset`)
 -----------------------------------------------------------
@@ -470,20 +477,15 @@ def select_active_cohort(train_panel, id_col: str, target_col: str):
 
 def prepare_dataset(
     panel: pd.DataFrame,
-    config: dict[str, Any] | PanelConfig,
-    schema: dict[str, Sequence[str]] | None = None,
-    time_features: dict[str, bool] | None = None,
+    config: PanelConfig,
     verbose: bool = True,
-    *,
-    input_spec: dict[str, Any] | None = None,
-    ar_features: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Top-level pipeline.
 
-    `config` may be a `PanelConfig` (preferred) — in which case `schema`,
-    `time_features` and `input_spec` are read from it and any values passed
-    for those arguments are ignored — or the original four dicts, where
-    `schema` is required.
+    `config` is a `PanelConfig`: it carries the physical layout, calendar
+    toggles, feature roles, embeddings and AR features in one validated object,
+    and everything below is read from it (`.data_config`, `.schema`,
+    `.time_features`, `.input_spec`, `.ar_features`).
 
     Steps:
         1. (optional) Engineer time features per `time_features` toggles.
@@ -497,9 +499,9 @@ def prepare_dataset(
         7. Check no NaN in selected columns.
         8. Reshape to (N, T, F) and build AR (samples, targets).
 
-    If `input_spec` is passed, embedding cardinalities are resolved here (see
-    `resolve_embedded_cols`): each `embedded_cols` entry may be a pinned int or
-    `"auto"`/`None` (and the mapping may be given as a plain list of column
+    When the config declares `embedded_cols`, embedding cardinalities are
+    resolved here (see `resolve_embedded_cols`): each entry may be a pinned int
+    or `"auto"`/`None` (and the mapping may be given as a plain list of column
     names, all treated as `"auto"`). `"auto"` cardinalities are inferred from
     the data per column role — target -> clip_target_upper + 1, known-future ->
     max over both windows + 1, everything else -> calibration max + 1 — and
@@ -509,22 +511,19 @@ def prepare_dataset(
 
     Returns a dict described at the module level.
     """
-    # Accept a PanelConfig or the original four dicts. Either way the body
-    # below runs on plain dicts.
-    if isinstance(config, PanelConfig):
-        ar_features = config.ar_features
-        config, schema, time_features, input_spec = (
-            config.data_config,
-            config.schema,
-            config.time_features,
-            config.input_spec,
-        )
-    elif schema is None:
+
+    # PanelConfig is the only accepted config; expand it to the plain dicts the
+    # body below runs on.
+    if not isinstance(config, PanelConfig):
         raise TypeError(
-            "schema is required when config is a plain dict "
-            "(or pass a PanelConfig as config)"
+            f"config must be a PanelConfig, got {type(config).__name__}. "
+            "Build one with PanelConfig(...) — see panelclv.configs.panel_config."
         )
-    ar_features = list(ar_features)
+    ar_features = list(config.ar_features)
+    schema = config.schema
+    time_features = config.time_features
+    input_spec = config.input_spec
+    config = config.data_config
 
     panel = panel.copy()
 
@@ -644,6 +643,7 @@ def prepare_dataset(
     # 5) Train / holdout slices.
     training_start = pd.Timestamp(config["training_start"])
     training_end   = pd.Timestamp(config["training_end"])
+    validation_start = pd.Timestamp(config["validation_start"])
     holdout_start  = pd.Timestamp(config["holdout_start"])
     holdout_end    = pd.Timestamp(config["holdout_end"])
 
@@ -729,6 +729,29 @@ def prepare_dataset(
     T_CAL  = int(train_counts.iloc[0])
     T_HOLD = int(hold_counts.iloc[0])
 
+    # 6b) Temporal validation boundary. Map `validation_start` (a date) onto a
+    # calibration PERIOD index: val_start_idx = how many calibration periods fall
+    # strictly before validation_start. The distinct, sorted calibration
+    # period_start values ARE the T_CAL periods (uniform across customers, just
+    # checked above), so counting those below the cutoff gives the split point.
+    #   periods 0 .. val_start_idx-1   -> train the weights
+    #   periods val_start_idx .. T_CAL-1 -> validation window (never trained on)
+    # The PanelConfig date check already guarantees the date ordering; here we
+    # re-check against the real calendar so a date that lands on the very first
+    # or past the last calibration period (leaving no train or no val period)
+    # fails loudly rather than producing an empty slice downstream.
+    cal_periods = np.sort(train_panel["period_start"].unique())   # (T_CAL,)
+    val_start_idx = int((cal_periods < validation_start).sum())
+    if not 0 < val_start_idx < T_CAL:
+        raise ValueError(
+            f"validation_start={validation_start.date()} maps to calibration "
+            f"period index {val_start_idx}, but it must be in (0, T_CAL={T_CAL}) "
+            f"so that at least one period trains the weights and at least one is "
+            f"held out for validation. Calibration covers "
+            f"{pd.Timestamp(cal_periods[0]).date()}..{pd.Timestamp(cal_periods[-1]).date()}."
+        )
+    n_val_periods = T_CAL - val_start_idx
+
     sort_cols = [id_col, "period_start"]
     ids_train = train_panel.sort_values(sort_cols)[id_col].drop_duplicates().tolist()
     ids_hold  = holdout_panel.sort_values(sort_cols)[id_col].drop_duplicates().tolist()
@@ -767,6 +790,11 @@ def prepare_dataset(
 
     if verbose:
         print(f"N={N} T_CAL={T_CAL} T_HOLD={T_HOLD} F={len(seq_cols)}")
+        print(
+            f"validation_start={validation_start.date()} -> val_start_idx="
+            f"{val_start_idx} (train periods 0..{val_start_idx - 1}, "
+            f"validation periods {val_start_idx}..{T_CAL - 1}, V={n_val_periods})"
+        )
         print(f"seq_cols   = {seq_cols}")
         print(f"target_col = {target_col!r} at index {target_idx}")
         print(
@@ -784,6 +812,13 @@ def prepare_dataset(
         "seq_cols":      seq_cols,
         "target_col":    target_col,
         "target_idx":    target_idx,
+        # Temporal validation split (see step 6b): the calibration PERIOD index
+        # where the validation window begins, its length, and the source date.
+        # Consumed by make_loaders (train = prefix transitions, val = full
+        # sequence scored on the suffix) and the Optuna rollout horizon.
+        "val_start_idx":   val_start_idx,
+        "n_val_periods":   n_val_periods,
+        "validation_start": config["validation_start"],
         # id_col + frequency are carried so the data dict is self-describing:
         # downstream consumers (e.g. the Pareto/NBD benchmark) can recover the
         # customer key and the period length without re-passing the config.
@@ -792,7 +827,7 @@ def prepare_dataset(
         "input_spec":    ({"embedded_cols": resolved_embedded}
                           if resolved_embedded is not None else None),
         "ar_features":   ar_features,
-        "N":             N,
+        "N  ":             N,
         "T_CAL":         T_CAL,
         "T_HOLD":        T_HOLD,
         "F":             len(seq_cols),
@@ -809,61 +844,46 @@ def prepare_dataset(
 
 
 if __name__ == "__main__":
-    # ---- Step 1: physical layout of the panel ---------------------------
-    # Matches the columns produced by dataset_building.py:
+    # Everything the pipeline needs lives in one validated PanelConfig. The
+    # panel here matches the columns produced by the data-integration notebook:
     #   Id, year, week, Transactions, Gender, Income, high.season
-    DATA_CONFIG = {
-        "id_col":           "Id",
-        "target_col":       "Transactions",
-        "time_cols":        ["year", "week"],   # weekly: year + week
-        "frequency":        "weekly",
-        "periods_per_year": 52,
-        "training_start":   "1999-01-01",
-        "training_end":     "2000-12-31",
-        "holdout_start":    "2001-01-01",
-        "holdout_end":      "2002-12-31",
-    }
 
-    # ---- Step 2: which engineered time features to create ---------------
-    TIME_FEATURES = {
-        "add_year_idx":          True,
-        "add_week_sin_cos":      True,
-        "add_month_sin_cos":     False,
-        "add_dayofyear_sin_cos": False,
-    }
+    # ---- Minimal config: just the target + the raw weekly index ---------
+    # No engineered calendar features, no covariates, no embeddings — the
+    # `week` column is fed directly as a (precomputed) time feature.
+    cfg_minimal = PanelConfig(
+        id_col="Id", target_col="Transactions", frequency="weekly",
+        time_cols=("year", "week"), periods_per_year=52,
+        training_start="1999-01-01", training_end="2000-12-31",
+        validation_start="2000-07-01", holdout_start="2001-01-01",
+        holdout_end="2002-12-31",
+        time=("week",),
+    )
 
-    # ---- Step 3: which features the model actually sees -----------------
-    FEATURE_SCHEMA_MINIMAL = {
-        "target":                            ["Transactions"],
-        "time":                              ["week"],
-        "static_covariates":                 [],
-        "known_future_time_varying_inputs":  [],
-        "observed_past_time_varying_inputs": [],
-    }
+    # ---- Full config: engineered calendar features + covariates ---------
+    # `add_week_sin_cos` engineers + auto-assigns week_sin/week_cos to the time
+    # role; `add_year_idx` creates year_idx, placed here in known_future
+    # alongside the externally-known high.season flag. Gender/Income are static.
+    cfg_full = PanelConfig(
+        id_col="Id", target_col="Transactions", frequency="weekly",
+        time_cols=("year", "week"), periods_per_year=52,
+        training_start="1999-01-01", training_end="2000-12-31",
+        validation_start="2000-07-01", holdout_start="2001-01-01",
+        holdout_end="2002-12-31",
+        known_future=("year_idx", "high.season"),
+        static=("Gender", "Income"),
+        time_features={"add_year_idx": True, "add_week_sin_cos": True},
+    )
 
-    FEATURE_SCHEMA_FULL = {
-        "target":                            ["Transactions"],
-        "time":                              ["week_sin", "week_cos"],
-        "static_covariates":                 ["Gender", "Income"],
-        "known_future_time_varying_inputs":  ["year_idx", "high.season"],
-        "observed_past_time_varying_inputs": [],
-    }
-
-    # ---- Step 4: run the pipeline ---------------------------------------
-    # Point `csv_path` at any panel CSV with the columns referenced in
-    # DATA_CONFIG and FEATURE_SCHEMA. How the panel was built is out of
-    # scope for this file — produce it from raw transactions (e.g. via
-    # dataset_building.py), from your data-integration notebook, or by
-    # hand.
+    # ---- Run the pipeline -----------------------------------------------
+    # Point `csv_path` at any panel CSV with the columns the configs reference.
+    # How the panel was built is out of scope for this file — produce it from
+    # raw transactions in your data-integration notebook, or by hand.
     csv_path = "Datasets/electronic_panel.csv"
     panel = pd.read_csv(csv_path)
 
-    print("=== minimal schema ===")
-    data_min = prepare_dataset(
-        panel, DATA_CONFIG, FEATURE_SCHEMA_MINIMAL, TIME_FEATURES,
-    )
+    print("=== minimal config ===")
+    data_min = prepare_dataset(panel, cfg_minimal)
 
-    print("\n=== full schema ===")
-    data_full = prepare_dataset(
-        panel, DATA_CONFIG, FEATURE_SCHEMA_FULL, TIME_FEATURES,
-    )
+    print("\n=== full config ===")
+    data_full = prepare_dataset(panel, cfg_full)

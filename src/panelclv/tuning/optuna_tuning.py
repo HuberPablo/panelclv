@@ -21,7 +21,11 @@ or re-runs data prep per trial:
 `metadata` must contain `seq_cols` (list[str] matching the input tensor's last
 axis), `input_spec` ({"embedded_cols": {col: cardinality}}), and `target_col`
 (the AR target, default "Transactions"); optionally `seq_len` (Transformer
-fixed-length mask cache; the LSTM ignores it).
+fixed-length mask cache; the LSTM ignores it) and `val_score_start` (the temporal
+validation boundary — the objective forwards it to `fit_model` so `val_loss` is the
+cross-entropy on the validation window only). `experiments.make_loaders` /
+`make_data_builder` produce a contract-compliant builder from a `prepare_dataset`
+dict; the train/val split is temporal (a time window over all customers).
 
 Feature-group selection
 -----------------------
@@ -48,11 +52,12 @@ Selection metric (what Optuna minimises)
   sampling rollout the real forecast uses, so it can favour feature sets that
   drift at forecast time.
 - "rollout_composite": after training, score the trial with a LEAK-FREE
-  validation Monte-Carlo rollout (`weekly_aggregate_rollout_metrics`). For the
-  validation customers, the last `rollout_horizon` weeks of CALIBRATION are
-  carved off as a pseudo-holdout (the real `data["holdout"]` is never read in
-  tuning); the model warms up on the prefix and autoregressively rolls the
-  pseudo-holdout over `rollout_n_simulations` paths. Metrics are computed on the
+  validation Monte-Carlo rollout (`weekly_aggregate_rollout_metrics`). The
+  temporal validation window (the last `n_val_periods` weeks of CALIBRATION, i.e.
+  after `validation_start`) is carved off as a pseudo-holdout for ALL customers
+  (the real `data["holdout"]` is never read in tuning); the model warms up on the
+  prefix and autoregressively rolls the pseudo-holdout over `rollout_n_simulations`
+  paths. Metrics are computed on the
   WEEKLY AGGREGATE (sum over customers per step) and combined into one
   scale-normalised composite:
 
@@ -70,8 +75,9 @@ Selection metric (what Optuna minimises)
   run needs its OWN fresh study/storage — never a val_loss study's DB; (b) the
   pruner still acts on per-epoch CE, so it only prunes clearly bad-CE trials
   early — surviving trials are always rolled out and scored. Requires
-  `rollout_data` (the full prepare_dataset dict) and `val_idx`; `rollout_horizon`
-  is validated up front (0 < horizon < T_CAL, with a short-warm-up warning).
+  `rollout_data` (the full prepare_dataset dict; its `n_val_periods` sets the
+  default horizon); `rollout_horizon` is validated up front (0 < horizon < T_CAL,
+  with a short-warm-up warning).
 """
 
 from __future__ import annotations
@@ -420,7 +426,6 @@ def _validation_rollout_score(
     drop_cols: Sequence[str],
     checkpoint_path: str,
     rollout_data: dict[str, Any],
-    val_idx: Sequence[int],
     horizon: int,
     n_simulations: int,
     seed: int,
@@ -430,12 +435,16 @@ def _validation_rollout_score(
     """Evaluate one trained trial with a validation-horizon MC rollout.
 
     Leak-free pseudo-holdout: the real ``data["holdout"]`` is never touched.
-    Instead we carve the last ``horizon`` weeks off the CALIBRATION window of the
-    VALIDATION customers and treat them as a holdout the trial has not been
-    selected on:
+    Instead we carve the last ``horizon`` weeks off the CALIBRATION window — the
+    temporal validation window (after ``validation_start``) — for ALL customers and
+    treat them as a holdout the trial has not been selected on:
 
-        calib_prefix  = calibration[val_idx, :-horizon]   # warm-up context
-        pseudo_holdout= calibration[val_idx, -horizon:]    # scored target
+        calib_prefix  = calibration[:, :-horizon]   # warm-up context
+        pseudo_holdout= calibration[:, -horizon:]    # scored target
+
+    The split is temporal, not customer-wise, so every customer contributes both a
+    warm-up prefix and a scored suffix (matching how the teacher-forced ``val_loss``
+    path scores the same window).
 
     Because each trial may have dropped a different covariate subset, we re-slice
     ``rollout_data`` with this trial's ``drop_cols`` first (so F and seq_cols
@@ -456,7 +465,7 @@ def _validation_rollout_score(
     input_spec = d["input_spec"]
     target_col = d.get("target_col", "Transactions")
 
-    calib = np.asarray(d["calibration"])[list(val_idx)]   # (n_val, T_CAL, F)
+    calib = np.asarray(d["calibration"])                  # (N, T_CAL, F) — all customers
     T_CAL = calib.shape[1]
     if not 0 < horizon < T_CAL:
         raise ValueError(
@@ -601,6 +610,9 @@ def objective(
         loss_type=loss_type,
         class_weights=data_info.get("class_weights"),
         focal_gamma=focal_gamma,
+        # Temporal split: score CE only on the validation suffix (periods after
+        # validation_start). make_loaders puts this in metadata; 0 ⇒ score all steps.
+        val_score_start=metadata.get("val_score_start", 0),
     )
     trial.set_user_attr("checkpoint_path", str(result.checkpoint_path))
     trial.set_user_attr("best_epoch", result.best_epoch)
@@ -626,7 +638,6 @@ def objective(
         drop_cols=drop_cols,
         checkpoint_path=str(result.checkpoint_path),
         rollout_data=rollout_cfg["rollout_data"],
-        val_idx=rollout_cfg["val_idx"],
         horizon=rollout_cfg["horizon"],
         n_simulations=rollout_cfg["n_simulations"],
         seed=rollout_cfg["seed"],
@@ -661,8 +672,7 @@ def run_optuna_study(
     removable_features: Sequence[str | Sequence[str]] = (),
     selection_metric: str = "val_loss",
     rollout_data: dict[str, Any] | None = None,
-    val_idx: Sequence[int] | None = None,
-    rollout_horizon: int = 52,
+    rollout_horizon: int | None = None,
     rollout_n_simulations: int = 100,
     rollout_seed: int = 42,
     rollout_mape_clip: float = 300.0,
@@ -686,18 +696,22 @@ def run_optuna_study(
     `selection_metric="rollout_composite"` to instead select on a validation
     Monte-Carlo rollout that mirrors the real forecasting regime:
 
-        - For the validation customers (`val_idx`), the last `rollout_horizon`
-          weeks of the CALIBRATION window are carved off as a leak-free
-          pseudo-holdout (the real `data["holdout"]` is never used in tuning).
+        - The temporal validation window (the last `n_val_periods` weeks of the
+          CALIBRATION window, i.e. everything after `validation_start`) is carved
+          off as a leak-free pseudo-holdout for ALL customers (the real
+          `data["holdout"]` is never used in tuning). `rollout_horizon` defaults
+          to that window; pass an int to override it.
         - Each trained trial is warmed up on the prefix and autoregressively
           rolls the pseudo-holdout (`rollout_n_simulations` paths), then scored
           by `weekly_aggregate_rollout_metrics` (normalized RMSE + MAPE + bias).
-        - Cross-entropy is still logged as the `val_loss` user attr.
+        - Cross-entropy (over the same validation window) is still logged as the
+          `val_loss` user attr.
 
     This mode requires `rollout_data` (the full `prepare_dataset` dict — the
-    objective re-slices it per trial's feature subset) and `val_idx`. Because
-    the returned score is on a different scale than cross-entropy, a rollout run
-    must use its OWN fresh study (don't point it at a `val_loss` study's storage).
+    objective re-slices it per trial's feature subset; its `n_val_periods` sets the
+    default horizon). Because the returned score is on a different scale than
+    cross-entropy, a rollout run must use its OWN fresh study (don't point it at a
+    `val_loss` study's storage).
 
     When `append_timestamp` is True (default) the effective run name is
     `f"{study_name}_{YYYYMMDD_HHMM}"`; that name is used for the Optuna study,
@@ -735,20 +749,30 @@ def run_optuna_study(
         )
     rollout_cfg: dict[str, Any] | None = None
     if selection_metric == ROLLOUT_METRIC:
-        if rollout_data is None or val_idx is None:
+        if rollout_data is None:
             raise ValueError(
-                f"selection_metric={ROLLOUT_METRIC!r} requires both rollout_data "
-                "(the prepare_dataset dict) and val_idx (validation customer "
-                "indices)."
+                f"selection_metric={ROLLOUT_METRIC!r} requires rollout_data "
+                "(the prepare_dataset dict)."
             )
+        # The rollout scores the SAME temporal validation window the teacher-forced
+        # path uses: the last `n_val_periods` weeks of calibration (= the window after
+        # validation_start), for ALL customers. By default the horizon IS that window,
+        # so the two selection metrics stay comparable; an explicit `rollout_horizon`
+        # overrides it (e.g. to probe a different carve), still leak-free since the
+        # real `data["holdout"]` is never read.
+        T_CAL = int(np.asarray(rollout_data["calibration"]).shape[1])
+        horizon = (
+            int(rollout_horizon)
+            if rollout_horizon is not None
+            else int(rollout_data["n_val_periods"])
+        )
         # Validate the horizon UP FRONT (before any training) so a misconfigured
         # rollout fails in seconds, not after the first trial finishes. The
-        # pseudo-holdout is the last `rollout_horizon` periods of calibration, so
-        # the horizon must leave a non-empty warm-up prefix: 0 < horizon < T_CAL.
-        T_CAL = int(np.asarray(rollout_data["calibration"]).shape[1])
-        if not 0 < rollout_horizon < T_CAL:
+        # pseudo-holdout is the last `horizon` periods of calibration, so the horizon
+        # must leave a non-empty warm-up prefix: 0 < horizon < T_CAL.
+        if not 0 < horizon < T_CAL:
             raise ValueError(
-                f"rollout_horizon={rollout_horizon} must be in (0, T_CAL={T_CAL}): "
+                f"rollout horizon={horizon} must be in (0, T_CAL={T_CAL}): "
                 f"the validation rollout is carved from the calibration window, so "
                 f"it cannot be >= the full calibration length (no warm-up would "
                 f"remain). Pick a horizon well below {T_CAL} (e.g. <= {T_CAL // 2})."
@@ -756,19 +780,18 @@ def run_optuna_study(
         # Even when valid, a horizon that consumes most of calibration leaves too
         # little warm-up for the model to represent each customer's history, so the
         # rollout score becomes unreliable. Warn (don't error) past the halfway mark.
-        warmup = T_CAL - rollout_horizon
-        if warmup < rollout_horizon:
+        warmup = T_CAL - horizon
+        if warmup < horizon:
             warnings.warn(
-                f"rollout_horizon={rollout_horizon} leaves only {warmup} warm-up "
+                f"rollout horizon={horizon} leaves only {warmup} warm-up "
                 f"period(s) of {T_CAL} (shorter than the scored horizon). The "
-                f"validation rollout metric may be unreliable; consider "
-                f"rollout_horizon <= {T_CAL // 2}.",
+                f"validation rollout metric may be unreliable; consider a horizon "
+                f"<= {T_CAL // 2} (move validation_start earlier).",
                 stacklevel=2,
             )
         rollout_cfg = {
             "rollout_data": rollout_data,
-            "val_idx": list(val_idx),
-            "horizon": int(rollout_horizon),
+            "horizon": horizon,
             "n_simulations": int(rollout_n_simulations),
             "seed": int(rollout_seed),
             "metric_kwargs": {

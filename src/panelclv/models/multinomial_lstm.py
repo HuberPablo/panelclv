@@ -113,7 +113,7 @@ def _validate_spec_against_seq(
     if not isinstance(input_spec, dict) or "embedded_cols" not in input_spec:
         raise ValueError(
             "input_spec must be a dict containing 'embedded_cols' "
-            "(see configs.transformations_spec.validate_input_spec)"
+            "(use PanelConfig.embedded_cols / prepare_dataset's data['input_spec'])"
         )
     embedded_cols = dict(input_spec["embedded_cols"])
 

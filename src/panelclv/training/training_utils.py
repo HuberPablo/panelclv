@@ -131,7 +131,17 @@ def validate_one_epoch(
     max_trans: int,
     compute_f1: bool = True,
     validate_targets: bool = True,
+    val_score_start: int = 0,
 ) -> dict[str, float]:
+    """Teacher-forced validation pass.
+
+    `val_score_start` supports the temporal validation split: the loader feeds each
+    customer's FULL calibration sequence (so the recurrent/causal state is warmed up
+    over the training prefix), but only the time steps at index >= `val_score_start`
+    are scored — i.e. the loss/accuracy/F1 are computed on the validation window only,
+    not the training prefix the model was already fit on. `val_score_start=0` (default)
+    scores every step, preserving the original behaviour.
+    """
     model.eval()
     total_loss = 0.0
     total_correct = 0
@@ -150,6 +160,12 @@ def validate_one_epoch(
             output = model(samples)
             if isinstance(output, tuple):
                 output = output[0]
+
+            # Keep only the validation-window steps (the suffix). The prefix steps
+            # were warm-up context for the state, not part of the validation score.
+            if val_score_start:
+                output = output[:, val_score_start:]
+                targets = targets[:, val_score_start:]
 
             loss = criterion(output.reshape(-1, max_trans), targets.reshape(-1))
             total_loss += loss.item()
@@ -200,6 +216,7 @@ def fit_model(
     loss_type: str = "cross_entropy",       # 'cross_entropy' | 'weighted_ce' | 'focal' | 'emd'
     class_weights: torch.Tensor | None = None,
     focal_gamma: float = 2.0,
+    val_score_start: int = 0,
 ) -> FitResult:
     """Train a multinomial model with early stopping on validation loss.
 
@@ -217,6 +234,12 @@ def fit_model(
 
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.
+
+    `val_score_start` is the temporal-validation hook: the val_loader feeds the full
+    calibration sequence (warm-up), but only steps >= `val_score_start` are scored, so
+    early stopping tracks cross-entropy on the validation window alone. Build the loaders
+    with `experiments.make_loaders` (which sets `metadata["val_score_start"] = s-1`) and
+    pass that value through here. 0 (default) scores every step.
     """
     device = _select_device(device)
     model = model.to(device)
@@ -270,6 +293,7 @@ def fit_model(
         val_metrics = validate_one_epoch(
             model, val_loader, criterion, device,
             max_trans, validate_targets=validate_targets,
+            val_score_start=val_score_start,
         )
 
         record = {
@@ -339,6 +363,111 @@ def fit_model(
         best_val_loss=best_val_loss,
         best_val_f1=best_val_f1,
         best_epoch=best_epoch,
+        checkpoint_path=checkpoint_path,
+        history=history,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Final retrain on the full calibration window (Valendin et al. paper step)
+# ---------------------------------------------------------------------------
+
+
+def refit_full_calibration(
+    model: nn.Module,
+    train_loader: DataLoader,
+    max_trans: int,
+    *,
+    n_epochs: int,
+    learning_rate: float = 1e-3,
+    weight_decay: float = 1e-3,
+    grad_clip: float | None = 1.0,
+    device: str | torch.device | None = None,
+    checkpoint_dir: str | Path = "./checkpoints",
+    model_name: str = "model_refit",
+    warm_start_state: dict[str, torch.Tensor] | str | Path | None = None,
+    loss_type: str = "cross_entropy",
+    class_weights: torch.Tensor | None = None,
+    focal_gamma: float = 2.0,
+    validate_targets: bool = True,
+    verbose: bool = True,
+) -> FitResult:
+    """Warm-start fine-tune on the FULL calibration window — no validation, no early stop.
+
+    Valendin et al. (the *paper*, not their GitHub) describe a final step: after the
+    architecture / stopping epoch are chosen on the validation window, retrain the
+    selected model for a few epochs with a large batch on the full calibration window so
+    the weights also LEARN from the most recent periods (the validation tail), not just
+    condition on them at forecast time. This is a **warm-start fine-tune**: pass the
+    tuned weights via `warm_start_state` and keep optimising them — do NOT start from
+    scratch (a "few epochs" from random init would badly underfit).
+
+    Because the validation window is now folded into training there is nothing left to
+    early-stop on, so this trains for exactly `n_epochs` (typically the `best_epoch`
+    found by `fit_model`) and persists the FINAL-epoch weights — not a best-by-val
+    checkpoint. The returned `FitResult` carries the train history; its `best_val_*`
+    fields are NaN (no validation set), and `best_epoch` is the last epoch index.
+
+    `train_loader` must yield the full-calibration AR pairs (all T-1 transitions), unlike
+    the temporally-truncated training loader used during tuning — build it with
+    `experiments.make_refit_loader`.
+    """
+    device = _select_device(device)
+    model = model.to(device)
+
+    # Warm start: load the tuned weights before fine-tuning. Accept a state_dict or a
+    # checkpoint path; drop the Transformer's non-persistent cached-mask key if present
+    # (the same guard build_inference_from_trial uses) so a strict load succeeds.
+    if warm_start_state is not None:
+        if isinstance(warm_start_state, (str, Path)):
+            state = torch.load(warm_start_state, map_location=device)
+        else:
+            state = dict(warm_start_state)
+        state.pop("_cached_mask", None)
+        model.load_state_dict(state)
+
+    if class_weights is not None:
+        class_weights = class_weights.to(device)
+    criterion = build_criterion(
+        loss_type, class_weights=class_weights, focal_gamma=focal_gamma,
+    )
+    optimizer = optim.AdamW(
+        model.parameters(), lr=learning_rate, weight_decay=weight_decay
+    )
+
+    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = checkpoint_dir / f"{model_name}.pth"
+
+    history: list[dict[str, float]] = []
+    for epoch in range(n_epochs):
+        train_metrics = train_one_epoch(
+            model, train_loader, optimizer, criterion, device,
+            max_trans, grad_clip=grad_clip, validate_targets=validate_targets,
+        )
+        record = {
+            "epoch": epoch,
+            "train_loss": train_metrics["loss"],
+            "train_accuracy": train_metrics["accuracy"],
+        }
+        history.append(record)
+        if verbose:
+            print(
+                f"[refit] Epoch {epoch + 1:>3}/{n_epochs} | "
+                f"train_loss={record['train_loss']:.4f} "
+                f"train_acc={record['train_accuracy']:.4f}"
+            )
+
+    # Persist the FINAL weights (there is no validation set to pick a "best" epoch).
+    torch.save(model.state_dict(), checkpoint_path)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return FitResult(
+        best_val_loss=float("nan"),
+        best_val_f1=float("nan"),
+        best_epoch=max(n_epochs - 1, 0),
         checkpoint_path=checkpoint_path,
         history=history,
     )

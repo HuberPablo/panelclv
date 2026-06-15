@@ -7,10 +7,17 @@ subpackage at a single altitude: ``models`` is *what the model is*, ``training``
 *how it is fit*.
 """
 
-from .training_utils import fit_model, train_one_epoch, validate_one_epoch, FitResult
+from .training_utils import (
+    fit_model,
+    refit_full_calibration,
+    train_one_epoch,
+    validate_one_epoch,
+    FitResult,
+)
 
 __all__ = [
     "fit_model",
+    "refit_full_calibration",
     "train_one_epoch",
     "validate_one_epoch",
     "FitResult",

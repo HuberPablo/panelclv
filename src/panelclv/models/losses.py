@@ -93,7 +93,7 @@ def compute_class_weights(
     targets,
     num_classes: int | None = None,
     *,
-    train_idx=None,
+    training_only: bool = True,
 ) -> torch.Tensor:
     """Inverse-frequency per-class weights, normalised to sum to `num_classes`.
 
@@ -107,9 +107,13 @@ def compute_class_weights(
       (`data["input_spec"]["embedded_cols"][data["target_col"]]`, i.e. the same
       `max_trans` the softmax head uses). This folds the old notebook
       boilerplate (squeeze the target axis, look up `max_trans`) into one call.
-      Pass `train_idx` to weight on the **training customers only** — recommended,
-      so the validation split's class mix never leaks into the loss; omit it to
-      use every customer. (`train_idx` is only meaningful with the dict form.)
+
+    The train/val split is **temporal** (a time window over all customers), so with
+    the dict form `training_only=True` (default) weights on the **training prefix**
+    only — transitions whose target falls before `validation_start`, i.e.
+    `targets[:, :val_start_idx-1]` — so the held-out validation periods' class mix
+    never leaks into the loss. Pass `training_only=False` to use every period.
+    (`training_only` is only meaningful with the dict form.)
 
     Classes absent from the labels get a count of 1 (so their weight stays
     finite). The normalisation keeps the average weight at 1, so the loss scale
@@ -126,8 +130,17 @@ def compute_class_weights(
             )
         # (N, T-1, 1) float32 -> (N, T-1); long() happens below with the array path.
         labels = torch.as_tensor(data["targets"]).squeeze(-1)
-        if train_idx is not None:
-            labels = labels[list(train_idx)]            # training customers only
+        if training_only:
+            # Keep only the training-prefix transitions (target period < validation
+            # window). val_start_idx = s ⇒ training target indices 0..s-2 = [:, :s-1].
+            s = data.get("val_start_idx")
+            if s is None:
+                raise KeyError(
+                    "compute_class_weights(training_only=True) needs data['val_start_idx'] "
+                    "(set by prepare_dataset from validation_start). Pass training_only=False "
+                    "to weight on every period, or rebuild the dataset with a validation_start."
+                )
+            labels = labels[:, : int(s) - 1]
         if num_classes is None:
             spec = data.get("input_spec") or {}
             embedded = spec.get("embedded_cols", {}) if isinstance(spec, dict) else {}
@@ -139,11 +152,8 @@ def compute_class_weights(
                 )
             num_classes = int(embedded[target_col])
         targets = labels
-    elif train_idx is not None:
-        raise TypeError(
-            "train_idx is only valid when `targets` is a prepare_dataset data dict; "
-            "for an array of labels, slice it yourself before calling."
-        )
+    # Array path: `training_only` has no meaning (no temporal axis is known), so it is
+    # simply ignored — slice the labels yourself before calling if you need a subset.
 
     if num_classes is None:
         raise ValueError(

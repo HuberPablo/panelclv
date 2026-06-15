@@ -5,23 +5,86 @@ take (DATA_CONFIG, FEATURE_SCHEMA, TIME_FEATURES, INPUT_SPEC). It validates
 its fields at construction (so typos and cross-field mistakes fail early) and
 supplies per-frequency defaults. The target is declared once, as `target_col`.
 
-    cfg = PanelConfig(id_col="Id", target_col="Transactions", frequency="weekly",
-                      training_start=..., training_end=...,
-                      holdout_start=..., holdout_end=...,
-                      time_cols=("year", "week"), clip_target_upper=6,
-                      time=("week_sin", "week_cos"),
-                      known_future=("year_idx", "high.season"),
-                      static=("Gender", "Income"),
-                      time_features={"add_year_idx": True, "add_week_sin_cos": True},
-                      embedded_cols={"Transactions": "auto", "Gender": "auto"})
+    cfg = PanelConfig(
+        # === REQUIRED ============================================================
+        # --- identity / target ---
+        id_col="Id",                       # customer identifier column
+        target_col="Transactions",         # count column to forecast (and embed)
+        frequency="weekly",                # "weekly" | "monthly" | "daily"
+
+        # --- window dates ---
+        training_start="2017-01-01",       # first date of the calibration window
+        training_end="2018-12-31",         # last date of calibration (must precede holdout)
+        validation_start="2018-07-01",     # first date of the temporal validation window;
+                                           # carves the calibration TAIL [validation_start,
+                                           # training_end] off as validation (all customers),
+                                           # so weights train only on [training_start,
+                                           # validation_start). Must satisfy
+                                           # training_start < validation_start <= training_end.
+        holdout_start="2019-01-01",        # first date of the holdout window
+        holdout_end="2019-12-31",          # last date of holdout
+
+        # --- time indexing: REQUIRED, but which one depends on frequency ---
+        time_cols=("year", "week"),        # REQUIRED for weekly/monthly: (year_col, period_col)
+        # date_col="Date",                 # REQUIRED for daily instead: single date column
+        
+        # === OPTIONAL (defaults shown) ===========================================
+        periods_per_year=52,               # seasonal period; default per frequency (52/12/365)
+        clip_target_upper=6,               # cap counts (sets softmax head size); default None = no cap
+        require_calibration_activity=True, # keep only customers active in calibration (Valendin filter)
+        # --- feature roles (target excluded; all default to ()) ---
+        time=(),                           # cyclical time cols already precomputed in the panel
+        known_future=("year_idx", "high.season"),  # covariates known at forecast time (future-dated)
+        observed_past=("promo_flag",),     # covariates observed only up to the forecast origin
+        static=("Gender", "Income"),       # per-customer constants (don't vary over time)
+        # --- engineered calendar features (opt-in; default None = none) ---
+        time_features={"add_year_idx": True, "add_week_sin_cos": True},  # derive year_idx + week_sin/cos
+        # --- autoregressive target-derived features (leak-free; default ()) ---
+        ar_features=("period_since_last_transaction",),  # recency/activity, recomputed during rollout
+        # --- embeddings (which cols to embed; int | "auto"; default ()) ---
+        embedded_cols={"Transactions": "auto", "Gender": "auto"},  # categorical cols → learned embeddings
+    )
     data = prepare_dataset(panel, cfg)
+
+Feature roles follow the TFT-style grouping — `time`, `known_future`,
+`observed_past`, `static` — with the target kept out of every role (it is
+`target_col`). `ar_features` names autoregressive, target-derived signals
+(a "transaction" = target > 0) that are recomputed from the sampled count
+during the holdout rollout, so they stay leak-free. Supported names:
+
+    period_since_last_transaction   recency: periods since the last transaction
+                                    (0 this period; counts up if never seen).
+    has_transacted_before           1 once any transaction has occurred, else 0.
+    active_in_last_<K>_periods      1 if a transaction fell within the last K
+                                    periods (inclusive); K >= 1, e.g. ..._3_... .
+    cumulative_transactions         running count of active periods — the RFM /
+                                    Pareto-NBD "frequency" (x).
+    cumulative_count                running sum of the target counts themselves
+                                    (>= cumulative_transactions).
+    period_since_first_transaction  tenure: periods since the first transaction
+                                    — the BTYD observation age "T".
+    transaction_rate                cumulative_transactions / max(tenure, 1), an
+                                    empirical per-period purchase rate.
+
+`require_calibration_activity` (the Valendin cohort filter, on by default)
+restricts the panel to customers active in the calibration window, governing
+both the LSTM and the Pareto/NBD benchmark.
+
+`time_features` vs the `time` role are two different jobs and should not be
+double-specified. A `time_features` flag (e.g. `add_week_sin_cos`) *engineers*
+calendar columns that don't exist in the raw panel — and `.schema` then auto-
+assigns its outputs (`week_sin`/`week_cos`) to the `time` role. So when a flag
+produces a column you do NOT also list it under `time`. Use `time=(...)` only
+for cyclical columns that are ALREADY precomputed in the panel (no flag engineers
+them). In the example above `add_week_sin_cos` supplies `week_sin`/`week_cos`, so
+`time` is left empty.
 
 The `.data_config`, `.schema` and `.input_spec` properties expose the
 dict forms the existing `prepare_dataset` internals consume, so no downstream
 helper had to change.
 
-Standard library only — no third-party dependencies beyond pandas (used only
-to parse the window dates).
+Depends only on pandas (to parse the window dates) plus the in-package
+`ar_features` validator — no other third-party libraries.
 """
 
 from __future__ import annotations
@@ -121,7 +184,8 @@ class PanelConfig:
     """Validated configuration for one panel → model run.
 
     Required: identity / target (`id_col`, `target_col`, `frequency`) and the
-    four window dates. Everything else has a sensible default. Feature roles
+    five window dates (`training_start`, `training_end`, `validation_start`,
+    `holdout_start`, `holdout_end`). Everything else has a sensible default. Feature roles
     follow the TFT-style grouping (`time`, `known_future`, `observed_past`,
     `static`); the target is NOT listed in a role — it is `target_col`.
     `embedded_cols` is the user's choice of which columns to embed; each value
@@ -141,6 +205,12 @@ class PanelConfig:
     frequency: str
     training_start: str
     training_end: str
+    # Temporal validation split: the calibration window [training_start, training_end]
+    # is cut at `validation_start`. Periods [training_start, validation_start) train the
+    # weights; periods [validation_start, training_end] are the validation window (used
+    # for early stopping / model selection, never trained on). This replaces the old
+    # customer-wise split — validation is a TIME window over ALL customers. Required.
+    validation_start: str
     holdout_start: str
     holdout_end: str
 
@@ -215,7 +285,10 @@ class PanelConfig:
                 raise ValueError("daily frequency requires date_col")
 
         # Windows must parse and be ordered (training strictly before holdout).
-        for name in ("training_start", "training_end", "holdout_start", "holdout_end"):
+        for name in (
+            "training_start", "training_end", "validation_start",
+            "holdout_start", "holdout_end",
+        ):
             value = getattr(self, name)
             try:
                 pd.Timestamp(value)
@@ -225,6 +298,22 @@ class PanelConfig:
             raise ValueError(
                 f"training_end ({self.training_end}) must be before "
                 f"holdout_start ({self.holdout_start})"
+            )
+        # The temporal validation window sits at the TAIL of the calibration window:
+        # training_start < validation_start <= training_end. The lower bound is strict
+        # so at least one training period exists before validation begins; the upper
+        # bound is inclusive so validation_start == training_end is allowed (a single
+        # validation period). The exact period counts are re-checked in prepare_dataset
+        # against the real calendar (0 < val_start_idx < T_CAL).
+        if not (
+            pd.Timestamp(self.training_start)
+            < pd.Timestamp(self.validation_start)
+            <= pd.Timestamp(self.training_end)
+        ):
+            raise ValueError(
+                f"validation_start ({self.validation_start}) must satisfy "
+                f"training_start ({self.training_start}) < validation_start "
+                f"<= training_end ({self.training_end})"
             )
 
         if self.clip_target_upper is not None and int(self.clip_target_upper) < 0:
@@ -309,6 +398,7 @@ class PanelConfig:
             "periods_per_year": self.periods_per_year,
             "training_start": self.training_start,
             "training_end": self.training_end,
+            "validation_start": self.validation_start,
             "holdout_start": self.holdout_start,
             "holdout_end": self.holdout_end,
             "require_calibration_activity": self.require_calibration_activity,

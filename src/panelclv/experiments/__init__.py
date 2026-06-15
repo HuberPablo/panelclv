@@ -12,12 +12,16 @@ structurally impossible.
 
 from .experiment_utils import (
     make_loaders,
+    make_refit_loader,
     make_data_builder,
     build_inference_from_trial,
+    refit_best_trial,
 )
 
 __all__ = [
     "make_loaders",
+    "make_refit_loader",
     "make_data_builder",
     "build_inference_from_trial",
+    "refit_best_trial",
 ]
