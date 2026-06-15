@@ -570,13 +570,17 @@ def prepare_dataset(
         panel, frequency=frequency, time_cols=time_cols, date_col=date_col,
     )
 
-    # 2b) Autoregressive target-derived features (recency / activity). Causal
-    # functions of the target's own past, so computing them over the full
-    # per-customer series leaks nothing: calibration positions depend only on
-    # calibration targets, and holdout positions (computed here as placeholders)
-    # are recomputed from the SAMPLED target during the MC rollout — see
-    # Models/monte_carlo_forecasting.py. The same compute_ar_feature_columns is
-    # used there (via ARFeatureState), keeping training and inference aligned.
+    # 2b) Autoregressive target-derived features (recency / activity). Here we only
+    # CREATE the columns as zero placeholders; their values are filled in step 8 from
+    # the CALIBRATION target alone. They must NOT be computed over the full per-customer
+    # series: that series also spans the holdout (and any pre-window history), so a
+    # customer's recency / frequency / tenure would absorb holdout activity — e.g.
+    # "frequency" inferred from purchases in the forecast window. That is leakage, and
+    # it would also disagree with inference, where `ARFeatureState` seeds purely from
+    # the calibration target (models/monte_carlo_forecasting.py). Creating them now
+    # keeps the column-existence check (step 4) and the window slices happy; the holdout
+    # AR columns stay zero and are recomputed per step from the SAMPLED target during
+    # the MC rollout, so they are never read as inputs.
     if ar_features:
         validate_ar_features(ar_features)
         collide = [n for n in ar_features if n in panel.columns]
@@ -584,16 +588,8 @@ def prepare_dataset(
             raise ValueError(
                 f"ar_features names collide with existing panel columns: {collide}"
             )
-        panel = panel.sort_values(
-            [id_col, "period_start"], kind="stable"
-        ).reset_index(drop=True)
         for n in ar_features:
             panel[n] = np.float32(0)
-        for positions in panel.groupby(id_col, sort=False).indices.values():
-            y = panel[target_col].to_numpy()[positions][None, :]   # (1, L_i)
-            cols = compute_ar_feature_columns(y, ar_features)
-            for n in ar_features:
-                panel.iloc[positions, panel.columns.get_loc(n)] = cols[n][0]
 
     # 3) Schema → seq_cols + target index.
     # target_col is declared once in DATA_CONFIG. If schema omits the 'target'
@@ -713,6 +709,25 @@ def prepare_dataset(
     if clip_upper is not None:
         train_panel[target_col] = train_panel[target_col].clip(upper=int(clip_upper))
 
+    # 5c) Fill the AR feature columns on the CALIBRATION window only (created as zero
+    # placeholders in step 2b). Computed per customer, in period order, from the CLIPPED
+    # calibration target — the exact array `ARFeatureState` re-seeds from at forecast time
+    # — so the training AR features and the holdout rollout come from the identical
+    # primitive on identical inputs, with NO holdout leakage. `holdout_panel`'s AR columns
+    # stay zero: the rollout overwrites them each step from the sampled target
+    # (models/monte_carlo_forecasting.py), so a zero placeholder is never read. Done here,
+    # before resolve_embedded_cols (step 7b), so an embedded AR feature is sized from its
+    # real calibration values rather than the zeros.
+    if ar_features:
+        train_panel = train_panel.sort_values(
+            [id_col, "period_start"], kind="stable"
+        ).reset_index(drop=True)
+        for positions in train_panel.groupby(id_col, sort=False).indices.values():
+            y = train_panel[target_col].to_numpy()[positions][None, :]   # (1, T_CAL) clipped
+            cols = compute_ar_feature_columns(y, ar_features)
+            for n in ar_features:
+                train_panel.iloc[positions, train_panel.columns.get_loc(n)] = cols[n][0]
+
     # 6) Uniform period counts.
     train_counts = train_panel.groupby(id_col).size()
     hold_counts  = holdout_panel.groupby(id_col).size()
@@ -782,7 +797,9 @@ def prepare_dataset(
         clip_upper=clip_upper,
     )
 
-    # 8) Reshape + AR (samples, targets).
+    # 8) Reshape + AR (samples, targets). The AR feature columns were filled on the
+    # calibration window in step 5c (and left zero on the holdout), so make_block carries
+    # them straight into the tensors.
     calibration = make_block(train_panel,   ids, sort_cols, seq_cols)
     holdout     = make_block(holdout_panel, ids, sort_cols, seq_cols)
     samples     = calibration[:, :-1, :]
