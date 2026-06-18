@@ -19,7 +19,7 @@ or re-runs data prep per trial:
     )
 
 `metadata` must contain `seq_cols` (list[str] matching the input tensor's last
-axis), `input_spec` ({"embedded_cols": {col: cardinality}}), and `target_col`
+axis), `embedded_cols` ({col: cardinality}), and `target_col`
 (the AR target, default "Transactions"); optionally `seq_len` (Transformer
 fixed-length mask cache; the LSTM ignores it) and `val_score_start` (the temporal
 validation boundary — the objective forwards it to `fit_model` so `val_loss` is the
@@ -187,7 +187,7 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
     Feature selection is pure column slicing on the precomputed tensors, so it
     is cheap and deterministic (no re-running data prep per trial). We slice the
     feature axis of `calibration`/`holdout`, rebuild `samples`/`targets` and
-    `target_idx` for the reduced layout, and filter `input_spec['embedded_cols']`
+    `target_idx` for the reduced layout, and filter `embedded_cols`
     in lockstep — the model validator requires embedded_cols ⊆ seq_cols. All
     other keys (ids, N, T_*, panels, ...) pass through unchanged.
 
@@ -211,7 +211,7 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
     calibration = data["calibration"][:, :, idx]
     holdout = data["holdout"][:, :, idx]
 
-    embedded = (data.get("input_spec") or {}).get("embedded_cols", {})
+    embedded = data.get("embedded_cols") or {}
     kept_embedded = {c: v for c, v in embedded.items() if c in keep}
 
     # Keep ar_features in lockstep with the surviving columns. If a trial drops a
@@ -228,7 +228,7 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
         targets=calibration[:, 1:, target_idx:target_idx + 1],
         seq_cols=keep,
         target_idx=target_idx,
-        input_spec={"embedded_cols": kept_embedded} if kept_embedded else None,
+        embedded_cols=kept_embedded if kept_embedded else None,
         ar_features=ar_features,
         F=len(keep),
     )
@@ -249,7 +249,7 @@ def select_features_for_trial(
     load into a full-feature model):
 
         data_best = select_features_for_trial(data_full, study.best_trial)
-        # build the inference model from data_best["seq_cols"]/["input_spec"]
+        # build the inference model from data_best["seq_cols"]/["embedded_cols"]
         # and pass data_best (not data_full) to the Monte Carlo forecast.
 
     A trial with no `dropped_features` attribute (e.g. a study run without
@@ -309,7 +309,7 @@ def _build_lstm(
 ) -> MultinomialLSTMModel:
     return MultinomialLSTMModel(
         seq_cols=metadata["seq_cols"],
-        input_spec=metadata["input_spec"],
+        embedded_cols=metadata["embedded_cols"],
         target_col=metadata.get("target_col", "Transactions"),
         hidden_dim=params["hidden_dim"],
         memory_units=params["memory_units"],
@@ -323,7 +323,7 @@ def _build_transformer(
 ) -> MultinomialTransformerModel:
     return MultinomialTransformerModel(
         seq_cols=metadata["seq_cols"],
-        input_spec=metadata["input_spec"],
+        embedded_cols=metadata["embedded_cols"],
         target_col=metadata.get("target_col", "Transactions"),
         seq_len=metadata.get("seq_len"),
         d_model=params["d_model"],
@@ -462,7 +462,7 @@ def _validation_rollout_score(
     """
     d = select_features(rollout_data, list(drop_cols))
     seq_cols = d["seq_cols"]
-    input_spec = d["input_spec"]
+    embedded_cols = d["embedded_cols"]
     target_col = d.get("target_col", "Transactions")
 
     calib = np.asarray(d["calibration"])                  # (N, T_CAL, F) — all customers
@@ -491,18 +491,17 @@ def _validation_rollout_score(
 
     if model_type == "lstm":
         model = InferenceMultinomialLSTMModel(
-            seq_cols=seq_cols, input_spec=input_spec, target_col=target_col,
+            seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
             hidden_dim=params["hidden_dim"], memory_units=params["memory_units"],
             dense_units=params["dense_units"], dropout=params["dropout"],
-            mode="sample",
         )
         forecaster = run_monte_carlo_forecast
     else:
         model = InferenceMultinomialTransformerModel(
-            seq_cols=seq_cols, input_spec=input_spec, target_col=target_col,
+            seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
             d_model=params["d_model"], nhead=params["nhead"],
             num_encoder_layers=params["num_encoder_layers"],
-            dropout=params["dropout"], mode="sample",
+            dropout=params["dropout"],
         )
         forecaster = run_monte_carlo_forecast_transformer
 

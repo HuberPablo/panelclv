@@ -139,7 +139,7 @@ def simulate_one_path(
     with torch.inference_mode():
         # Step 1: warmup → its last-position sample IS the holdout step 0 forecast,
         # and `state` now summarises the whole calibration window.
-        out, state = model(calib_tensor, state=None, mode="sample")
+        out, state = model(calib_tensor, state=None)
         previous_sample    = out[:, -1, 0]                    # (N,)
         sampled_path[:, 0] = previous_sample
 
@@ -156,7 +156,7 @@ def simulate_one_path(
                     x_t[:, 0, col] = torch.as_tensor(
                         feats[name], dtype=x_t.dtype, device=x_t.device
                     )
-            sampled, state = model(x_t, state=state, mode="sample")
+            sampled, state = model(x_t, state=state)
             previous_sample        = sampled[:, 0, 0]         # (N,)
             sampled_path[:, t + 1] = previous_sample
 
@@ -235,7 +235,7 @@ def simulate_transformer_path(
         for t in range(T_HOLD):
             # Re-feed the whole context; read the distribution at the last
             # position only — that is the forecast for holdout step t.
-            out, _ = model(context, only_last=True, mode="sample")
+            out, _ = model(context, only_last=True)
             sample = out[:, -1, 0]                             # (N,)
             sampled_path[:, t] = sample
 
@@ -455,8 +455,8 @@ def compute_forecast_metrics(
 # from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
 #
 # inference_model = InferenceMultinomialLSTMModel(
-#     seq_cols=data["seq_cols"], input_spec=data["input_spec"],
-#     target_col=data["target_col"], mode="sample",
+#     seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
+#     target_col=data["target_col"],
 # )
 # inference_model.load_state_dict(trained_model.state_dict())
 # forecast = run_monte_carlo_forecast(inference_model, data, n_simulations=30)
@@ -466,8 +466,8 @@ def compute_forecast_metrics(
 # from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
 #
 # inference_model = InferenceMultinomialTransformerModel(
-#     seq_cols=data["seq_cols"], input_spec=data["input_spec"],
-#     target_col=data["target_col"], mode="sample",
+#     seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
+#     target_col=data["target_col"],
 # )
 # inference_model.load_state_dict(trained_model.state_dict())
 # forecast = run_monte_carlo_forecast_transformer(inference_model, data, n_simulations=30)

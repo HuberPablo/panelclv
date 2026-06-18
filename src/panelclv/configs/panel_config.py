@@ -79,9 +79,9 @@ for cyclical columns that are ALREADY precomputed in the panel (no flag engineer
 them). In the example above `add_week_sin_cos` supplies `week_sin`/`week_cos`, so
 `time` is left empty.
 
-The `.data_config`, `.schema` and `.input_spec` properties expose the
-dict forms the existing `prepare_dataset` internals consume, so no downstream
-helper had to change.
+The `.data_config` and `.schema` properties expose the dict forms the existing
+`prepare_dataset` internals consume; the embedding map is read straight off the
+`.embedded_cols` field (normalized to `{col: int | "auto"}` by `prepare_dataset`).
 
 Depends only on pandas (to parse the window dates) plus the in-package
 `ar_features` validator — no other third-party libraries.
@@ -443,9 +443,3 @@ class PanelConfig:
             "static_covariates": list(self.static),
         }
 
-    @property
-    def input_spec(self) -> dict[str, Any] | None:
-        """The INPUT_SPEC-equivalent dict, or None if no columns are embedded."""
-        if not self.embedded_cols:
-            return None
-        return {"embedded_cols": normalize_embedded_cols(self.embedded_cols)}

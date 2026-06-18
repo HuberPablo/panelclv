@@ -3,10 +3,10 @@
 Mirror of `multinomial_lstm.py`, swapping the LSTM for a causal Transformer
 encoder with sinusoidal positional encoding. Same dynamic input contract:
 
-    seq_cols    list[str]      Ordered column names matching x's last axis.
-    input_spec  dict           {"embedded_cols": {col: num_categories, ...}}
+    seq_cols      list[str]    Ordered column names matching x's last axis.
+    embedded_cols dict         {col: num_categories, ...}
 
-Columns named in `input_spec["embedded_cols"]` are embedded; everything else
+Columns named in `embedded_cols` are embedded; everything else
 in `seq_cols` is a numerical covariate (single shared linear projection).
 The AR target column (default `"Transactions"`) must appear in both lists.
 
@@ -22,7 +22,7 @@ Architecture
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -50,18 +50,28 @@ def _cat_embedding(num_categories: int, out_dim: int) -> nn.Sequential:
     )
 
 
-def _validate_spec_against_seq(
+def _validate_embedded_cols(
     seq_cols: Sequence[str],
-    input_spec: dict[str, Any],
+    embedded_cols: dict[str, int],
     target_col: str,
 ) -> dict[str, int]:
-    """Return the validated, dict-form embedded_cols mapping."""
-    if not isinstance(input_spec, dict) or "embedded_cols" not in input_spec:
+    """Assert the MODEL-critical invariants and return embedded_cols as a dict.
+
+    Only the facts the model itself depends on are checked here: that the input
+    is a dict, and that the target is a present, embedded column (its cardinality
+    is the softmax head size). The fuller spec validation — pinned-vs-"auto" types,
+    cardinalities covering the data, and `embedded_cols ⊆ seq_cols` — already
+    happened upstream in `PanelConfig._validate_embedded_cols` (static) and
+    `prepare_dataset`/`resolve_embedded_cols` (data-dependent), and `select_features`
+    only ever filters that resolved set, so it stays a subset by construction. We
+    don't re-derive any of that.
+    """
+    if not isinstance(embedded_cols, dict):
         raise ValueError(
-            "input_spec must be a dict containing 'embedded_cols' "
-            "(use PanelConfig.embedded_cols / prepare_dataset's data['input_spec'])"
+            "embedded_cols must be a {column: cardinality} dict "
+            "(use PanelConfig.embedded_cols / prepare_dataset's data['embedded_cols'])"
         )
-    embedded_cols = dict(input_spec["embedded_cols"])
+    embedded_cols = dict(embedded_cols)
 
     if target_col not in seq_cols:
         raise ValueError(
@@ -69,13 +79,8 @@ def _validate_spec_against_seq(
         )
     if target_col not in embedded_cols:
         raise ValueError(
-            f"target_col {target_col!r} must appear in input_spec['embedded_cols'] "
+            f"target_col {target_col!r} must appear in embedded_cols "
             f"(its cardinality drives the output head size)"
-        )
-    unknown = [c for c in embedded_cols if c not in seq_cols]
-    if unknown:
-        raise ValueError(
-            f"input_spec['embedded_cols'] references columns not in seq_cols: {unknown}"
         )
     return embedded_cols
 
@@ -116,7 +121,7 @@ class _MultinomialTransformerBackbone(nn.Module):
     def __init__(
         self,
         seq_cols: Sequence[str],
-        input_spec: dict[str, Any],
+        embedded_cols: dict[str, int],
         target_col: str = "Transactions",
         d_model: int = 64,
         nhead: int = 8,
@@ -127,7 +132,7 @@ class _MultinomialTransformerBackbone(nn.Module):
         if d_model % nhead != 0:
             raise ValueError(f"d_model={d_model} must be divisible by nhead={nhead}")
 
-        embedded_cols = _validate_spec_against_seq(seq_cols, input_spec, target_col)
+        embedded_cols = _validate_embedded_cols(seq_cols, embedded_cols, target_col)
         max_trans = int(embedded_cols[target_col])
 
         self.seq_cols: list[str] = list(seq_cols)
@@ -267,7 +272,7 @@ class MultinomialTransformerModel(nn.Module):
     def __init__(
         self,
         seq_cols: Sequence[str],
-        input_spec: dict[str, Any],
+        embedded_cols: dict[str, int],
         target_col: str = "Transactions",
         seq_len: int | None = None,
         d_model: int = 64,
@@ -278,7 +283,7 @@ class MultinomialTransformerModel(nn.Module):
         super().__init__()
         self.backbone = _MultinomialTransformerBackbone(
             seq_cols=seq_cols,
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=target_col,
             d_model=d_model,
             nhead=nhead,
@@ -322,33 +327,33 @@ class MultinomialTransformerModel(nn.Module):
 
 
 class InferenceMultinomialTransformerModel(nn.Module):
-    """Inference-mode Transformer.
+    """Inference-mode Transformer. Returns (sample, None):
 
-    Same modes as the inference LSTM:
-        "sample"   -> class index from Categorical(softmax(logits)), shape (B, T, 1)
-        "expected" -> E[Y] = sum_k k * P(y=k), shape (B, T, 1)
-        "probs"    -> full P(y=k), shape (B, T, max_trans)
+        sample : (B, T, 1) float — a count class drawn from
+                 Categorical(softmax(logits)) at each step.
+        None   : the Transformer is stateless across calls (no hidden state to
+                 thread), so the second tuple element is always None — kept for
+                 call-signature parity with the inference LSTM.
 
-    The second tuple element is always None (the Transformer is stateless
-    across calls).
+    Sampling is the only inference behaviour the forecast needs, so it is
+    hardcoded here (no mode switch).
     """
 
     def __init__(
         self,
         seq_cols: Sequence[str],
-        input_spec: dict[str, Any],
+        embedded_cols: dict[str, int],
         target_col: str = "Transactions",
         seq_len: int | None = None,  # accepted for API symmetry; unused here
         d_model: int = 64,
         nhead: int = 8,
         num_encoder_layers: int = 1,
         dropout: float = 0.0,
-        mode: str = "sample",
     ) -> None:
         super().__init__()
         self.backbone = _MultinomialTransformerBackbone(
             seq_cols=seq_cols,
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=target_col,
             d_model=d_model,
             nhead=nhead,
@@ -358,7 +363,6 @@ class InferenceMultinomialTransformerModel(nn.Module):
         self.seq_cols: list[str] = self.backbone.seq_cols
         self.target_col: str = self.backbone.target_col
         self.max_trans: int = self.backbone.max_trans
-        self.mode: str = mode
         self._seq_len_hint = seq_len
 
     def forward(
@@ -366,20 +370,8 @@ class InferenceMultinomialTransformerModel(nn.Module):
         x: torch.Tensor,
         state=None,                # unused; kept for API parity with the LSTM
         only_last: bool = False,
-        mode: str | None = None,
     ):
-        mode = mode or self.mode
         logits = self.backbone(x, mask=None, only_last=only_last)
         probs = torch.softmax(logits, dim=-1)
-
-        if mode == "sample":
-            out = dist.Categorical(probs=probs).sample().unsqueeze(-1).float()
-        elif mode == "expected":
-            k = torch.arange(self.max_trans, device=probs.device, dtype=probs.dtype)
-            out = (probs * k).sum(dim=-1, keepdim=True)
-        elif mode == "probs":
-            out = probs
-        else:
-            raise ValueError(f"Unknown inference mode: {mode!r}")
-
-        return out, None
+        sample = dist.Categorical(probs=probs).sample().unsqueeze(-1).float()
+        return sample, None

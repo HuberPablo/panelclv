@@ -104,7 +104,7 @@ def compute_class_weights(
     * a **`prepare_dataset` data dict** — then the labels are read from
       `data["targets"]` and, unless `num_classes` is passed, the class count is
       derived from the resolved target embedding
-      (`data["input_spec"]["embedded_cols"][data["target_col"]]`, i.e. the same
+      (`data["embedded_cols"][data["target_col"]]`, i.e. the same
       `max_trans` the softmax head uses). This folds the old notebook
       boilerplate (squeeze the target axis, look up `max_trans`) into one call.
 
@@ -142,8 +142,7 @@ def compute_class_weights(
                 )
             labels = labels[:, : int(s) - 1]
         if num_classes is None:
-            spec = data.get("input_spec") or {}
-            embedded = spec.get("embedded_cols", {}) if isinstance(spec, dict) else {}
+            embedded = data.get("embedded_cols") or {}
             target_col = data.get("target_col")
             if target_col not in embedded:
                 raise ValueError(

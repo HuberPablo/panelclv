@@ -1,1 +1,1 @@
-"""Configuration helpers (INPUT_SPEC save/load, etc.)."""
+"""Configuration helpers (the PanelConfig dataclass, embedded_cols normalization)."""

@@ -11,12 +11,11 @@ Constructor inputs
 seq_cols : list[str]
     Ordered column names matching the LAST axis of the input tensor.
     Example: ["Transactions", "week_sin", "week_cos", "Gender"].
-input_spec : dict
-    {"embedded_cols": {col: num_categories, ...}} — every column listed
-    here is embedded with `nn.Embedding(num_categories, hidden_dim)`.
-    Values in those columns must be integer class indices in
-    [0, num_categories). Anything in `seq_cols` but not here is treated as
-    a numerical covariate.
+embedded_cols : dict
+    {col: num_categories, ...} — every column listed here is embedded with
+    `nn.Embedding(num_categories, hidden_dim)`. Values in those columns must
+    be integer class indices in [0, num_categories). Anything in `seq_cols`
+    but not here is treated as a numerical covariate.
 target_col : str = "Transactions"
     Which embedded column is the autoregressive target. Its cardinality
     sets the size of the output multinomial head (max_trans).
@@ -27,8 +26,7 @@ hidden_dim, memory_units, dense_units, dropout
 Mandatory vs optional inputs
 ----------------------------
 Mandatory : `target_col` must appear in BOTH `seq_cols` AND
-            `input_spec["embedded_cols"]`. Cardinality there drives
-            the output head size.
+            `embedded_cols`. Cardinality there drives the output head size.
 Optional  : any number of additional categorical embeddings (week_idx,
             month_idx, cohort_idx, ...) and any number of numerical
             covariates. The smallest legal model has only the target
@@ -49,12 +47,9 @@ Training (`MultinomialLSTMModel.forward`):
     Use with `nn.CrossEntropyLoss` — integer class targets of shape
     (B, T) with values in [0, max_trans).
 
-Inference (`InferenceMultinomialLSTMModel.forward`) — returns (out, state):
-    mode = "sample"   → (B, T, 1) class indices drawn from
-                        Categorical(softmax(logits)).
-    mode = "expected" → (B, T, 1) E[Y] = sum_k k * P(y=k).
-    mode = "probs"    → (B, T, max_trans) full P(y=k) tensor.
-    state is the LSTM hidden state, chainable across AR steps.
+Inference (`InferenceMultinomialLSTMModel.forward`) — returns (sample, state):
+    sample → (B, T, 1) count classes drawn from Categorical(softmax(logits)).
+    state  → the LSTM hidden state, chainable across AR steps.
 
 
 Architecture
@@ -70,14 +65,15 @@ The LSTM `input_size` is `2 * hidden_dim` when context is present and
 Validation
 ----------
 Raises ValueError on:
-    - `target_col` missing from `seq_cols` or from `input_spec["embedded_cols"]`,
-    - `input_spec` referencing columns absent from `seq_cols`,
+    - `target_col` missing from `seq_cols` or from `embedded_cols`,
     - x's last axis size != len(seq_cols).
+(That `embedded_cols ⊆ seq_cols` and the cardinalities are valid is guaranteed
+upstream by PanelConfig + prepare_dataset, so it is not re-checked here.)
 """
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 import torch
 import torch.distributions as dist
@@ -88,12 +84,13 @@ from torch import nn
 # Small helpers
 # ---------------------------------------------------------------------------
 
-
+# dynamic Embeddings (for columns in embedded_cols + transaction) :
+# Automatic embedding size
 def _emb_size(n: int) -> int:
     """Square-root heuristic for embedding dimensionality (legacy compatible)."""
     return int(n ** 0.5) + 1
 
-
+# Embedding structure
 def _cat_embedding(num_categories: int, out_dim: int) -> nn.Sequential:
     inner = _emb_size(num_categories)
     return nn.Sequential(
@@ -104,18 +101,31 @@ def _cat_embedding(num_categories: int, out_dim: int) -> nn.Sequential:
     )
 
 
-def _validate_spec_against_seq(
+# -----------------------------------------
+
+# Safeguard for seq_cols and embedded_cols :
+def _validate_embedded_cols(
     seq_cols: Sequence[str],
-    input_spec: dict[str, Any],
+    embedded_cols: dict[str, int],
     target_col: str,
 ) -> dict[str, int]:
-    """Return the validated, dict-form embedded_cols mapping."""
-    if not isinstance(input_spec, dict) or "embedded_cols" not in input_spec:
+    """Assert the MODEL-critical invariants and return embedded_cols as a dict.
+
+    Only the facts the model itself depends on are checked here: that the input
+    is a dict, and that the target is a present, embedded column (its cardinality
+    is the softmax head size). The fuller spec validation — pinned-vs-"auto" types,
+    cardinalities covering the data, and `embedded_cols ⊆ seq_cols` — already
+    happened upstream in `PanelConfig._validate_embedded_cols` (static) and
+    `prepare_dataset`/`resolve_embedded_cols` (data-dependent), and `select_features`
+    only ever filters that resolved set, so it stays a subset by construction. We
+    don't re-derive any of that.
+    """
+    if not isinstance(embedded_cols, dict):
         raise ValueError(
-            "input_spec must be a dict containing 'embedded_cols' "
-            "(use PanelConfig.embedded_cols / prepare_dataset's data['input_spec'])"
+            "embedded_cols must be a {column: cardinality} dict "
+            "(use PanelConfig.embedded_cols / prepare_dataset's data['embedded_cols'])"
         )
-    embedded_cols = dict(input_spec["embedded_cols"])
+    embedded_cols = dict(embedded_cols)
 
     if target_col not in seq_cols:
         raise ValueError(
@@ -123,13 +133,8 @@ def _validate_spec_against_seq(
         )
     if target_col not in embedded_cols:
         raise ValueError(
-            f"target_col {target_col!r} must appear in input_spec['embedded_cols'] "
+            f"target_col {target_col!r} must appear in embedded_cols "
             f"(its cardinality drives the output head size)"
-        )
-    unknown = [c for c in embedded_cols if c not in seq_cols]
-    if unknown:
-        raise ValueError(
-            f"input_spec['embedded_cols'] references columns not in seq_cols: {unknown}"
         )
     return embedded_cols
 
@@ -145,7 +150,7 @@ class _MultinomialLSTMBackbone(nn.Module):
     def __init__(
         self,
         seq_cols: Sequence[str],
-        input_spec: dict[str, Any],
+        embedded_cols: dict[str, int],
         target_col: str = "Transactions",
         hidden_dim: int = 128,
         memory_units: int = 64,
@@ -154,19 +159,20 @@ class _MultinomialLSTMBackbone(nn.Module):
     ) -> None:
         super().__init__()
 
-        embedded_cols = _validate_spec_against_seq(seq_cols, input_spec, target_col)
+        embedded_cols = _validate_embedded_cols(seq_cols, embedded_cols, target_col)
         max_trans = int(embedded_cols[target_col])
 
         self.seq_cols: list[str] = list(seq_cols)
         self.target_col: str = target_col
         self.max_trans: int = max_trans
-        self.hidden_dim: int = hidden_dim
 
         # Embeddings — kept in seq_cols order. We use ModuleList + an index
         # map (instead of ModuleDict) because nn.ModuleDict rejects keys
         # containing dots, and real column names often have them
         # (e.g. "high.season").
         self._emb_cols: list[str] = [c for c in self.seq_cols if c in embedded_cols]
+
+        # Automatic Embedding for columns in embedded_cols
         self._emb_modules = nn.ModuleList(
             _cat_embedding(int(embedded_cols[c]), hidden_dim) for c in self._emb_cols
         )
@@ -256,7 +262,7 @@ class MultinomialLSTMModel(nn.Module):
     def __init__(
         self,
         seq_cols: Sequence[str],
-        input_spec: dict[str, Any],
+        embedded_cols: dict[str, int],
         target_col: str = "Transactions",
         hidden_dim: int = 128,
         memory_units: int = 64,
@@ -266,7 +272,7 @@ class MultinomialLSTMModel(nn.Module):
         super().__init__()
         self.backbone = _MultinomialLSTMBackbone(
             seq_cols=seq_cols,
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=target_col,
             hidden_dim=hidden_dim,
             memory_units=memory_units,
@@ -289,32 +295,31 @@ class MultinomialLSTMModel(nn.Module):
 
 
 class InferenceMultinomialLSTMModel(nn.Module):
-    """Inference-mode LSTM. Returns one of:
+    """Inference-mode LSTM. Returns (sample, state):
 
-        - mode="sample":   a class index drawn from Categorical(softmax(logits)).
-                           Output shape (B, T, 1) float.
-        - mode="expected": E[Y] = sum_k k * P(y=k). Shape (B, T, 1).
-        - mode="probs":    the full P(y=k) tensor. Shape (B, T, max_trans).
+        sample : (B, T, 1) float — a count class drawn from
+                 Categorical(softmax(logits)) at each step.
+        state  : the LSTM hidden state, suitable for chaining autoregressive steps.
 
-    The second tuple element is the LSTM hidden state, suitable for chaining
-    autoregressive steps.
+    The autoregressive Monte Carlo simulator threads `state` across steps and
+    averages many sampled paths; sampling is the only inference behaviour the
+    forecast needs, so it is hardcoded here (no mode switch).
     """
 
     def __init__(
         self,
         seq_cols: Sequence[str],
-        input_spec: dict[str, Any],
+        embedded_cols: dict[str, int],
         target_col: str = "Transactions",
         hidden_dim: int = 128,
         memory_units: int = 64,
         dense_units: int = 64,
         dropout: float = 0.0,
-        mode: str = "sample",
     ) -> None:
         super().__init__()
         self.backbone = _MultinomialLSTMBackbone(
             seq_cols=seq_cols,
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=target_col,
             hidden_dim=hidden_dim,
             memory_units=memory_units,
@@ -324,29 +329,9 @@ class InferenceMultinomialLSTMModel(nn.Module):
         self.seq_cols: list[str] = self.backbone.seq_cols
         self.target_col: str = self.backbone.target_col
         self.max_trans: int = self.backbone.max_trans
-        self.mode: str = mode
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        state=None,
-        only_last: bool = False,  # kept for API parity with the Transformer
-        mode: str | None = None,
-    ):
-        mode = mode or self.mode
+    def forward(self, x: torch.Tensor, state=None):
         logits, state = self.backbone(x, state)
         probs = torch.softmax(logits, dim=-1)
-
-        if mode == "sample":
-            out = dist.Categorical(probs=probs).sample().unsqueeze(-1).float()
-        elif mode == "expected":
-            k = torch.arange(self.max_trans, device=probs.device, dtype=probs.dtype)
-            out = (probs * k).sum(dim=-1, keepdim=True)
-        elif mode == "probs":
-            out = probs
-        else:
-            raise ValueError(f"Unknown inference mode: {mode!r}")
-
-        if only_last:
-            out = out[:, -1:, :]
-        return out, state
+        sample = dist.Categorical(probs=probs).sample().unsqueeze(-1).float()
+        return sample, state

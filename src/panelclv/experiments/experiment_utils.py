@@ -100,7 +100,7 @@ def make_loaders(
 
     The returned ``metadata`` is the recipe ``run_optuna_study`` and the model
     constructors need to rebuild a matching network: ``seq_cols`` (feature-axis column
-    names), ``input_spec`` (embedding cardinalities), ``target_col``, ``seq_len`` (the
+    names), ``embedded_cols`` (embedding cardinalities), ``target_col``, ``seq_len`` (the
     TRAIN sequence length ``s-1``, used by the Transformer's fixed-length mask cache; the
     longer val sequence simply rebuilds a mask on the fly, and the LSTM ignores it), and
     ``val_score_start`` (= ``s-1``).
@@ -127,7 +127,7 @@ def make_loaders(
 
     metadata = {                                        # the recipe to build the matching model
         "seq_cols":        data["seq_cols"],
-        "input_spec":      data["input_spec"],
+        "embedded_cols":   data["embedded_cols"],
         "target_col":      data["target_col"],
         "seq_len":         X_train.shape[1],            # train length s-1 (Transformer mask cache)
         "val_score_start": s - 1,                       # score CE on the validation suffix only
@@ -189,9 +189,9 @@ def build_inference_from_trial(
     here removes that footgun.
 
     The checkpoint was trained on the sliced layout, so the inference model is built
-    from ``data_best["seq_cols"]`` / ``["input_spec"]`` and the best trial's
-    architecture params. ``mode="sample"`` is the mode the simulator requires (sample
-    a count class per step; see CLAUDE.md "Critical modeling distinction").
+    from ``data_best["seq_cols"]`` / ``["embedded_cols"]`` and the best trial's
+    architecture params. The inference model always samples a count class per step
+    (see CLAUDE.md "Critical modeling distinction") — that is the forecast mechanism.
 
     ``checkpoint_path`` overrides which weights are loaded; pass the path returned by
     ``refit_best_trial`` to forecast with the full-calibration refit instead of the
@@ -207,14 +207,13 @@ def build_inference_from_trial(
     params = best.params
     if checkpoint_path is None:
         checkpoint_path = best.user_attrs["checkpoint_path"]
-    # Slice to the winning feature set so seq_cols/input_spec line up with the weights.
+    # Slice to the winning feature set so seq_cols/embedded_cols line up with the weights.
     data_best = select_features_for_trial(data_full, best)
 
     common = dict(
         seq_cols=data_best["seq_cols"],
-        input_spec=data_best["input_spec"],
+        embedded_cols=data_best["embedded_cols"],
         target_col=data_best["target_col"],
-        mode="sample",
     )
 
     if family == "lstm":
@@ -300,15 +299,15 @@ def refit_best_trial(
     # length (samples span all T-1 transitions here, not the truncated training prefix).
     data_best = select_features_for_trial(data_full, best)
     train_meta = {
-        "seq_cols":   data_best["seq_cols"],
-        "input_spec": data_best["input_spec"],
-        "target_col": data_best["target_col"],
-        "seq_len":    data_best["samples"].shape[1],
+        "seq_cols":      data_best["seq_cols"],
+        "embedded_cols": data_best["embedded_cols"],
+        "target_col":    data_best["target_col"],
+        "seq_len":       data_best["samples"].shape[1],
     }
     if family == "lstm":
         model: torch.nn.Module = MultinomialLSTMModel(
             seq_cols=train_meta["seq_cols"],
-            input_spec=train_meta["input_spec"],
+            embedded_cols=train_meta["embedded_cols"],
             target_col=train_meta["target_col"],
             hidden_dim=params["hidden_dim"],
             memory_units=params["memory_units"],
@@ -318,7 +317,7 @@ def refit_best_trial(
     else:
         model = MultinomialTransformerModel(
             seq_cols=train_meta["seq_cols"],
-            input_spec=train_meta["input_spec"],
+            embedded_cols=train_meta["embedded_cols"],
             target_col=train_meta["target_col"],
             seq_len=train_meta["seq_len"],
             d_model=params["d_model"],

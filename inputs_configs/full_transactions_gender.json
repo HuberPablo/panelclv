@@ -1,6 +1,4 @@
 {
-  "embedded_cols": {
-    "Gender": 2,
-    "Transactions": 10
-  }
+  "Gender": 2,
+  "Transactions": 10
 }

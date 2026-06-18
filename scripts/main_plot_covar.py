@@ -72,7 +72,7 @@ def compute_and_save_transformer_config(
     calibration: Sequence[pd.DataFrame],
     holdout_calendar: pd.DataFrame,
     seq_cols: Sequence[str],
-    input_spec: dict,
+    embedded_cols: dict,
     target_col: str = "Transactions",
     seq_len: int | None = None,
     customer_ids: Sequence | None = None,
@@ -83,17 +83,15 @@ def compute_and_save_transformer_config(
     n_simulations: int = 30,
     batch_size: int = 256,
     device: str = "cuda",
-    mode: str = "sample",
 ) -> Path:
     """Run MC from a checkpoint for one covariate configuration and save its CSV."""
     def factory():
         return InferenceMultinomialTransformerModel(
             seq_cols=seq_cols,
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=target_col,
             seq_len=seq_len, d_model=d_model, nhead=nhead,
             num_encoder_layers=num_encoder_layers, dropout=dropout,
-            mode=mode,
         )
 
     result = forecast_from_checkpoint(
@@ -107,7 +105,6 @@ def compute_and_save_transformer_config(
         n_simulations=n_simulations,
         batch_size=batch_size,
         device=device,
-        mode=mode,
     )
     return save_predictions_to_csv(
         result["predictions"], csv_path_for(config), customer_ids=customer_ids,

@@ -93,7 +93,7 @@ def compute_and_save_lstm(
     checkpoint_path: str | Path,
     *,
     data: dict[str, Any],
-    input_spec: dict[str, Any],
+    embedded_cols: dict[str, Any],
     hidden_dim: int = 128,
     memory_units: int = 64,
     dense_units: int = 64,
@@ -105,13 +105,12 @@ def compute_and_save_lstm(
     def factory():
         return InferenceMultinomialLSTMModel(
             seq_cols=data["seq_cols"],
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=data["target_col"],
             hidden_dim=hidden_dim,
             memory_units=memory_units,
             dense_units=dense_units,
             dropout=dropout,
-            mode="sample",
         )
 
     forecast = forecast_from_checkpoint(
@@ -128,7 +127,7 @@ def compute_and_save_transformer(
     checkpoint_path: str | Path,
     *,
     data: dict[str, Any],
-    input_spec: dict[str, Any],
+    embedded_cols: dict[str, Any],
     d_model: int = 64,
     nhead: int = 4,
     num_encoder_layers: int = 2,
@@ -140,12 +139,11 @@ def compute_and_save_transformer(
     def factory():
         return InferenceMultinomialTransformerModel(
             seq_cols=data["seq_cols"],
-            input_spec=input_spec,
+            embedded_cols=embedded_cols,
             target_col=data["target_col"],
             d_model=d_model, nhead=nhead,
             num_encoder_layers=num_encoder_layers,
             dropout=dropout,
-            mode="sample",
         )
 
     forecast = forecast_from_checkpoint(

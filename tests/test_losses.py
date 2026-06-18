@@ -37,7 +37,7 @@ def _fake_data(seed=0, n=5, t=4, num_classes=3, val_start_idx=4):
     return {
         "targets": y,
         "target_col": "Transactions",
-        "input_spec": {"embedded_cols": {"Transactions": num_classes}},
+        "embedded_cols": {"Transactions": num_classes},
         "val_start_idx": val_start_idx,
     }
 
@@ -68,14 +68,14 @@ def test_dict_form_matches_training_prefix_boilerplate():
     w_dict = compute_class_weights(data)  # training_only=True by default
 
     y_arr = data["targets"].squeeze(-1).astype(np.int64)
-    max_trans = data["input_spec"]["embedded_cols"][data["target_col"]]
+    max_trans = data["embedded_cols"][data["target_col"]]
     w_arr = compute_class_weights(y_arr[:, : s - 1], num_classes=max_trans)
 
     torch.testing.assert_close(w_dict, w_arr)
 
 
 def test_dict_form_infers_num_classes_from_embedding():
-    """Without an explicit num_classes, the head size comes from input_spec."""
+    """Without an explicit num_classes, the head size comes from embedded_cols."""
     data = _fake_data(num_classes=4)
     w = compute_class_weights(data)
     assert w.shape == (4,)  # inferred from embedded_cols[target_col] == 4
@@ -122,7 +122,7 @@ def test_dict_training_only_without_val_start_idx_raises():
     """training_only=True needs val_start_idx (set by prepare_dataset)."""
     data = {"targets": np.zeros((2, 3, 1), dtype=np.float32),
             "target_col": "Transactions",
-            "input_spec": {"embedded_cols": {"Transactions": 3}}}
+            "embedded_cols": {"Transactions": 3}}
     with pytest.raises(KeyError):
         compute_class_weights(data)  # training_only=True by default, no val_start_idx
 
@@ -131,7 +131,7 @@ def test_dict_without_inferable_num_classes_raises():
     """Target not in embedded_cols -> can't infer the head size."""
     data = {"targets": np.zeros((2, 3, 1), dtype=np.float32),
             "target_col": "Transactions",
-            "input_spec": {"embedded_cols": {}},
+            "embedded_cols": {},
             "val_start_idx": 3}
     with pytest.raises(ValueError):
         compute_class_weights(data)

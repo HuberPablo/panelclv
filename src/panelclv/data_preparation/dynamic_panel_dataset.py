@@ -10,7 +10,7 @@ ar_features.
 `config` is a `PanelConfig` — the single validated object that bundles the
 layout, calendar toggles, feature roles, embeddings and AR features.
 `prepare_dataset` reads everything from it (`.data_config`, `.schema`,
-`.time_features`, `.input_spec`, `.ar_features`); see "what a PanelConfig
+`.time_features`, `.embedded_cols`, `.ar_features`); see "what a PanelConfig
 declares" below for the pieces.
 
 What it does, in order: engineer the requested calendar features and the causal
@@ -43,7 +43,7 @@ Feature roles (→ `.schema`) — TFT-style; ONLY listed columns enter the tenso
 AR features (→ `.ar_features`, recency / frequency / tenure / rate) are appended
     last; being causal functions of the target's own past, their holdout values
     are recomputed from the SAMPLED target during the rollout, so they leak nothing.
-Embeddings (→ `.input_spec`): which columns to embed and their cardinalities
+Embeddings (→ `.embedded_cols`): which columns to embed and their cardinalities
     (pinned int or `"auto"`, resolved here against the data).
 
 Output dict (full key list at the end of `prepare_dataset`)
@@ -53,7 +53,7 @@ Output dict (full key list at the end of `prepare_dataset`)
     samples       (N, T_CAL - 1, F) float32   AR inputs  (steps 0..T-2)
     targets       (N, T_CAL - 1, 1) float32   AR labels  (next-step target)
     seq_cols, target_col, target_idx          channel names / target position
-    input_spec                                resolved {col: cardinality} embeddings
+    embedded_cols                             resolved {col: cardinality} embeddings
     ar_features                               the AR feature names that were added
     N, T_CAL, T_HOLD, F, ids                  shapes + customer order of the tensors
     panel, train_panel, holdout_panel         engineered panel + the two slices
@@ -112,7 +112,7 @@ def _known_future_cols(schema: dict[str, Sequence[str]]) -> set[str]:
 
 
 def resolve_embedded_cols(
-    input_spec: dict[str, Any] | None,
+    embedded_cols: dict[str, Any] | None,
     *,
     target_col: str,
     seq_cols: Sequence[str],
@@ -121,7 +121,7 @@ def resolve_embedded_cols(
     holdout_panel: pd.DataFrame,
     clip_upper: int | None,
 ) -> dict[str, int] | None:
-    """Resolve `input_spec['embedded_cols']` to a plain ``{col: cardinality}``.
+    """Resolve an `embedded_cols` map to a plain ``{col: cardinality}``.
 
     The caller chooses WHICH columns are embedded (the dict keys, or a plain
     list of names) — including whether to embed the target. Each cardinality
@@ -140,17 +140,17 @@ def resolve_embedded_cols(
     Embedding the target is the caller's decision (it is what gives the model
     a multinomial head); this function does NOT add it automatically. Pinned
     ints are kept but validated to cover the values present in the relevant
-    window. Returns ``None`` if `input_spec` is ``None``.
+    window. Returns ``None`` if `embedded_cols` is ``None``.
     """
-    if input_spec is None:
+    if embedded_cols is None:
         return None
 
-    spec = normalize_embedded_cols(input_spec.get("embedded_cols", {}))
+    spec = normalize_embedded_cols(embedded_cols)
 
     unknown = [c for c in spec if c not in seq_cols]
     if unknown:
         raise ValueError(
-            f"input_spec['embedded_cols'] references columns not in seq_cols: {unknown}"
+            f"embedded_cols references columns not in seq_cols: {unknown}"
         )
 
     # Columns whose future is known in advance — safe to size from the holdout.
@@ -167,25 +167,26 @@ def resolve_embedded_cols(
         # static (constant per customer) / observed-past / unknown → calibration only.
         return train_max
 
+    # PRECONDITION: `PanelConfig._validate_embedded_cols` has already checked the
+    # STATIC shape of every value (each is "auto"/None or a non-bool int > 1).
+    # We don't re-check that here; this function only does the DATA-dependent work
+    # PanelConfig cannot — resolve "auto" against the panel and verify pinned
+    # cardinalities actually cover the observed values.
     resolved: dict[str, int] = {}
     for col, value in spec.items():
         observed_max = _observed_max(col)
         if value in (None, "auto"):
             cardinality = observed_max + 1
-        elif isinstance(value, bool):
-            raise TypeError(f"embedded_cols[{col!r}] must be an int or 'auto', got bool")
-        elif isinstance(value, int):
+        else:  # pinned int (statically validated upstream); just check coverage.
             if value <= observed_max:
                 raise ValueError(
-                    f"input_spec cardinality for {col!r} = {value} is too small; "
+                    f"embedded_cols cardinality for {col!r} = {value} is too small; "
                     f"values up to {observed_max} are present in the relevant "
                     f"window (need cardinality >= {observed_max + 1})."
                 )
             cardinality = value
-        else:
-            raise TypeError(
-                f"embedded_cols[{col!r}] must be an int or 'auto', got {value!r}"
-            )
+        # Data-dependent: an "auto" column that is constant in-window resolves to
+        # cardinality 1. PanelConfig can't catch this (it never sees the panel).
         if cardinality < 2:
             raise ValueError(
                 f"Inferred cardinality for {col!r} is {cardinality} (< 2); the "
@@ -366,7 +367,7 @@ def warn_known_future_drift(
     holdout_panel: pd.DataFrame,
     *,
     schema: dict[str, Sequence[str]],
-    input_spec: dict[str, Any] | None,
+    embedded_cols: dict[str, Any] | None,
     target_col: str,
 ) -> None:
     """Warn when an *embedded* known-future column takes holdout values that
@@ -388,10 +389,10 @@ def warn_known_future_drift(
     leave untrained, so flagging them would be pure noise. The target is also
     excluded: it is sampled during the rollout, never read from the holdout.
     """
-    if input_spec is None:
+    if embedded_cols is None:
         return
 
-    embedded_names = set(normalize_embedded_cols(input_spec.get("embedded_cols", {})))
+    embedded_names = set(normalize_embedded_cols(embedded_cols))
     known_future = _known_future_cols(schema)
     cols = sorted((embedded_names & known_future) - {target_col})
 
@@ -485,7 +486,7 @@ def prepare_dataset(
     `config` is a `PanelConfig`: it carries the physical layout, calendar
     toggles, feature roles, embeddings and AR features in one validated object,
     and everything below is read from it (`.data_config`, `.schema`,
-    `.time_features`, `.input_spec`, `.ar_features`).
+    `.time_features`, `.embedded_cols`, `.ar_features`).
 
     Steps:
         1. (optional) Engineer time features per `time_features` toggles.
@@ -506,7 +507,7 @@ def prepare_dataset(
     the data per column role — target -> clip_target_upper + 1, known-future ->
     max over both windows + 1, everything else -> calibration max + 1 — and
     pinned ints are validated to cover the observed values. The fully resolved
-    spec is returned under the "input_spec" key so the model is built from it.
+    map is returned under the "embedded_cols" key so the model is built from it.
     Embedding the target is the caller's choice; it is not added automatically.
 
     Returns a dict described at the module level.
@@ -522,7 +523,12 @@ def prepare_dataset(
     ar_features = list(config.ar_features)
     schema = config.schema
     time_features = config.time_features
-    input_spec = config.input_spec
+    # The user's choice of which columns to embed, normalized to a plain
+    # {col: int | "auto"} dict (or None if nothing is embedded). 'auto' values
+    # are resolved against the data later by resolve_embedded_cols.
+    embedded_cols = (
+        normalize_embedded_cols(config.embedded_cols) if config.embedded_cols else None
+    )
     config = config.data_config
 
     panel = panel.copy()
@@ -539,15 +545,14 @@ def prepare_dataset(
     # if both are available. Catches the common mistake of clipping at 10
     # while declaring an embedding of cardinality 6 (or smaller).
     clip_upper = config.get("clip_target_upper")
-    if clip_upper is not None and input_spec is not None:
-        embedded = input_spec.get("embedded_cols", {})
+    if clip_upper is not None and embedded_cols is not None:
         # Only a pinned int can be checked this early; 'auto' is resolved later
         # against the clipped training window (see resolve_embedded_cols).
-        pinned = embedded.get(target_col) if isinstance(embedded, dict) else None
+        pinned = embedded_cols.get(target_col)
         if isinstance(pinned, int) and not isinstance(pinned, bool):
             if pinned <= int(clip_upper):
                 raise ValueError(
-                    f"input_spec['embedded_cols'][{target_col!r}] = {pinned} "
+                    f"embedded_cols[{target_col!r}] = {pinned} "
                     f"is too small for clip_target_upper={clip_upper}. "
                     f"Need cardinality >= {int(clip_upper) + 1} so all clipped "
                     f"target values in [0, {int(clip_upper)}] fit in the embedding."
@@ -701,7 +706,7 @@ def prepare_dataset(
     # cohort-filtered slices — before any training happens.
     warn_known_future_drift(
         train_panel, holdout_panel,
-        schema=schema, input_spec=input_spec, target_col=target_col,
+        schema=schema, embedded_cols=embedded_cols, target_col=target_col,
     )
 
     # 5b) Clip the target on the training window only — holdout stays
@@ -788,7 +793,7 @@ def prepare_dataset(
     # data per column role; pinned ints validated). Returned to the caller so
     # the model is built from the SAME resolved spec.
     resolved_embedded = resolve_embedded_cols(
-        input_spec,
+        embedded_cols,
         target_col=target_col,
         seq_cols=seq_cols,
         schema=schema,
@@ -841,8 +846,9 @@ def prepare_dataset(
         # customer key and the period length without re-passing the config.
         "id_col":        id_col,
         "frequency":     frequency,
-        "input_spec":    ({"embedded_cols": resolved_embedded}
-                          if resolved_embedded is not None else None),
+        # Resolved {col: cardinality} embedding map (or None). Fed straight to
+        # the model constructors' embedded_cols= argument.
+        "embedded_cols": resolved_embedded,
         "ar_features":   ar_features,
         "N  ":             N,
         "T_CAL":         T_CAL,
