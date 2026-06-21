@@ -25,6 +25,10 @@ from .plot_utils import (
     save_predictions_to_csv,
     load_predictions_from_csv,
 )
+from .segment_analysis import (
+    assign_customer_groups,
+    group_metrics_table,
+)
 
 __all__ = [
     "compute_metrics",
@@ -42,4 +46,6 @@ __all__ = [
     "pareto_forecast",
     "save_predictions_to_csv",
     "load_predictions_from_csv",
+    "assign_customer_groups",
+    "group_metrics_table",
 ]
