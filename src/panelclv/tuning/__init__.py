@@ -13,6 +13,7 @@ from .optuna_tuning import (
     select_features_for_trial,
     weekly_aggregate_rollout_metrics,
     validate_removable_features,
+    validate_data_info,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "select_features_for_trial",
     "weekly_aggregate_rollout_metrics",
     "validate_removable_features",
+    "validate_data_info",
 ]

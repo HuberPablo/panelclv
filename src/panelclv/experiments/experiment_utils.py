@@ -219,8 +219,8 @@ def build_inference_from_trial(
     if family == "lstm":
         inference_model: torch.nn.Module = InferenceMultinomialLSTMModel(
             **common,
-            hidden_dim=params["hidden_dim"],
-            memory_units=params["memory_units"],
+            embedding_dim=params["embedding_dim"],
+            lstm_hidden_size=params["lstm_hidden_size"],
             dense_units=params["dense_units"],
             dropout=params["dropout"],
         )
@@ -309,8 +309,8 @@ def refit_best_trial(
             seq_cols=train_meta["seq_cols"],
             embedded_cols=train_meta["embedded_cols"],
             target_col=train_meta["target_col"],
-            hidden_dim=params["hidden_dim"],
-            memory_units=params["memory_units"],
+            embedding_dim=params["embedding_dim"],
+            lstm_hidden_size=params["lstm_hidden_size"],
             dense_units=params["dense_units"],
             dropout=params["dropout"],
         )
@@ -330,7 +330,7 @@ def refit_best_trial(
     result = refit_full_calibration(
         model,
         refit_loader,
-        max_trans=model.max_trans,
+        max_trans=model.num_target_classes,
         n_epochs=n_epochs,
         learning_rate=learning_rate,
         weight_decay=weight_decay,

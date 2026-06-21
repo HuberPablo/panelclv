@@ -13,6 +13,7 @@ installed R package).
 
 Model (Schmittlein, Morrison & Colombo 1987)
 --------------------------------------------
+
 Per customer i, two latent rates with Gamma population priors:
 
     purchasing  lambda_i ~ Gamma(r, alpha)     events while "alive" ~ Poisson(lambda_i)

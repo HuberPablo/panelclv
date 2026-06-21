@@ -267,36 +267,175 @@ def select_features_for_trial(
 # ---------------------------------------------------------------------------
 
 
-def suggest_lstm_params(trial: optuna.Trial) -> dict[str, Any]:
-    return {
-        "hidden_dim": trial.suggest_categorical("hidden_dim", [64, 128, 256]),
-        "memory_units": trial.suggest_categorical("memory_units", [32, 64, 128]),
-        "dense_units": trial.suggest_categorical("dense_units", [32, 64, 128]),
-        "dropout": trial.suggest_float("dropout", 0.0, 0.4),
-        "learning_rate": trial.suggest_float("learning_rate", 1e-4, 3e-3, log=True),
-        "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True),
-        "batch_size": trial.suggest_categorical("batch_size", [64, 128, 256]),
-    }
+# Hardcoded fallback search spaces. These are used per-parameter ONLY when the
+# caller's `data_info` does not specify that parameter, so the historical
+# behaviour (caller passes no search keys) is reproduced exactly. Each value is a
+# "spec" in the mini-language `_suggest_param` understands (see its docstring):
+#   set            -> categorical over those values
+#   (lo, hi)       -> float, uniform
+#   (lo, hi,'log') -> float, log scale
+#   (lo, hi,'int') -> integer
+#   (lo, hi, step) -> float on a step grid
+#   scalar         -> fixed (not searched)
+LSTM_SEARCH_DEFAULTS: dict[str, Any] = {
+    "embedding_dim":    {64, 128, 256},
+    "lstm_hidden_size":  {32, 64, 128},
+    "dense_units":   {32, 64, 128},
+    "dropout":       (0.0, 0.4),
+    "learning_rate": (1e-4, 3e-3, "log"),
+    "weight_decay":  (1e-6, 1e-2, "log"),
+    "batch_size":    {64, 128, 256},
+}
+
+TRANSFORMER_SEARCH_DEFAULTS: dict[str, Any] = {
+    "d_model":            {32, 64, 128},
+    "nhead":              {2, 4, 8},
+    "num_encoder_layers": (1, 3, "int"),
+    "dropout":            (0.0, 0.4),
+    "learning_rate":      (1e-4, 3e-3, "log"),
+    "weight_decay":       (1e-6, 1e-2, "log"),
+    "batch_size":         {64, 128, 256},
+}
+
+# `data_info` keys that are NOT search-space parameters — training control and
+# loss/logging settings. `n_epochs`/`patience` are special: they are training
+# control, but the caller may still hand them a search spec (e.g. patience over
+# {5,7,9}), so they are resolved through `_suggest_param` like a hyperparameter.
+# This whitelist is what `validate_data_info` checks against so a typo'd key
+# (e.g. "hiddendim") raises up front instead of being silently ignored.
+_NON_SEARCH_DATA_INFO_KEYS: frozenset[str] = frozenset({
+    "n_epochs", "patience",          # training control (scalar, or a search spec)
+    "checkpoint_dir", "verbose",     # bookkeeping
+    "loss_type", "class_weights", "focal_gamma",   # loss configuration
+    "grad_clip", "log_wandb", "seed",              # optimiser / logging / RNG
+})
 
 
-def suggest_transformer_params(trial: optuna.Trial) -> dict[str, Any]:
-    d_model = trial.suggest_categorical("d_model", [32, 64, 128])
-    nhead = trial.suggest_categorical("nhead", [2, 4, 8])
+def _suggest_param(trial: optuna.Trial, name: str, spec: Any) -> Any:
+    """Turn one `data_info` spec into a value, sampling from `trial` if needed.
+
+    The spec mini-language lets the caller describe a search dimension (or a
+    fixed value) declaratively in the notebook, instead of editing this module:
+
+    - **scalar** (`int`/`float`/`str`/`bool`) -> returned as-is, FIXED. No trial
+      parameter is registered, so it never appears in `best_params`.
+    - **set / frozenset** -> `suggest_categorical` over the values (sorted for a
+      deterministic, reproducible category order).
+    - **list** -> `suggest_categorical` in the given order.
+    - **tuple** -> a numeric RANGE:
+        `(lo, hi)`          float, uniform
+        `(lo, hi, "log")`   float, log scale (for LR / weight decay)
+        `(lo, hi, "int")`   integer
+        `(lo, hi, step)`    float on a step grid (numeric 3rd element)
+
+    A clear `ValueError` is raised for malformed specs (e.g. an empty set or an
+    unknown range mode) so mistakes surface immediately, not as a silent default.
+    """
+    # bool is a subclass of int — check it within the scalar branch so a fixed
+    # boolean flag is returned verbatim rather than mis-read as a number.
+    if isinstance(spec, (bool, int, float, str)):
+        return spec
+    if isinstance(spec, (set, frozenset)):
+        if not spec:
+            raise ValueError(f"{name}: empty set of choices")
+        return trial.suggest_categorical(name, sorted(spec))
+    if isinstance(spec, list):
+        if not spec:
+            raise ValueError(f"{name}: empty list of choices")
+        return trial.suggest_categorical(name, spec)
+    if isinstance(spec, tuple):
+        if len(spec) == 2:
+            low, high = spec
+            return trial.suggest_float(name, float(low), float(high))
+        if len(spec) == 3:
+            low, high, mode = spec
+            if mode == "log":
+                return trial.suggest_float(name, float(low), float(high), log=True)
+            if mode == "int":
+                return trial.suggest_int(name, int(low), int(high))
+            if isinstance(mode, (int, float)) and not isinstance(mode, bool):
+                # numeric 3rd element = grid step
+                return trial.suggest_float(name, float(low), float(high), step=float(mode))
+            raise ValueError(
+                f"{name}: unknown range mode {mode!r}; use 'log', 'int', or a "
+                f"numeric step"
+            )
+        raise ValueError(
+            f"{name}: tuple spec must be (lo, hi), (lo, hi, 'log'|'int'), or "
+            f"(lo, hi, step); got {spec!r}"
+        )
+    raise ValueError(
+        f"{name}: unsupported spec {spec!r} (type {type(spec).__name__}). Use a "
+        f"set/list (categorical), a tuple (range), or a scalar (fixed)."
+    )
+
+
+def _merge_specs(
+    defaults: dict[str, Any], overrides: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Per-parameter override: caller's spec wins, else the hardcoded default.
+
+    Only keys present in `defaults` are pulled from `overrides`; non-search
+    settings in `data_info` (checkpoint_dir, loss_type, ...) are ignored here.
+    """
+    overrides = overrides or {}
+    return {name: overrides.get(name, default) for name, default in defaults.items()}
+
+
+def validate_data_info(model_type: str, data_info: dict[str, Any]) -> None:
+    """Fail fast on unrecognised `data_info` keys, before any training runs.
+
+    The search space is now driven by `data_info`, so a typo'd hyperparameter
+    name (`"hiddendim"`) would otherwise be silently dropped and the default
+    range used instead — exactly the kind of silent miss this guard prevents.
+    """
+    if model_type == "lstm":
+        search_keys = set(LSTM_SEARCH_DEFAULTS)
+    elif model_type == "transformer":
+        search_keys = set(TRANSFORMER_SEARCH_DEFAULTS)
+    else:
+        raise ValueError(f"Unknown model_type {model_type!r}")
+    allowed = search_keys | set(_NON_SEARCH_DATA_INFO_KEYS)
+    unknown = [k for k in data_info if k not in allowed]
+    if unknown:
+        raise ValueError(
+            f"Unrecognised data_info key(s) for model_type={model_type!r}: "
+            f"{sorted(unknown)}. Allowed search params: {sorted(search_keys)}; "
+            f"allowed settings: {sorted(_NON_SEARCH_DATA_INFO_KEYS)}."
+        )
+
+
+def suggest_lstm_params(
+    trial: optuna.Trial, overrides: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Sample the LSTM hyperparameters, honouring `overrides` (from data_info)."""
+    specs = _merge_specs(LSTM_SEARCH_DEFAULTS, overrides)
+    return {name: _suggest_param(trial, name, spec) for name, spec in specs.items()}
+
+
+def suggest_transformer_params(
+    trial: optuna.Trial, overrides: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Sample the Transformer hyperparameters, honouring `overrides`.
+
+    `d_model` and `nhead` are resolved first so the divisibility constraint can
+    prune incompatible draws before the remaining params are sampled.
+    """
+    specs = _merge_specs(TRANSFORMER_SEARCH_DEFAULTS, overrides)
+    d_model = _suggest_param(trial, "d_model", specs["d_model"])
+    nhead = _suggest_param(trial, "nhead", specs["nhead"])
     if d_model % nhead != 0:
         # Cleaner than narrowing the categorical domain per trial; Optuna's
         # samplers handle pruned trials gracefully.
         raise optuna.TrialPruned(
             f"d_model={d_model} is not divisible by nhead={nhead}"
         )
-    return {
-        "d_model": d_model,
-        "nhead": nhead,
-        "num_encoder_layers": trial.suggest_int("num_encoder_layers", 1, 3),
-        "dropout": trial.suggest_float("dropout", 0.0, 0.4),
-        "learning_rate": trial.suggest_float("learning_rate", 1e-4, 3e-3, log=True),
-        "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True),
-        "batch_size": trial.suggest_categorical("batch_size", [64, 128, 256]),
-    }
+    params = {"d_model": d_model, "nhead": nhead}
+    for name, spec in specs.items():
+        if name in ("d_model", "nhead"):
+            continue
+        params[name] = _suggest_param(trial, name, spec)
+    return params
 
 
 # ---------------------------------------------------------------------------
@@ -311,8 +450,8 @@ def _build_lstm(
         seq_cols=metadata["seq_cols"],
         embedded_cols=metadata["embedded_cols"],
         target_col=metadata.get("target_col", "Transactions"),
-        hidden_dim=params["hidden_dim"],
-        memory_units=params["memory_units"],
+        embedding_dim=params["embedding_dim"],
+        lstm_hidden_size=params["lstm_hidden_size"],
         dense_units=params["dense_units"],
         dropout=params["dropout"],
     )
@@ -492,7 +631,7 @@ def _validation_rollout_score(
     if model_type == "lstm":
         model = InferenceMultinomialLSTMModel(
             seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
-            hidden_dim=params["hidden_dim"], memory_units=params["memory_units"],
+            embedding_dim=params["embedding_dim"], lstm_hidden_size=params["lstm_hidden_size"],
             dense_units=params["dense_units"], dropout=params["dropout"],
         )
         forecaster = run_monte_carlo_forecast
@@ -537,8 +676,11 @@ def objective(
 ) -> float:
     """Objective: validation cross-entropy, or an autoregressive rollout score.
 
-    `data_info` is a free-form dict for things that aren't search-space items
-    (number of epochs, patience, checkpoint dir, ...). `removable_features`
+    `data_info` carries BOTH the search-space overrides (per-parameter specs in
+    the `_suggest_param` mini-language — set=categorical, tuple=range, scalar=
+    fixed; anything omitted falls back to the model's hardcoded default range)
+    and the non-search settings (checkpoint dir, loss config, ...). Its keys are
+    validated up front by `validate_data_info`. `removable_features`
     lists covariates Optuna may drop this trial (see `suggest_covariate_selection`);
     the chosen drop-set is handed to `data_builder` as `feature_config`.
 
@@ -555,9 +697,9 @@ def objective(
                               `rollout_cfg` (assembled by `run_optuna_study`).
     """
     if model_type == "lstm":
-        params = suggest_lstm_params(trial)
+        params = suggest_lstm_params(trial, data_info)
     elif model_type == "transformer":
-        params = suggest_transformer_params(trial)
+        params = suggest_transformer_params(trial, data_info)
     else:
         raise ValueError(f"Unknown model_type {model_type!r}")
 
@@ -594,9 +736,12 @@ def objective(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        max_trans=model.max_trans,
-        n_epochs=data_info.get("n_epochs", 50),
-        patience=data_info.get("patience", 5),
+        max_trans=model.num_target_classes,
+        # n_epochs / patience are training control, but the caller may still hand
+        # them a search spec (e.g. patience over {5,7,9}); resolve through the same
+        # mini-language so a scalar stays fixed and a set/tuple is searched.
+        n_epochs=_suggest_param(trial, "n_epochs", data_info.get("n_epochs", 50)),
+        patience=_suggest_param(trial, "patience", data_info.get("patience", 5)),
         learning_rate=params["learning_rate"],
         weight_decay=params["weight_decay"],
         grad_clip=data_info.get("grad_clip", 1.0),
@@ -801,6 +946,11 @@ def run_optuna_study(
                 "min_actual_for_mape": rollout_min_actual_for_mape,
             },
         }
+
+    # Validate data_info keys once, up front: the search space is now driven by
+    # data_info, so a typo'd hyperparameter name must raise here rather than be
+    # silently ignored (which would quietly fall back to the default range).
+    validate_data_info(model_type, data_info)
 
     # Validate removable_features once, before any training. We probe the
     # data_builder with an empty drop-set (keep everything) purely to learn the
