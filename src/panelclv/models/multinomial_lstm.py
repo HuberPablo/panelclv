@@ -13,14 +13,22 @@ seq_cols : list[str]
     Example: ["Transactions", "week_sin", "week_cos", "Gender"].
 embedded_cols : dict
     {col: num_categories, ...} — every column listed here is embedded with
-    `nn.Embedding(num_categories, hidden_dim)`. Values in those columns must
-    be integer class indices in [0, num_categories). Anything in `seq_cols`
-    but not here is treated as a numerical covariate.
+    a categorical embedding block: `nn.Embedding` into a square-root-heuristic
+    width, LayerNorm, then a linear projection to `embedding_dim` followed by a
+    final LayerNorm. Values in those columns must be integer class indices in
+    [0, num_categories). Anything in `seq_cols` but not here is treated as a
+    numerical covariate.
 target_col : str = "Transactions"
     Which embedded column is the autoregressive target. Its cardinality
-    sets the size of the output multinomial head (max_trans).
-hidden_dim, memory_units, dense_units, dropout
-    Standard LSTM hyper-parameters.
+    sets the size of the output multinomial head (num_target_classes).
+embedding_dim
+    Width of categorical embeddings and numerical covariate projections.
+lstm_hidden_size
+    Width of the LSTM hidden state and cell state.
+dense_units
+    Width of the dense prediction layer after the LSTM.
+dropout
+    Dropout applied to LSTM outputs before the prediction head.
 
 
 Mandatory vs optional inputs
@@ -43,9 +51,9 @@ Layout : column k holds the value for `seq_cols[k]` at every (B, T).
 Output
 ------
 Training (`MultinomialLSTMModel.forward`):
-    raw logits of shape (B, T, max_trans).
+    raw logits of shape (B, T, num_target_classes).
     Use with `nn.CrossEntropyLoss` — integer class targets of shape
-    (B, T) with values in [0, max_trans).
+    (B, T) with values in [0, num_target_classes).
 
 Inference (`InferenceMultinomialLSTMModel.forward`) — returns (sample, state):
     sample → (B, T, 1) count classes drawn from Categorical(softmax(logits)).
@@ -54,12 +62,28 @@ Inference (`InferenceMultinomialLSTMModel.forward`) — returns (sample, state):
 
 Architecture
 ------------
-    emb_target           embedding of the AR target column
-    context_sum    sum of (all other embeddings) + projection of covariates
-    LSTM input  =  [context_sum, emb_target]   if any context exists
-                =  emb_target                   otherwise
-The LSTM `input_size` is `2 * hidden_dim` when context is present and
-`hidden_dim` otherwise — no zero-padding tricks.
+    target_emb
+        Embedding of the autoregressive target column.
+
+    context_repr
+        Sum of all non-target categorical embeddings plus the projected
+        numerical covariates.
+
+    encoded_input
+        [context_repr, target_emb] if context exists,
+        otherwise target_emb only. This is the LSTM input.
+
+    lstm_out
+        Per-step output of the LSTM (width = lstm_hidden_size).
+
+    dense_out
+        lstm_out passed through the dense layer (width = dense_units).
+
+    logits
+        Raw output scores over num_target_classes transaction-count classes.
+
+The LSTM `input_size` is `2 * embedding_dim` when context is present and
+`embedding_dim` otherwise.
 
 
 Validation
@@ -87,17 +111,17 @@ from torch import nn
 # dynamic Embeddings (for columns in embedded_cols + transaction) :
 # Automatic embedding size
 def _emb_size(n: int) -> int:
-    """Square-root heuristic for embedding dimensionality (legacy compatible)."""
+    """Square-root heuristic for embedding dimensionality."""
     return int(n ** 0.5) + 1
 
 # Embedding structure
-def _cat_embedding(num_categories: int, out_dim: int) -> nn.Sequential:
-    inner = _emb_size(num_categories)
+def _cat_embedding(num_categories: int, embedding_dim: int) -> nn.Sequential:
+    raw_embedding_dim = _emb_size(num_categories)
     return nn.Sequential(
-        nn.Embedding(num_categories, inner),
-        nn.LayerNorm(inner),
-        nn.Linear(inner, out_dim),
-        nn.LayerNorm(out_dim),
+        nn.Embedding(num_categories, raw_embedding_dim), # raw because at the end the dim will be embedding_dim, but we want to apply layernorm before the projection to embedding_dim
+        nn.LayerNorm(raw_embedding_dim),
+        nn.Linear(raw_embedding_dim, embedding_dim), #out dim = embedding_dim
+        nn.LayerNorm(embedding_dim),
     )
 
 
@@ -145,26 +169,26 @@ def _validate_embedded_cols(
 
 
 class _MultinomialLSTMBackbone(nn.Module):
-    """Embeddings + LSTM + dense head, producing raw logits over `max_trans`."""
+    """Embeddings + LSTM + dense head, producing raw logits over `num_target_classes`."""
 
     def __init__(
         self,
         seq_cols: Sequence[str],
         embedded_cols: dict[str, int],
         target_col: str = "Transactions",
-        hidden_dim: int = 128,
-        memory_units: int = 64,
+        embedding_dim: int = 128,
+        lstm_hidden_size: int = 64,
         dense_units: int = 64,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
 
         embedded_cols = _validate_embedded_cols(seq_cols, embedded_cols, target_col)
-        max_trans = int(embedded_cols[target_col])
+        num_target_classes = int(embedded_cols[target_col])
 
         self.seq_cols: list[str] = list(seq_cols)
         self.target_col: str = target_col
-        self.max_trans: int = max_trans
+        self.num_target_classes: int = num_target_classes
 
         # Embeddings — kept in seq_cols order. We use ModuleList + an index
         # map (instead of ModuleDict) because nn.ModuleDict rejects keys
@@ -174,7 +198,7 @@ class _MultinomialLSTMBackbone(nn.Module):
 
         # Automatic Embedding for columns in embedded_cols
         self._emb_modules = nn.ModuleList(
-            _cat_embedding(int(embedded_cols[c]), hidden_dim) for c in self._emb_cols
+            _cat_embedding(int(embedded_cols[c]), embedding_dim) for c in self._emb_cols
         )
         self._emb_index: dict[str, int] = {c: i for i, c in enumerate(self._emb_cols)}
 
@@ -184,8 +208,8 @@ class _MultinomialLSTMBackbone(nn.Module):
         ]
         if self.covariate_cols:
             self.covariate_proj: nn.Module | None = nn.Sequential(
-                nn.Linear(len(self.covariate_cols), hidden_dim),
-                nn.LayerNorm(hidden_dim),
+                nn.Linear(len(self.covariate_cols), embedding_dim),
+                nn.LayerNorm(embedding_dim),
             )
         else:
             self.covariate_proj = None
@@ -194,15 +218,15 @@ class _MultinomialLSTMBackbone(nn.Module):
         n_context_embs = len(self._emb_cols) - 1
         self.has_context: bool = (n_context_embs > 0) or (self.covariate_proj is not None)
 
-        lstm_input_size = hidden_dim * (2 if self.has_context else 1)
+        lstm_input_size = embedding_dim * (2 if self.has_context else 1)
         self.lstm = nn.LSTM(
             input_size=lstm_input_size,
-            hidden_size=memory_units,
+            hidden_size=lstm_hidden_size,
             batch_first=True,
         )
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.dense = nn.Linear(memory_units, dense_units)
-        self.output_layer = nn.Linear(dense_units, max_trans)
+        self.dense = nn.Linear(lstm_hidden_size, dense_units)
+        self.output_layer = nn.Linear(dense_units, num_target_classes)
 
     # ------------------------------------------------------------------
 
@@ -216,36 +240,51 @@ class _MultinomialLSTMBackbone(nn.Module):
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         self._check_shape(x)
 
-        emb_target: torch.Tensor | None = None
-        context_sum: torch.Tensor | None = None
-        cov_chunks: list[torch.Tensor] = []
+        target_emb: torch.Tensor | None = None
+        context_repr: torch.Tensor | None = None
+        numeric_covariate_chunks: list[torch.Tensor] = []
 
         for i, col in enumerate(self.seq_cols):
             if col in self._emb_index:
                 emb = self._emb_modules[self._emb_index[col]](x[:, :, i].long())
                 if col == self.target_col:
-                    emb_target = emb
+                    target_emb = emb
                 else:
-                    context_sum = emb if context_sum is None else context_sum + emb
+                    context_repr = emb if context_repr is None else context_repr + emb
             else:
-                cov_chunks.append(x[:, :, i:i + 1])
+                numeric_covariate_chunks.append(x[:, :, i:i + 1])
 
         if self.covariate_proj is not None:
-            covs = torch.cat(cov_chunks, dim=-1).float()
-            proj = self.covariate_proj(covs)
-            context_sum = proj if context_sum is None else context_sum + proj
+            numeric_covariates = torch.cat(numeric_covariate_chunks, dim=-1).float()
+            numeric_covariate_repr = self.covariate_proj(numeric_covariates)
+            context_repr = (
+                numeric_covariate_repr
+                if context_repr is None
+                else context_repr + numeric_covariate_repr
+            )
 
-        # `emb_target` is always assigned because the validator guarantees the
+        # `target_emb` is always assigned because the validator guarantees the
         # target column is in self._emb_index.
-        if context_sum is None:
-            return emb_target  # type: ignore[return-value]
-        return torch.cat([context_sum, emb_target], dim=-1)
+        if context_repr is None:
+            return target_emb  # type: ignore[return-value]
+        return torch.cat([context_repr, target_emb], dim=-1)
 
-    def forward(self, x: torch.Tensor, hidden=None):
-        h = self._encode(x)
-        lstm_out, hidden = self.lstm(h, hidden)
+    def forward(self, x: torch.Tensor, state=None):
+        # Build the LSTM input: concatenate the target embedding with the summed
+        # context (other embeddings + covariate projection). With no context the
+        # LSTM input is just the target embedding.
+        encoded_input = self._encode(x)
+
+        # encoded_input: (B, T, input_size) where input_size = 2 * embedding_dim
+        # if context exists else embedding_dim. lstm_out: (B, T, lstm_hidden_size).
+        # `state` is the LSTM recurrent (hidden, cell) state, threaded across AR steps.
+        lstm_out, state = self.lstm(encoded_input, state)
         lstm_out = self.dropout(lstm_out)
-        return self.output_layer(self.dense(lstm_out)), hidden
+
+        dense_out = self.dense(lstm_out)
+        logits = self.output_layer(dense_out)
+
+        return logits, state
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +295,7 @@ class _MultinomialLSTMBackbone(nn.Module):
 class MultinomialLSTMModel(nn.Module):
     """Training-mode LSTM returning raw logits.
 
-    Forward output shape: (B, T, max_trans). Use with `nn.CrossEntropyLoss`.
+    Forward output shape: (B, T, num_target_classes). Use with `nn.CrossEntropyLoss`.
     """
 
     def __init__(
@@ -264,8 +303,8 @@ class MultinomialLSTMModel(nn.Module):
         seq_cols: Sequence[str],
         embedded_cols: dict[str, int],
         target_col: str = "Transactions",
-        hidden_dim: int = 128,
-        memory_units: int = 64,
+        embedding_dim: int = 128,
+        lstm_hidden_size: int = 64,
         dense_units: int = 64,
         dropout: float = 0.0,
     ) -> None:
@@ -274,15 +313,15 @@ class MultinomialLSTMModel(nn.Module):
             seq_cols=seq_cols,
             embedded_cols=embedded_cols,
             target_col=target_col,
-            hidden_dim=hidden_dim,
-            memory_units=memory_units,
+            embedding_dim=embedding_dim,
+            lstm_hidden_size=lstm_hidden_size,
             dense_units=dense_units,
             dropout=dropout,
         )
         # Hoist commonly accessed fields for convenience.
         self.seq_cols: list[str] = self.backbone.seq_cols
         self.target_col: str = self.backbone.target_col
-        self.max_trans: int = self.backbone.max_trans
+        self.num_target_classes: int = self.backbone.num_target_classes
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         logits, _ = self.backbone(x)
@@ -290,7 +329,7 @@ class MultinomialLSTMModel(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Inference-time wrapper (sample / expected / probs)
+# Inference-time wrapper (sampling)
 # ---------------------------------------------------------------------------
 
 
@@ -311,8 +350,8 @@ class InferenceMultinomialLSTMModel(nn.Module):
         seq_cols: Sequence[str],
         embedded_cols: dict[str, int],
         target_col: str = "Transactions",
-        hidden_dim: int = 128,
-        memory_units: int = 64,
+        embedding_dim: int = 128,
+        lstm_hidden_size: int = 64,
         dense_units: int = 64,
         dropout: float = 0.0,
     ) -> None:
@@ -321,14 +360,14 @@ class InferenceMultinomialLSTMModel(nn.Module):
             seq_cols=seq_cols,
             embedded_cols=embedded_cols,
             target_col=target_col,
-            hidden_dim=hidden_dim,
-            memory_units=memory_units,
+            embedding_dim=embedding_dim,
+            lstm_hidden_size=lstm_hidden_size,
             dense_units=dense_units,
             dropout=dropout,
         )
         self.seq_cols: list[str] = self.backbone.seq_cols
         self.target_col: str = self.backbone.target_col
-        self.max_trans: int = self.backbone.max_trans
+        self.num_target_classes: int = self.backbone.num_target_classes
 
     def forward(self, x: torch.Tensor, state=None):
         logits, state = self.backbone(x, state)
