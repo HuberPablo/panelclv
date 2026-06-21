@@ -21,6 +21,7 @@ checkpoints/
 optuna_summaries/
 plots/
 Predictions/
+FOR_ANALYSIS/
 
 Datasets/Kaggle/online_retail_II.csv
 Datasets/Kaggle/
