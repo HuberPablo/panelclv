@@ -23,6 +23,7 @@ Given Monte Carlo forecast arrays from `monte_carlo_forecasting.mc_forecast`
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -237,7 +238,9 @@ def weekly_aggregate_predictions(
 _PERIOD_IN_DAYS: dict[str, float] = {"weekly": 7.0, "monthly": 30.4368, "daily": 1.0}
 
 
-def _pareto_from_data(data: dict[str, Any] | None, variant: str = "mle") -> np.ndarray:
+def _pareto_from_data(
+    data: dict[str, Any] | None, variant: str = "mle", **fit_kwargs: Any
+) -> np.ndarray:
     """Fit a Pareto/NBD benchmark on a `prepare_dataset` output.
 
     Shared by `plot_weekly_aggregated` and `metrics_table` so the benchmark is
@@ -251,6 +254,10 @@ def _pareto_from_data(data: dict[str, Any] | None, variant: str = "mle") -> np.n
         "mle"   — `pareto_nbd.compute_pareto_predictions` (lifetimes MLE; fast).
         "paper" — `pareto_paper.compute_pareto_paper_predictions` (hierarchical-Bayes
                   MCMC, BTYDplus-faithful; the estimator Valendin et al. actually use).
+
+    `fit_kwargs` are forwarded to the chosen fitter for its estimator-specific
+    knobs (MLE: `penalizer_coef`; HB: `mcmc`, `burnin`, `thin`, `chains`, `seed`,
+    `param_init`). The data-derived arguments are always supplied from `data`.
     """
     if data is None:
         raise ValueError("a Pareto/NBD benchmark requires data=<prepare_dataset output>.")
@@ -276,6 +283,7 @@ def _pareto_from_data(data: dict[str, Any] | None, variant: str = "mle") -> np.n
             target_col=data["target_col"],
             period_in_days=period_in_days,
             customer_ids=data["ids"],
+            **fit_kwargs,
         )
         return pred
     if variant != "mle":
@@ -288,8 +296,82 @@ def _pareto_from_data(data: dict[str, Any] | None, variant: str = "mle") -> np.n
         target_col=data["target_col"],
         period_in_days=period_in_days,
         customer_ids=data["ids"],
+        **fit_kwargs,
     )
     return pareto_pred
+
+
+def pareto_forecast(
+    data: dict[str, Any],
+    variant: str = "mle",
+    *,
+    save_predictions: bool = False,
+    output_dir: str | Path | None = None,
+    file_name: str = "predictions.csv",
+    run_name: str | None = None,
+    **fit_kwargs: Any,
+) -> dict[str, Any]:
+    """Pareto/NBD holdout forecast, mirroring `mc_forecast`'s contract.
+
+    Gives the Pareto/NBD benchmark the same call shape as the neural
+    `mc_forecast`, so the three models (LSTM, Transformer, Pareto/NBD) are
+    produced — and saved — the same way. Fits the benchmark on the
+    `prepare_dataset` output `data` and returns a dict of per-customer
+    `(N, T_HOLD)` arrays:
+
+        prediction_mean : ndarray (N, T_HOLD) — expected holdout counts.
+        actual          : ndarray (N, T_HOLD) — true holdout counts, pulled from
+                          `data["holdout"]` for evaluation only (never fed in).
+        variant         : "mle" or "paper".
+        predictions_path: Path to the written CSV, only if save_predictions.
+
+    Per-customer prediction dump (opt-in, off by default) — same arguments as
+    `mc_forecast`:
+        save_predictions : when True, write the per-customer predictions to a CSV
+                           inside an auto-named subfolder of `output_dir`.
+        output_dir       : BASE directory the run subfolder is created in
+                           (required when save_predictions=True).
+        file_name        : name of the CSV inside that subfolder.
+        run_name         : tag for the subfolder (defaults to f"pareto_{variant}").
+                           The subfolder is `{tag}_{YYYYMMDD_HHMMSS}` (seconds
+                           resolution avoids same-minute collisions).
+
+    `fit_kwargs` are forwarded to the estimator (MLE: `penalizer_coef`; HB:
+    `mcmc`, `burnin`, `thin`, `chains`, `seed`, `param_init`).
+    """
+    prediction_mean = _pareto_from_data(data, variant, **fit_kwargs)    # (N, T_HOLD)
+
+    # True holdout counts for scoring; read straight from the data dict so the
+    # actual lines up with the NN forecasts' actual on the same cohort/order.
+    target_idx = list(data["seq_cols"]).index(data["target_col"])
+    actual = np.asarray(data["holdout"])[:, :, target_idx]             # (N, T_HOLD)
+
+    result: dict[str, Any] = {
+        "prediction_mean": prediction_mean,
+        "actual": actual,
+        "variant": variant,
+    }
+
+    if save_predictions:
+        if output_dir is None:
+            raise ValueError(
+                "save_predictions=True requires output_dir (the base directory the "
+                "auto-named run subfolder is created in)"
+            )
+        # IDs map each prediction row back to a customer; save_predictions_to_csv
+        # falls back to a plain row index when they are absent.
+        tag = run_name if run_name else f"pareto_{variant}"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = Path(output_dir) / f"{tag}_{timestamp}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        result["predictions_path"] = save_predictions_to_csv(
+            prediction_mean,
+            run_dir / file_name,
+            customer_ids=data.get("ids"),
+            id_col=data.get("id_col", "customer_id"),
+        )
+
+    return result
 
 
 def plot_weekly_aggregated(

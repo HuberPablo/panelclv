@@ -76,13 +76,13 @@ def _emb_size(n: int) -> int:
     return int(n ** 0.5) + 1
 
 
-def _cat_embedding(num_categories: int, out_dim: int) -> nn.Sequential:
-    inner = _emb_size(num_categories)
+def _cat_embedding(num_categories: int, d_model: int) -> nn.Sequential:
+    raw_embedding_dim = _emb_size(num_categories)
     return nn.Sequential(
-        nn.Embedding(num_categories, inner),
-        nn.LayerNorm(inner),
-        nn.Linear(inner, out_dim),
-        nn.LayerNorm(out_dim),
+        nn.Embedding(num_categories, raw_embedding_dim),
+        nn.LayerNorm(raw_embedding_dim),
+        nn.Linear(raw_embedding_dim, d_model),
+        nn.LayerNorm(d_model),
     )
 
 

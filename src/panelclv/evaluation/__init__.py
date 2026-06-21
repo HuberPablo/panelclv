@@ -21,6 +21,7 @@ from .plot_utils import (
     metrics_table,
     alignment_check,
     forecast_from_checkpoint,
+    pareto_forecast,
     save_predictions_to_csv,
     load_predictions_from_csv,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "metrics_table",
     "alignment_check",
     "forecast_from_checkpoint",
+    "pareto_forecast",
     "save_predictions_to_csv",
     "load_predictions_from_csv",
 ]
