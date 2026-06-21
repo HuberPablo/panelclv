@@ -37,6 +37,8 @@ points are `run_monte_carlo_forecast` (LSTM) and
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Sequence
 
 import numpy as np
@@ -262,6 +264,60 @@ def simulate_transformer_path(
 # ---------------------------------------------------------------------------
 
 
+def _save_predictions_run(
+    prediction_mean: np.ndarray,
+    data: dict[str, Any],
+    *,
+    output_dir: str | Path,
+    file_name: str,
+    run_name: str | None,
+    model_type: str,
+    n_simulations: int,
+    seed: int | None,
+) -> Path:
+    """Write the per-customer predicted means to an auto-named subfolder.
+
+    `output_dir` is the user-supplied BASE directory; this creates a dynamically
+    named subfolder inside it and writes one wide CSV (one row per customer,
+    columns `week_0..week_{H-1}`) of the predicted-mean counts.
+
+    The subfolder name encodes everything needed to tell two runs apart and to
+    line a run up with its checkpoints/summaries:
+
+        {tag}_n{n_simulations}_seed{seed}_{YYYYMMDD_HHMMSS}
+
+    where `tag` is `run_name` if given (e.g. the Optuna study name) else the
+    model type. Seconds resolution keeps two runs in the same minute from
+    colliding into the same folder. Returns the path to the written CSV.
+    """
+    if output_dir is None:
+        raise ValueError(
+            "save_predictions=True requires output_dir (the base directory the "
+            "auto-named run subfolder is created in)"
+        )
+
+    # Lazy import: `evaluation.plot_utils` already imports from this module, so a
+    # top-level import here would create a circular import at load time.
+    from panelclv.evaluation.plot_utils import save_predictions_to_csv
+
+    tag = run_name if run_name else model_type
+    seed_label = "None" if seed is None else seed
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    subfolder = f"{tag}_n{n_simulations}_seed{seed_label}_{timestamp}"
+
+    run_dir = Path(output_dir) / subfolder
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # IDs map each prediction row back to a customer; save_predictions_to_csv
+    # falls back to a plain row index when they are absent.
+    return save_predictions_to_csv(
+        prediction_mean,
+        run_dir / file_name,
+        customer_ids=data.get("ids"),
+        id_col=data.get("id_col", "customer_id"),
+    )
+
+
 def _run_monte_carlo(
     model: torch.nn.Module,
     data: dict[str, Any],
@@ -272,6 +328,11 @@ def _run_monte_carlo(
     device: str | torch.device | None,
     return_simulations: bool,
     seed: int | None,
+    save_predictions: bool = False,
+    output_dir: str | Path | None = None,
+    file_name: str = "predictions.csv",
+    run_name: str | None = None,
+    model_type: str = "model",
 ) -> dict[str, Any]:
     """Run `simulate_path` `n_simulations` times and average the paths.
 
@@ -328,6 +389,21 @@ def _run_monte_carlo(
     }
     if return_simulations:
         result["simulations"] = simulations
+
+    # Optional, opt-in per-customer prediction dump. Off by default so the
+    # forecast stays a pure computation; when on, the written path is returned
+    # in the dict for traceability.
+    if save_predictions:
+        result["predictions_path"] = _save_predictions_run(
+            prediction_mean,
+            data,
+            output_dir=output_dir,
+            file_name=file_name,
+            run_name=run_name,
+            model_type=model_type,
+            n_simulations=n_simulations,
+            seed=seed,
+        )
     return result
 
 
@@ -344,6 +420,10 @@ def run_monte_carlo_forecast(
     device: str | torch.device | None = None,
     return_simulations: bool = True,
     seed: int | None = None,
+    save_predictions: bool = False,
+    output_dir: str | Path | None = None,
+    file_name: str = "predictions.csv",
+    run_name: str | None = None,
 ) -> dict[str, Any]:
     """Monte Carlo holdout forecast for a recurrent (LSTM) inference model.
 
@@ -355,6 +435,17 @@ def run_monte_carlo_forecast(
     whole Monte Carlo forecast is reproducible (same model + data + seed →
     identical paths). Leave it None for fresh randomness each call.
 
+    Per-customer prediction dump (opt-in, off by default):
+        save_predictions : when True, write the per-customer predicted means to
+                           a CSV inside an auto-named subfolder of `output_dir`.
+        output_dir       : BASE directory the run subfolder is created in
+                           (required when save_predictions=True).
+        file_name        : name of the CSV inside that subfolder.
+        run_name         : tag for the subfolder name (defaults to the model
+                           type); pass the Optuna study name to line the dump
+                           up with its checkpoints/summaries. The subfolder is
+                           `{tag}_n{n_simulations}_seed{seed}_{YYYYMMDD_HHMMSS}`.
+
     Returns a dict with:
         prediction_mean : ndarray (N, T_HOLD)
         actual          : ndarray (N, T_HOLD) — true holdout targets,
@@ -362,6 +453,7 @@ def run_monte_carlo_forecast(
                           downstream evaluation (NOT used as input).
         target_col, target_idx, n_simulations, seed
         simulations     : ndarray (S, N, T_HOLD), only if return_simulations.
+        predictions_path: Path to the written CSV, only if save_predictions.
     """
     return _run_monte_carlo(
         model,
@@ -372,6 +464,11 @@ def run_monte_carlo_forecast(
         device=device,
         return_simulations=return_simulations,
         seed=seed,
+        save_predictions=save_predictions,
+        output_dir=output_dir,
+        file_name=file_name,
+        run_name=run_name,
+        model_type="lstm",
     )
 
 
@@ -383,6 +480,10 @@ def run_monte_carlo_forecast_transformer(
     device: str | torch.device | None = None,
     return_simulations: bool = True,
     seed: int | None = None,
+    save_predictions: bool = False,
+    output_dir: str | Path | None = None,
+    file_name: str = "predictions.csv",
+    run_name: str | None = None,
 ) -> dict[str, Any]:
     """Monte Carlo holdout forecast for an attention (Transformer) inference model.
 
@@ -390,7 +491,9 @@ def run_monte_carlo_forecast_transformer(
     `simulate_transformer_path` rollout because the Transformer is stateless. The
     inference model must be an `InferenceMultinomialTransformerModel` (its
     `forward` accepts `only_last=` and ignores `state`). Returns the same dict
-    described in `run_monte_carlo_forecast`.
+    described in `run_monte_carlo_forecast`, and accepts the same opt-in
+    per-customer prediction-dump arguments (`save_predictions`, `output_dir`,
+    `file_name`, `run_name`); the subfolder tag defaults to "transformer".
     """
     return _run_monte_carlo(
         model,
@@ -401,6 +504,11 @@ def run_monte_carlo_forecast_transformer(
         device=device,
         return_simulations=return_simulations,
         seed=seed,
+        save_predictions=save_predictions,
+        output_dir=output_dir,
+        file_name=file_name,
+        run_name=run_name,
+        model_type="transformer",
     )
 
 
