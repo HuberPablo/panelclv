@@ -22,6 +22,7 @@ optuna_summaries/
 plots/
 Predictions/
 FOR_ANALYSIS/
+Studies/
 
 Datasets/Kaggle/online_retail_II.csv
 Datasets/Kaggle/

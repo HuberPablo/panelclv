@@ -29,6 +29,7 @@ from .segment_analysis import (
     assign_customer_groups,
     group_metrics_table,
 )
+from .forecast_run import ForecastRun
 
 __all__ = [
     "compute_metrics",
@@ -48,4 +49,5 @@ __all__ = [
     "load_predictions_from_csv",
     "assign_customer_groups",
     "group_metrics_table",
+    "ForecastRun",
 ]
