@@ -411,6 +411,40 @@ class PanelConfig:
             d["clip_target_upper"] = self.clip_target_upper
         return d
 
+    def to_dict(self) -> dict[str, Any]:
+        """All fields as a JSON-serializable dict (post-validation/normalization).
+
+        Captures the *resolved* config actually used by `prepare_dataset`: the
+        feature-role sequences normalized to lists, `embedded_cols` collapsed to
+        a plain ``{col: int | "auto"}`` map, and the per-frequency defaults filled
+        in (`periods_per_year`, and `time_features` resolved to the kept flags).
+        So a study `config.json` that stores this can fully reconstruct the run's
+        PanelConfig — every constructor argument is present, with the same values
+        the pipeline saw. Mirrors (and supersedes) the partial `.data_config` view.
+        """
+        return {
+            "id_col": self.id_col,
+            "target_col": self.target_col,
+            "frequency": self.frequency,
+            "training_start": self.training_start,
+            "training_end": self.training_end,
+            "validation_start": self.validation_start,
+            "holdout_start": self.holdout_start,
+            "holdout_end": self.holdout_end,
+            "time_cols": list(self.time_cols) if self.time_cols is not None else None,
+            "date_col": self.date_col,
+            "periods_per_year": self.periods_per_year,
+            "clip_target_upper": self.clip_target_upper,
+            "require_calibration_activity": self.require_calibration_activity,
+            "time": list(self.time),
+            "known_future": list(self.known_future),
+            "observed_past": list(self.observed_past),
+            "static": list(self.static),
+            "time_features": dict(self.time_features),
+            "ar_features": list(self.ar_features),
+            "embedded_cols": dict(normalize_embedded_cols(self.embedded_cols)),
+        }
+
     @property
     def schema(self) -> dict[str, list[str]]:
         """The FEATURE_SCHEMA-equivalent dict.

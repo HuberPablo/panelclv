@@ -215,8 +215,16 @@ def _run_pareto_model(
 
 
 def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
-    """Serializable record of the whole suite (written to the root config.json)."""
+    """Serializable record of the whole suite (written to the root config.json).
+
+    Records every ``StudySuiteConfig`` field (bar the bulky ``data`` arrays, which
+    are summarised) plus the full ``PanelConfig`` under ``panel_config`` — so the
+    file alone documents exactly how the run was configured and how the dataset was
+    built. ``panel_config`` is ``None`` only if ``data`` did not come from
+    ``prepare_dataset`` (older dicts predate the carried config).
+    """
     data = config.data
+    panel_config = data.get("panel_config")
     return {
         "study_name": config.study_name,
         "created": datetime.now().isoformat(timespec="seconds"),
@@ -227,7 +235,10 @@ def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
         "base_seed": config.base_seed,
         "device": config.device,
         "refit_kwargs": config.refit_kwargs,
+        "overwrite": config.overwrite,
         "keep_only_best_checkpoint": config.keep_only_best_checkpoint,
+        # Full PanelConfig (all fields, post-normalization) — the dataset recipe.
+        "panel_config": panel_config.to_dict() if panel_config is not None else None,
         "models": [
             {
                 "name": m.name,

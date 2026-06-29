@@ -529,6 +529,10 @@ def prepare_dataset(
     embedded_cols = (
         normalize_embedded_cols(config.embedded_cols) if config.embedded_cols else None
     )
+    # Keep the original PanelConfig before `config` is rebound to its plain-dict
+    # view below — the return packs it under "panel_config" so the data dict
+    # records every config field, not just the data_config subset.
+    panel_config = config
     config = config.data_config
 
     panel = panel.copy()
@@ -858,6 +862,11 @@ def prepare_dataset(
         "panel":         panel,
         "train_panel":   train_panel,
         "holdout_panel": holdout_panel,
+        # The full PanelConfig that produced this dict. Carried so the data dict is
+        # fully self-describing: downstream archivers (e.g. the study-suite runner's
+        # config.json) can record every config field via `config.to_dict()` without
+        # the caller re-passing it.
+        "panel_config":  panel_config,
     }
 
 
