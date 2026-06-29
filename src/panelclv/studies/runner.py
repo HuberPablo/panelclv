@@ -113,6 +113,10 @@ def _run_neural_model(
             append_timestamp=False,
             summary_dir=sdir,
             sampler=optuna.samplers.TPESampler(seed=seed),
+            # Suite-wide disk policy: when True, drop every non-best trial's
+            # checkpoint once this study finishes (the winning checkpoint, which
+            # the refit/checkpoint rebuild below reloads, is preserved).
+            keep_only_best_checkpoint=config.keep_only_best_checkpoint,
         )
 
         inference_model, data_best = _rebuild_winner(study, spec, config, sdir)
@@ -223,6 +227,7 @@ def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
         "base_seed": config.base_seed,
         "device": config.device,
         "refit_kwargs": config.refit_kwargs,
+        "keep_only_best_checkpoint": config.keep_only_best_checkpoint,
         "models": [
             {
                 "name": m.name,

@@ -102,6 +102,14 @@ class StudySuiteConfig:
     device, refit_kwargs, overwrite
         Passed through to the trainer / forecaster; ``overwrite`` allows reusing an
         existing study-name folder.
+    keep_only_best_checkpoint
+        Disk policy for the per-study Optuna search. ``False`` (default) keeps every
+        trial's ``.pth``; these accumulate fast (``n_trials`` per study × every
+        study). ``True`` forwards to ``run_optuna_study`` so that, once each study
+        completes, all non-best trial checkpoints are deleted — only the study's
+        winning checkpoint survives. That winner is exactly what ``prediction_source``
+        (``"refit"`` warm-start or ``"checkpoint"``) rebuilds from, so the forecast
+        is unaffected; you only lose the ability to inspect losing trials' weights.
     """
 
     studies_base_path: str | Path
@@ -115,6 +123,7 @@ class StudySuiteConfig:
     device: str | None = None
     refit_kwargs: dict[str, Any] = field(default_factory=dict)
     overwrite: bool = False
+    keep_only_best_checkpoint: bool = False
 
     def validate(self) -> None:
         """Fail loudly before any training on a misconfigured suite."""
