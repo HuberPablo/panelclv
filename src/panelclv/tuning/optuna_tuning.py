@@ -824,6 +824,7 @@ def run_optuna_study(
     rollout_weight_rmse: float = 1.0,
     rollout_weight_mape: float = 0.5,
     rollout_weight_bias: float = 0.3,
+    keep_only_best_checkpoint: bool = False,
 ) -> optuna.Study:
     """Runs an Optuna study and saves a JSON / CSV summary of all trials.
 
@@ -880,6 +881,15 @@ def run_optuna_study(
     keep the feature set fixed and tune only model/training hyperparameters. The
     chosen feature set per trial is recorded in the `selected_features` /
     `dropped_features` user attributes (so the summary CSV/JSON is self-documenting).
+
+    `keep_only_best_checkpoint` (default False) trades inspectability for disk:
+    every trial writes a `.pth` (one per trial, they accumulate fast over a long
+    study), but only the best trial's checkpoint is needed afterwards
+    (`build_inference_from_trial` / `refit_best_trial` both load the best trial).
+    Set it True to delete all non-best trial checkpoints once the study completes
+    and the summary is written. The best trial's file (and its recorded
+    `checkpoint_path`) is preserved, so the downstream workflow is unaffected; you
+    only lose the ability to rebuild a NON-winning trial from its weights.
     """
     if model_type not in {"lstm", "transformer"}:
         raise ValueError(f"model_type must be 'lstm' or 'transformer', got {model_type!r}")
@@ -1034,5 +1044,40 @@ def run_optuna_study(
     }
     with open(summary_dir / f"{run_name}_best.json", "w") as f:
         json.dump(summary, f, indent=2, default=str)
+
+    # Optional disk cleanup. Each completed trial recorded its checkpoint under the
+    # "checkpoint_path" user attr; the downstream rebuild (build_inference_from_trial
+    # / refit_best_trial) only ever reloads the BEST trial, so once the summary above
+    # is written every other trial's .pth is dead weight. Delete them when asked.
+    if keep_only_best_checkpoint:
+        best_ckpt = best.user_attrs.get("checkpoint_path")
+        if best_ckpt:
+            best_ckpt = str(Path(best_ckpt))
+            removed = 0
+            for trial in study.trials:
+                path = trial.user_attrs.get("checkpoint_path")
+                # Skip trials with no checkpoint (pruned/failed before torch.save)
+                # and, crucially, the winning checkpoint itself.
+                if not path or str(Path(path)) == best_ckpt:
+                    continue
+                try:
+                    Path(path).unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    pass  # never let cleanup crash an otherwise-finished study
+            if data_info.get("verbose"):
+                print(
+                    f"[run_optuna_study] keep_only_best_checkpoint: removed "
+                    f"{removed} non-best trial checkpoint(s); kept {best_ckpt}"
+                )
+        else:
+            # No recorded winner path → deleting "non-best" files could remove the
+            # one we must keep. Skip rather than risk it.
+            warnings.warn(
+                "keep_only_best_checkpoint=True but the best trial has no recorded "
+                "checkpoint_path; skipping checkpoint cleanup to avoid deleting the "
+                "winning checkpoint.",
+                stacklevel=2,
+            )
 
     return study
