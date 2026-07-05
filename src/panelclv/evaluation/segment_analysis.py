@@ -4,8 +4,9 @@ Two steps, connected by customer ids:
 
     1. `assign_customer_groups(data, groups=...)`  -> {group_name: ids}
     2. `group_metrics_table(data, model_predictions, group_ids, ...)`
-           -> RMSE / MAPE / bias per (group, model), scored on the saved
-              predictions; optionally written to CSV.
+           -> RMSE (individual) / MAPE, bias, bias_percent (aggregate) per
+              (group, model), scored on the saved predictions; optionally
+              written to CSV.
 
 Groups are derived from each customer's calibration vs holdout activity:
 
@@ -32,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
+from .evaluation_utils import aggregate_bias
 from .plot_utils import load_predictions_from_csv
 
 
@@ -134,7 +136,24 @@ def group_metrics_table(
 
     `group_ids` is the {group_name: ids} mapping from `assign_customer_groups`.
     Returns a MultiIndex (group, model) DataFrame with columns n_customers,
-    rmse, mape, bias_percent; if `save_path` is given it is also written to CSV.
+    rmse, mape, bias, bias_percent; if `save_path` is given it is also written to CSV.
+
+    Each metric is either **individual** (scored on the per-customer, per-week cells,
+    so every customer contributes directly) or **aggregate** (customers are summed into
+    one weekly curve first, then scored — the tracking-quality view):
+
+    - `rmse`         : INDIVIDUAL. sqrt(mean over all (customer, week) cells of the
+                       squared error). Sensitive to per-customer over/under-prediction.
+    - `mape`         : AGGREGATE. MAPE of the summed weekly totals; NaN when the group's
+                       total actual is 0 (e.g. At Risk), since there is no positive
+                       denominator.
+    - `bias`         : AGGREGATE. Raw sum(pred) - sum(actual) — the signed count of
+                       over/under-forecast transactions. Well-defined for every group
+                       (no division), so it is the usable signed metric for zero-actual
+                       groups like At Risk, where it equals the total predicted "phantom"
+                       activity for customers who were in fact inactive.
+    - `bias_percent` : AGGREGATE. The same bias as a % of the total actual; NaN when that
+                       total is 0.
     """
     _, _, actual = _counts(data)
 
@@ -157,8 +176,10 @@ def group_metrics_table(
             m = compute_forecast_metrics(a_g, arr[row_idx])
             rows.append({
                 "group": gname, "model": mname, "n_customers": len(row_idx),
-                "rmse": m["rmse"], "mape": m["mape_aggregate_style"],
-                "bias_percent": m["bias_percent"],
+                "rmse": m["rmse"],                              # individual (per cell)
+                "mape": m["mape_aggregate_style"],              # aggregate (weekly curve)
+                "bias": aggregate_bias(a_g, arr[row_idx]),      # aggregate (raw count)
+                "bias_percent": m["bias_percent"],              # aggregate (% of actual)
             })
 
     table = pd.DataFrame(rows).set_index(["group", "model"]).sort_index()

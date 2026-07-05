@@ -90,7 +90,7 @@ Depends only on pandas (to parse the window dates) plus the in-package
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Mapping, Sequence
 
 import pandas as pd
@@ -444,6 +444,21 @@ class PanelConfig:
             "ar_features": list(self.ar_features),
             "embedded_cols": dict(normalize_embedded_cols(self.embedded_cols)),
         }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> "PanelConfig":
+        """Rebuild a `PanelConfig` from a `to_dict()` payload.
+
+        The inverse of `to_dict`: every key it emits is a constructor argument, so
+        reconstruction is just `cls(**d)`. `__post_init__` re-runs the same
+        validation/normalization the original went through (e.g. a `time_cols`
+        stored as a JSON list is re-tupled), so a config round-tripped through a
+        study's `config.json` is the same config `prepare_dataset` originally saw.
+        Keys that are not constructor fields are dropped, so a reader on an older
+        schema never crashes on a newer file.
+        """
+        field_names = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in field_names})
 
     @property
     def schema(self) -> dict[str, list[str]]:

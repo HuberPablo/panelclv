@@ -27,5 +27,25 @@ Typical use (see ``scripts/run_studies.py`` for a full example)::
 
 from .config import ModelSpec, StudySuiteConfig
 from .runner import run_study_suite
+from .analysis import (
+    load_model_predictions,
+    aggregate_suite_predictions,
+    plot_suite_forecast,
+    group_metrics_suite_table,
+    group_metrics_suite_distribution,
+    describe_dataset,
+    describe_suite_dataset,
+)
 
-__all__ = ["run_study_suite", "StudySuiteConfig", "ModelSpec"]
+__all__ = [
+    "run_study_suite",
+    "StudySuiteConfig",
+    "ModelSpec",
+    "load_model_predictions",
+    "aggregate_suite_predictions",
+    "plot_suite_forecast",
+    "group_metrics_suite_table",
+    "group_metrics_suite_distribution",
+    "describe_dataset",
+    "describe_suite_dataset",
+]
