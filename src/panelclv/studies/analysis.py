@@ -370,6 +370,38 @@ def _select_rows(
     return None, None
 
 
+def _across_study_band(
+    model_dir: Path, row_idx: np.ndarray | None, ci: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int] | None:
+    """Per-week across-studies ``(mean, low, high, n_studies)`` of the aggregate forecast.
+
+    Sums each study's ``Prediction_i.csv`` over the selected customers into a weekly
+    curve, then summarises the spread of those curves ACROSS the independent studies with
+    a Student-t interval ``mean ± t_{1-a/2, n-1} · s/√n``. Returns ``None`` for a model
+    with fewer than two studies (a deterministic benchmark has a single fit, so there is
+    no study-to-study spread to shade).
+    """
+    from panelclv.evaluation.plot_utils import load_predictions_from_csv
+    from scipy import stats
+
+    preds_dir = Path(model_dir) / "Predictions"
+    curves: list[np.ndarray] = []
+    for path in sorted(preds_dir.glob("Prediction_*.csv"), key=_prediction_index):
+        values, _ = load_predictions_from_csv(path)          # (N, T_HOLD)
+        if row_idx is not None:
+            values = values[row_idx]
+        curves.append(values.sum(axis=0))                    # aggregate over customers
+    n = len(curves)
+    if n < 2:
+        return None
+
+    stack = np.stack(curves, axis=0)                         # (n_studies, T_HOLD)
+    mean = stack.mean(axis=0)
+    std = stack.std(axis=0, ddof=1)                          # sample spread across studies
+    half = stats.t.ppf(1 - (1 - ci) / 2, df=n - 1) * std / np.sqrt(n)
+    return mean, mean - half, mean + half, n
+
+
 # ---------------------------------------------------------------------------
 # The headline: plot every model's forecast over training + holdout
 # ---------------------------------------------------------------------------
@@ -383,6 +415,8 @@ def plot_suite_forecast(
     data: dict[str, Any] | None = None,
     group: Any = None,
     customer_ids: Any = None,
+    confidence_interval: bool = False,
+    ci: float = 0.95,
     save_path: str | Path | None = None,
     title: str | None = None,
     pareto_nbd_benchmark: bool = False,
@@ -416,8 +450,20 @@ def plot_suite_forecast(
         (sums) over exactly those customers — for one id, that customer's own curve.
         Pass at most one of ``group`` / ``customer_ids``; with neither, the whole
         cohort is plotted (unchanged behaviour).
+    confidence_interval
+        When ``True`` (requires the default ``study=None``, the across-studies mode),
+        shade each model's forecast with a ``ci``-level band summarising its spread ACROSS
+        the suite's independent studies (mean ± a Student-t interval), and annotate the
+        title with e.g. ``"95% CI across 20 studies"``. A model with a single study (a
+        deterministic benchmark) draws no band. This is a different ribbon from the MC one
+        ``plot_weekly_aggregated``'s ``show_ci`` draws — that needs per-simulation arrays,
+        which the disk-loaded per-customer means are not.
+    ci
+        Confidence level for that band (default ``0.95``). Only used when
+        ``confidence_interval=True``.
     save_path
-        If given, the figure is written here (PNG).
+        If given, the figure is written here (PNG). With ``confidence_interval=True`` the
+        file is written after the bands are drawn, so they are included.
     title
         Overrides the auto-generated, mode-aware title.
     pareto_nbd_benchmark, pareto_paper_benchmark
@@ -439,6 +485,11 @@ def plot_suite_forecast(
 
     if (panel_path is None) == (data is None):
         raise ValueError("pass exactly one of panel_path= or data=")
+    if confidence_interval and study is not None:
+        raise ValueError(
+            "confidence_interval=True summarises spread ACROSS studies, so it needs the "
+            "default study=None (across-studies mode), not a single study."
+        )
     if data is None:
         data = _actuals_from_panel(root, panel_path)
 
@@ -504,15 +555,60 @@ def plot_suite_forecast(
         if sel_label is not None:
             title = f"{title} — {sel_label}"
 
-    return plot_weekly_aggregated(
+    # Across-studies confidence band: for each model with >1 study, shade the spread of
+    # its weekly-aggregate forecast over the independent studies. Computed BEFORE the plot
+    # so the study count can go in the title; drawn AFTER (matched to each line's colour).
+    bands: dict[str, tuple] = {}
+    if confidence_interval:
+        pct = f"{ci * 100:g}%"
+        bands = {
+            name: band
+            for name, model_dir in _discover_models(root)
+            if (band := _across_study_band(model_dir, row_idx, ci)) is not None
+        }
+        if not bands:
+            raise ValueError(
+                "confidence_interval=True but no model has >1 study to form an interval "
+                "(a deterministic benchmark is a single fit)."
+            )
+        n_studies = next(iter(bands.values()))[3]
+        title = f"{title} — {pct} CI across {n_studies} studies"
+
+    fig, ax = plot_weekly_aggregated(
         actuals=holdout_curve,
         predictions_by_model=predictions_by_model,
         train_actuals=train_curve,
         title=title,
-        save_path=save_path,
+        # Defer saving to after the bands are drawn, else the PNG misses them.
+        save_path=None if confidence_interval else save_path,
         data=data,
         **plot_kwargs,
     )
+
+    if confidence_interval:
+        from matplotlib.patches import Patch
+
+        # Match each band to its model line by colour (the line labels are the model names).
+        color_by_label = {ln.get_label(): ln.get_color() for ln in ax.get_lines()}
+        t_cal = len(train_curve)
+        hold_x = np.arange(t_cal, t_cal + holdout_curve.shape[0])
+        for name, (_, low, high, _) in bands.items():
+            ax.fill_between(
+                hold_x, low, high,
+                color=color_by_label.get(name), alpha=0.2, linewidth=0, zorder=1,
+            )
+        # One neutral legend entry explaining the shading, appended to the model legend.
+        handles, labels = ax.get_legend_handles_labels()
+        proxy = Patch(facecolor="grey", alpha=0.25, label=f"{pct} CI (across studies)")
+        ax.legend(handles + [proxy], labels + [proxy.get_label()], loc="best")
+        fig.tight_layout()
+
+        if save_path is not None:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(save_path, dpi=150)
+
+    return fig, ax
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +776,293 @@ def group_metrics_suite_distribution(
         save_path.parent.mkdir(parents=True, exist_ok=True)
         dist.to_csv(save_path)
     return dist
+
+
+# ---------------------------------------------------------------------------
+# Whole-cohort study metrics — the headline RMSE / bias / MAPE per model,
+# optionally with a confidence interval across the suite's independent studies
+# ---------------------------------------------------------------------------
+
+
+# The three whole-cohort metrics `compute_forecast_metrics` (a.k.a. mc_compute_metrics)
+# returns — the exact numbers the runner writes to results.csv, per study.
+_STUDY_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate_style"]
+
+
+def study_metrics(
+    root: str | Path,
+    panel_path: str | Path,
+    confidence_interval: bool = False,
+    standard_deviation: bool = False,
+    ci: float = 0.95,
+    display: bool = False,
+    decimals: int = 3,
+):
+    """Whole-cohort forecast metrics per model for a finished suite, from ROOT + panel.
+
+    Give it the suite folder and the dataset (panel) CSV it was built from; it rebuilds
+    the exact dataset (via the persisted ``panel_config``), then scores **every** study's
+    stored forecast with the same function the runner used (``compute_forecast_metrics``:
+    whole-cohort RMSE, aggregate %-bias, aggregate-style MAPE). Each neural model ran
+    ``n_studies_per_model`` independent studies (own seed), so the summary is the mean
+    over those studies; a deterministic benchmark (Pareto/NBD) has a single study, which
+    averages to itself.
+
+    ``standard_deviation`` and ``confidence_interval`` describe the SAME across-studies
+    spread but answer different questions, and are independent toggles you can combine:
+
+    - ``standard_deviation`` → ``std``, the study-to-study spread. This is "where a single
+      re-run lands" — the usual ``mean ± SD`` reported in ML papers over N seeds.
+    - ``confidence_interval`` → a Student-t interval on the **mean**,
+      ``mean ± t_{1-a/2, n-1} · s/√n`` (``ci_low`` / ``ci_high``). This is "how precisely
+      the *expected* metric is estimated"; it is ~√n narrower than the SD.
+
+    Parameters
+    ----------
+    root
+        The suite folder ``Studies/<name>/``.
+    panel_path
+        The customer-period panel (dataset) CSV the suite was built from — used to rebuild
+        the actuals and the cohort.
+    confidence_interval
+        Add the across-studies Student-t interval on the mean (``ci_low`` / ``ci_high``).
+        A single-study model (Pareto/NBD) has no interval (``NaN``).
+    standard_deviation
+        Add the across-studies sample standard deviation (``std``, ``ddof=1``). ``NaN`` for
+        a single-study model.
+    ci
+        Confidence level for the interval (default ``0.95``). Only used when
+        ``confidence_interval=True``.
+    display
+        Render a paper-ready ``mean ± …`` table of strings (one column per metric) instead
+        of the numeric columns. The ``±`` term is the SD when ``standard_deviation=True``
+        and the CI half-width (``t·s/√n``, symmetric) when ``confidence_interval=True``;
+        with both, each term is shown and labelled ``(SD)`` / ``(CI)``. Requires at least
+        one of the two flags (there is no ``±`` term otherwise). A single-study model shows
+        just its mean. Numbers are rounded to ``decimals``.
+    decimals
+        Decimal places for the ``display`` strings (default ``3``). Ignored otherwise.
+
+    Returns a ``pandas.DataFrame`` indexed by model. With neither spread flag (and no
+    ``display``): flat columns ``[rmse, bias_percent, mape_aggregate_style, n_studies]``
+    (the means). With a spread flag and ``display=False``: a MultiIndex column
+    ``(metric, stat)`` whose stats are ``mean`` plus whichever of ``std`` / ``ci_low`` /
+    ``ci_high`` were requested, then ``n``. With ``display=True``: one string column per
+    metric, ``"mean ± …"``.
+    """
+    root = Path(root)
+    data = _actuals_from_panel(root, panel_path)
+    return _study_metrics_from_data(
+        data, root,
+        confidence_interval=confidence_interval,
+        standard_deviation=standard_deviation,
+        ci=ci, display=display, decimals=decimals,
+    )
+
+
+def _study_metrics_from_data(
+    data: dict[str, Any],
+    root: Path,
+    *,
+    confidence_interval: bool,
+    standard_deviation: bool,
+    ci: float,
+    display: bool,
+    decimals: int,
+):
+    """Core of :func:`study_metrics` given an already-rebuilt ``prepare_dataset`` dict.
+
+    Split out so :func:`compare_study_metrics` can reuse the actuals it rebuilt (for its
+    holdout/cohort consistency check) without rebuilding them a second time. See
+    :func:`study_metrics` for the parameter semantics and return shapes.
+    """
+    # Lazy import: mc_compute_metrics pulls in torch via the models package, so we only
+    # pay that cost when actually scoring (keeps the module import cheap / torch-free).
+    import pandas as pd
+    from panelclv.models import mc_compute_metrics  # = compute_forecast_metrics
+
+    # Holdout actuals as (N, T_HOLD): the target channel of the (N, T, F) holdout tensor,
+    # in the cohort's own order — the same order the prediction CSVs are saved in.
+    actual = np.asarray(data["holdout"], dtype=np.float64)[:, :, int(data["target_idx"])]
+    ref_ids = np.asarray(data["ids"])
+
+    # Score each (model, study) forecast on its own — one row per study. Alignment is
+    # asserted so prediction row i and actual row i are the same customer.
+    rows: list[dict[str, Any]] = []
+    for name, model_dir in _discover_models(root):
+        preds = model_dir / "Predictions"
+        for i in sorted(_prediction_index(p) for p in preds.glob("Prediction_*.csv")):
+            values, ids = load_model_predictions(model_dir, study=i)
+            if ids is not None and not np.array_equal(np.asarray(ids), ref_ids):
+                raise ValueError(
+                    f"model {name!r} study {i}: prediction customer ids do not match the "
+                    f"rebuilt cohort — is panel_path the panel this suite was built from?"
+                )
+            if values.shape != actual.shape:
+                raise ValueError(
+                    f"model {name!r} study {i}: forecast shape {values.shape} != actual "
+                    f"{actual.shape}"
+                )
+            rows.append({"model": name, "study": i, **mc_compute_metrics(actual, values)})
+
+    per_study = pd.DataFrame(rows)
+    grouped = per_study.groupby("model", sort=False)[_STUDY_METRIC_COLS]
+
+    n = grouped.size()
+    mean = grouped.mean()
+
+    # Plain means (flat table) when nothing extra was asked for.
+    if not (confidence_interval or standard_deviation or display):
+        table = mean.copy()
+        table["n_studies"] = n
+        return table
+
+    std = grouped.std(ddof=1)                        # sample spread across studies; NaN if n<2
+
+    # CI half-width (t · s/√n), symmetric, per model×metric. Only needed for the CI columns
+    # or the ± display; NaN where a model has < 2 studies.
+    half = None
+    if confidence_interval:
+        from scipy import stats  # local: SciPy only needed for the t-interval
+
+        alpha = 1.0 - ci
+        sem = std.div(np.sqrt(n), axis=0)
+        tcrit = pd.Series(
+            {m: stats.t.ppf(1 - alpha / 2, df=int(k) - 1) if k > 1 else np.nan
+             for m, k in n.items()}
+        )
+        half = sem.mul(tcrit, axis=0)
+
+    # ---- paper-ready "mean ± …" strings -----------------------------------------------
+    if display:
+        if not (confidence_interval or standard_deviation):
+            raise ValueError(
+                "display=True needs standard_deviation=True and/or confidence_interval=True "
+                "to have a ± term to show."
+            )
+
+        def cell(model: Any, metric: str) -> str:
+            mu = f"{mean.loc[model, metric]:.{decimals}f}"
+            terms: list[str] = []
+            if standard_deviation:
+                s = std.loc[model, metric]
+                if not pd.isna(s):  # single-study models have no spread
+                    label = " (SD)" if confidence_interval else ""
+                    terms.append(f"± {s:.{decimals}f}{label}")
+            if confidence_interval:
+                h = half.loc[model, metric]
+                if not pd.isna(h):
+                    label = " (CI)" if standard_deviation else ""
+                    terms.append(f"± {h:.{decimals}f}{label}")
+            return f"{mu} {' '.join(terms)}".rstrip()
+
+        disp = pd.DataFrame(
+            {metric: {m: cell(m, metric) for m in mean.index} for metric in _STUDY_METRIC_COLS}
+        )
+        disp.index.name = mean.index.name  # "model"
+        return disp
+
+    # ---- numeric (metric, stat) table -------------------------------------------------
+    # Assemble only the requested stats, in a stable order: mean, [std], [ci], n.
+    parts: dict[str, Any] = {"mean": mean}
+    if standard_deviation:
+        parts["std"] = std
+    if confidence_interval:
+        parts["ci_low"] = mean.sub(half)
+        parts["ci_high"] = mean.add(half)
+    # broadcast the per-model study count across the metric columns
+    parts["n"] = pd.DataFrame({c: n for c in _STUDY_METRIC_COLS})
+
+    # keys=... fixes the stat order; swaplevel puts it as (metric, stat) so each metric's
+    # stats sit together, and we keep the metric order from _STUDY_METRIC_COLS.
+    table = (
+        pd.concat(parts.values(), axis=1, keys=parts.keys())
+        .swaplevel(axis=1)
+        .reindex(columns=_STUDY_METRIC_COLS, level=0)
+    )
+    table.columns.names = ["metric", "stat"]
+    return table
+
+
+def compare_study_metrics(
+    suites: dict[str, str | Path],
+    panel_path: str | Path,
+    confidence_interval: bool = False,
+    standard_deviation: bool = False,
+    ci: float = 0.95,
+    display: bool = False,
+    decimals: int = 3,
+):
+    """Stack :func:`study_metrics` for several suites into one comparison table.
+
+    Compares up to four finished suites — e.g. the same models under different validation
+    windows, losses or feature sets — scored against one shared dataset. Each ``ROOT`` is
+    summarised exactly as :func:`study_metrics` would (same ``confidence_interval`` /
+    ``standard_deviation`` / ``ci`` / ``display`` / ``decimals`` options, all forwarded),
+    then the per-suite tables are stacked with a ``(model, suite)`` row index so each
+    model's variants sit together.
+
+    Parameters
+    ----------
+    suites
+        ``{name: ROOT}`` — a display name mapped to each suite folder, at most four. The
+        names label the rows and set the suite order; dict keys keep them unique.
+    panel_path
+        The one dataset (panel) CSV shared by every suite. Note each suite still rebuilds
+        its *own* actuals from its *own* persisted ``panel_config``, so if two suites used
+        different holdout windows or cohorts their metrics are not comparable — a warning
+        is emitted when the rebuilt holdout length or cohort size differs across suites.
+    confidence_interval, standard_deviation, ci, display, decimals
+        Forwarded verbatim to :func:`study_metrics`; see it for their meaning and the
+        resulting column shapes.
+
+    Returns a ``pandas.DataFrame`` with the same columns :func:`study_metrics` produces for
+    the chosen options, indexed by ``(model, suite)`` — models in discovery order, suites
+    in the order given.
+    """
+    import warnings
+
+    import pandas as pd
+
+    if not isinstance(suites, dict):
+        raise TypeError("suites must be a dict {name: ROOT}")
+    if not 1 <= len(suites) <= 4:
+        raise ValueError(f"pass between 1 and 4 named suites, got {len(suites)}")
+
+    tables: dict[str, Any] = {}
+    holdout_lengths: dict[str, int] = {}
+    cohort_sizes: dict[str, int] = {}
+    for name, root in suites.items():
+        root = Path(root)
+        data = _actuals_from_panel(root, panel_path)          # rebuilt once, reused below
+        holdout_lengths[name] = int(np.asarray(data["holdout"]).shape[1])
+        cohort_sizes[name] = int(len(np.asarray(data["ids"])))
+        tables[name] = _study_metrics_from_data(
+            data, root,
+            confidence_interval=confidence_interval,
+            standard_deviation=standard_deviation,
+            ci=ci, display=display, decimals=decimals,
+        )
+
+    # Metrics are only comparable across suites that share a holdout window and cohort;
+    # each ROOT rebuilds its own actuals, so flag a mismatch rather than silently combining
+    # apples and oranges. Warn (not raise) so an intentional cross-window view is allowed.
+    for label, sizes in (("holdout length", holdout_lengths), ("cohort size", cohort_sizes)):
+        if len(set(sizes.values())) > 1:
+            detail = ", ".join(f"{k}: {v}" for k, v in sizes.items())
+            warnings.warn(
+                f"suites differ in {label} ({detail}) — metrics may not be comparable.",
+                stacklevel=2,
+            )
+
+    # Stack per-suite tables → (suite, model), then flip to (model, suite) so each model's
+    # variants group together. Reindex explicitly to keep models in discovery order and
+    # suites in the given order (sort_index would alphabetise both and lose that).
+    combined = pd.concat(tables.values(), keys=tables.keys(), names=["suite", "model"])
+    combined = combined.swaplevel(0, 1)
+    model_order = list(dict.fromkeys(combined.index.get_level_values("model")))
+    ordered = [(m, s) for m in model_order for s in suites if (m, s) in combined.index]
+    return combined.reindex(ordered)
 
 
 # ---------------------------------------------------------------------------

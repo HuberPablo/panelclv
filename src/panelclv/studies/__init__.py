@@ -33,6 +33,8 @@ from .analysis import (
     plot_suite_forecast,
     group_metrics_suite_table,
     group_metrics_suite_distribution,
+    study_metrics,
+    compare_study_metrics,
     describe_dataset,
     describe_suite_dataset,
 )
@@ -46,6 +48,8 @@ __all__ = [
     "plot_suite_forecast",
     "group_metrics_suite_table",
     "group_metrics_suite_distribution",
+    "study_metrics",
+    "compare_study_metrics",
     "describe_dataset",
     "describe_suite_dataset",
 ]

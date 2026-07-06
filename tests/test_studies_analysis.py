@@ -15,8 +15,10 @@ import pytest
 
 from panelclv.studies import (
     aggregate_suite_predictions,
+    compare_study_metrics,
     load_model_predictions,
     plot_suite_forecast,
+    study_metrics,
 )
 from panelclv.evaluation.plot_utils import (
     load_predictions_from_csv,
@@ -62,20 +64,37 @@ def suite(tmp_path):
     return root, a1, a2, b1
 
 
-def _fake_data():
+def _fake_data(t=T):
     """A stand-in prepare_dataset dict for the plot path (data= escape hatch).
 
     Only the keys plot_suite_forecast reads: calibration/holdout (N, T, F) tensors,
-    target_idx and ids. F=1, target channel 0.
+    target_idx and ids. F=1, target channel 0. ``t`` sets the holdout length (used by the
+    compare-suites mismatch test).
     """
     calibration = np.ones((N, 6, 1))           # 6 training weeks
-    holdout = np.ones((N, T, 1)) * 2.0          # T holdout weeks
+    holdout = np.ones((N, t, 1)) * 2.0          # t holdout weeks
     return {
         "calibration": calibration,
         "holdout": holdout,
         "target_idx": 0,
         "ids": IDS,
     }
+
+
+def _make_suite(root, t=T, offset=0.0):
+    """Write a two-model suite (ModelA: 2 studies, ModelB: 1) with t-week forecasts."""
+    (root / "ModelA" / "Predictions").mkdir(parents=True)
+    (root / "ModelB" / "Predictions").mkdir(parents=True)
+    a1 = np.arange(N * t, dtype=float).reshape(N, t) + offset
+    _write_prediction(root / "ModelA", 1, a1)
+    _write_prediction(root / "ModelA", 2, a1 + 2.0)
+    _write_prediction(root / "ModelB", 1, np.ones((N, t)) * 5.0)
+    with open(root / "config.json", "w") as f:
+        json.dump(
+            {"models": [{"name": "ModelA"}, {"name": "ModelB"}],
+             "data_summary": {"id_col": "customer_id"}},
+            f,
+        )
 
 
 # --- loading / averaging -----------------------------------------------------
@@ -157,6 +176,192 @@ def test_plot_requires_exactly_one_source(suite):
     root, *_ = suite
     with pytest.raises(ValueError, match="exactly one"):
         plot_suite_forecast(root, panel_path="x.csv", data=_fake_data())
+
+
+# --- study_metrics (whole-cohort metrics, with SD / CI / display) -------------
+
+METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate_style"]
+
+
+@pytest.fixture
+def patched_actuals(suite, monkeypatch):
+    """Point study_metrics' actuals rebuild at a controlled holdout — no panel needed.
+
+    Monkeypatches ``_actuals_from_panel`` so ``panel_path`` is irrelevant; the metrics
+    are then scored against ``_fake_data()``'s holdout (all 2.0, so no zero-denominator
+    NaNs in bias/MAPE). Returns ``(suite_tuple, actual_2d)``.
+    """
+    from panelclv.studies import analysis
+
+    data = _fake_data()
+    monkeypatch.setattr(analysis, "_actuals_from_panel", lambda root, panel_path: data)
+    actual = data["holdout"][:, :, data["target_idx"]]      # (N, T) the metric fn sees
+    return suite, actual
+
+
+def _expected_per_study(actual, preds_by_model):
+    """{model: {metric: [per-study values]}} via the same metric fn study_metrics uses."""
+    from panelclv.models import mc_compute_metrics
+
+    out = {}
+    for name, preds in preds_by_model.items():
+        vals = {m: [] for m in METRIC_COLS}
+        for p in preds:
+            r = mc_compute_metrics(actual, p)
+            for m in METRIC_COLS:
+                vals[m].append(r[m])
+        out[name] = vals
+    return out
+
+
+def test_study_metrics_default_returns_means(patched_actuals):
+    (root, a1, a2, b1), actual = patched_actuals
+    tbl = study_metrics(root, "ignored.csv")
+
+    assert list(tbl.columns) == METRIC_COLS + ["n_studies"]
+    assert tbl.loc["ModelA", "n_studies"] == 2       # 2 studies averaged
+    assert tbl.loc["ModelB", "n_studies"] == 1
+
+    exp = _expected_per_study(actual, {"ModelA": [a1, a2], "ModelB": [b1]})
+    for m in METRIC_COLS:
+        assert tbl.loc["ModelA", m] == pytest.approx(np.mean(exp["ModelA"][m]))
+        assert tbl.loc["ModelB", m] == pytest.approx(exp["ModelB"][m][0])
+
+
+def test_study_metrics_standard_deviation(patched_actuals):
+    (root, a1, a2, b1), actual = patched_actuals
+    tbl = study_metrics(root, "x", standard_deviation=True)
+
+    # stat columns are exactly mean/std/n — no CI when only SD is asked for.
+    assert set(tbl.columns.get_level_values("stat")) == {"mean", "std", "n"}
+
+    exp = _expected_per_study(actual, {"ModelA": [a1, a2]})
+    for m in METRIC_COLS:
+        assert tbl.loc["ModelA", (m, "std")] == pytest.approx(
+            np.std(exp["ModelA"][m], ddof=1)
+        )
+    # A single-study model has no spread.
+    assert np.isnan(tbl.loc["ModelB", ("rmse", "std")])
+    assert tbl.loc["ModelB", ("rmse", "n")] == 1
+
+
+def test_study_metrics_ci_is_symmetric_t_interval(patched_actuals):
+    from scipy import stats as sstats
+
+    (root, a1, a2, b1), actual = patched_actuals
+    tbl = study_metrics(root, "x", confidence_interval=True, ci=0.95)
+
+    assert set(tbl.columns.get_level_values("stat")) == {"mean", "ci_low", "ci_high", "n"}
+
+    exp = _expected_per_study(actual, {"ModelA": [a1, a2]})
+    n = 2
+    tcrit = sstats.t.ppf(0.975, n - 1)
+    for m in METRIC_COLS:
+        vals = exp["ModelA"][m]
+        mean, sd = np.mean(vals), np.std(vals, ddof=1)
+        half = tcrit * sd / np.sqrt(n)
+        lo = tbl.loc["ModelA", (m, "ci_low")]
+        hi = tbl.loc["ModelA", (m, "ci_high")]
+        assert lo == pytest.approx(mean - half)
+        assert hi == pytest.approx(mean + half)
+        assert (lo + hi) / 2 == pytest.approx(mean)        # symmetric about the mean
+    # Single-study model: interval undefined.
+    assert np.isnan(tbl.loc["ModelB", ("rmse", "ci_low")])
+
+
+def test_study_metrics_display_sd_strings(patched_actuals):
+    (root, a1, a2, b1), actual = patched_actuals
+    tbl = study_metrics(root, "x", standard_deviation=True, display=True, decimals=3)
+
+    exp = _expected_per_study(actual, {"ModelA": [a1, a2]})
+    mean = np.mean(exp["ModelA"]["rmse"])
+    sd = np.std(exp["ModelA"]["rmse"], ddof=1)
+    assert tbl.loc["ModelA", "rmse"] == f"{mean:.3f} ± {sd:.3f}"
+    # Single-study model shows just the mean — no ± term.
+    assert "±" not in tbl.loc["ModelB", "rmse"]
+
+
+def test_study_metrics_display_both_labels_terms(patched_actuals):
+    (root, *_), _ = patched_actuals
+    tbl = study_metrics(
+        root, "x", standard_deviation=True, confidence_interval=True, display=True
+    )
+    cell = tbl.loc["ModelA", "rmse"]
+    assert "(SD)" in cell and "(CI)" in cell            # both terms labelled, unambiguous
+
+
+def test_study_metrics_display_needs_a_spread_flag(patched_actuals):
+    (root, *_), _ = patched_actuals
+    with pytest.raises(ValueError, match="display=True needs"):
+        study_metrics(root, "x", display=True)
+
+
+# --- compare_study_metrics (several suites, one panel) ------------------------
+
+
+@pytest.fixture
+def two_suites(tmp_path, monkeypatch):
+    """Two consistent suites (same holdout) with actuals rebuild monkeypatched away."""
+    from panelclv.studies import analysis
+
+    root_a, root_b = tmp_path / "A", tmp_path / "B"
+    _make_suite(root_a)
+    _make_suite(root_b)
+    monkeypatch.setattr(analysis, "_actuals_from_panel", lambda root, panel_path: _fake_data())
+    return root_a, root_b
+
+
+def test_compare_stacks_with_model_suite_index(two_suites):
+    root_a, root_b = two_suites
+    out = compare_study_metrics({"A": root_a, "B": root_b}, "ignored.csv")
+
+    # (model, suite): models in discovery order, suites in the dict order.
+    assert out.index.names == ["model", "suite"]
+    assert out.index.tolist() == [
+        ("ModelA", "A"), ("ModelA", "B"),
+        ("ModelB", "A"), ("ModelB", "B"),
+    ]
+    # Each block equals the single-suite study_metrics for that root.
+    single = study_metrics(root_a, "ignored.csv")
+    assert out.loc[("ModelA", "A"), "rmse"] == pytest.approx(single.loc["ModelA", "rmse"])
+    assert out.loc[("ModelA", "A"), "n_studies"] == 2
+
+
+def test_compare_display_and_ci_pass_through(two_suites):
+    root_a, root_b = two_suites
+    out = compare_study_metrics(
+        {"A": root_a, "B": root_b}, "x", standard_deviation=True, display=True
+    )
+    assert out.index.names == ["model", "suite"]
+    assert "±" in out.loc[("ModelA", "A"), "rmse"]     # display strings survive stacking
+
+
+def test_compare_rejects_more_than_four(two_suites):
+    root_a, _ = two_suites
+    with pytest.raises(ValueError, match="between 1 and 4"):
+        compare_study_metrics({f"s{i}": root_a for i in range(5)}, "x")
+
+
+def test_compare_rejects_empty():
+    with pytest.raises(ValueError, match="between 1 and 4"):
+        compare_study_metrics({}, "x")
+
+
+def test_compare_warns_on_mismatched_holdout(tmp_path, monkeypatch):
+    from panelclv.studies import analysis
+
+    root_a, root_b = tmp_path / "A", tmp_path / "B"
+    _make_suite(root_a, t=T)          # 4-week holdout
+    _make_suite(root_b, t=T + 2)      # 6-week holdout — internally consistent, but differs
+
+    # Return actuals matching each suite's own forecast width, so the only inconsistency is
+    # the across-suite holdout mismatch the warning is meant to catch.
+    monkeypatch.setattr(
+        analysis, "_actuals_from_panel",
+        lambda root, panel_path: _fake_data(T if root.name == "A" else T + 2),
+    )
+    with pytest.warns(UserWarning, match="holdout length"):
+        compare_study_metrics({"A": root_a, "B": root_b}, "x")
 
 
 # --- PanelConfig round-trip (used by the panel-path actuals rebuild) ----------
