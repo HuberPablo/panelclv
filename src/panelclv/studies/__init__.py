@@ -38,6 +38,13 @@ from .analysis import (
     describe_dataset,
     describe_suite_dataset,
 )
+from .pnbd_grid import (
+    collect_grid_results,
+    group_summary,
+    compare_models_table,
+    plot_pattern,
+    plot_diff_grid,
+)
 
 __all__ = [
     "run_study_suite",
@@ -52,4 +59,9 @@ __all__ = [
     "compare_study_metrics",
     "describe_dataset",
     "describe_suite_dataset",
+    "collect_grid_results",
+    "group_summary",
+    "compare_models_table",
+    "plot_pattern",
+    "plot_diff_grid",
 ]
