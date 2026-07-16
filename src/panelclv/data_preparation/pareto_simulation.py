@@ -105,6 +105,32 @@ _PANEL_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 
+def _seasonal_weekly_multiplier(
+    peaks: Sequence[int], amplitude: float, width: float,
+    period: int = WEEKS_PER_YEAR,
+) -> np.ndarray:
+    """Length-``period`` week-of-year purchase-rate multiplier.
+
+    ``1 + amplitude * sum_k bump_k``, where each bump is a periodic Gaussian of
+    std ``width`` weeks centred on a peak week (``width=0`` -> a single-week spike),
+    then normalised to mean 1 so the annual mean rate is preserved (seasonality only
+    *redistributes* purchases within the year). Distances are measured on the
+    ``period``-week ring, so a peak near week 51 correctly bleeds into week 0.
+    Returns all-ones when there is no seasonality (no peaks or zero amplitude).
+    """
+    peaks = list(peaks)
+    if not peaks or amplitude == 0.0:
+        return np.ones(period)
+    woy = np.arange(period)
+    bumps = np.zeros(period)
+    for p in peaks:
+        d = np.abs(woy - (int(p) % period))
+        d = np.minimum(d, period - d)                     # circular distance on the ring
+        bumps += np.exp(-0.5 * (d / width) ** 2) if width > 0 else (d == 0).astype(float)
+    weight = 1.0 + amplitude * bumps
+    return weight / weight.mean()                         # annual mean 1 -> mean-preserving
+
+
 def simulate_pareto_nbd_panel(
     r: float,
     alpha: float,
@@ -116,6 +142,9 @@ def simulate_pareto_nbd_panel(
     start_year: int = 1999,
     seed: int = 42,
     birth_purchase: bool = False,
+    seasonal_peaks: Sequence[int] = (),
+    seasonal_amplitude: float = 0.0,
+    seasonal_width: float = 1.0,
     id_col: str = "Id",
     target_col: str = "Transactions",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -147,6 +176,19 @@ def simulate_pareto_nbd_panel(
         0, so every customer has >=1 transaction (a synchronised acquired cohort, the
         textbook BTYDplus ``pnbd.GenerateData`` convention) and the calibration-
         activity filter becomes a no-op.
+    seasonal_peaks, seasonal_amplitude, seasonal_width
+        Optional recurring within-year seasonality. ``seasonal_peaks`` are the
+        high-season weeks-of-year (0..51); each gets a bump of height
+        ``seasonal_amplitude`` (e.g. 0.8 ~ +80% at the peak) spread over
+        ``seasonal_width`` weeks (0 = single-week spike, ~2 = a multi-week season).
+        The per-week Poisson rate is multiplied by this pattern, which is keyed to
+        ``week mod 52`` so it recurs identically every year (calibration and
+        holdout). The multiplier is normalised to annual mean 1, so seasonality
+        redistributes purchases within the year without changing the mean rate
+        (``r/alpha``). Default (empty peaks / zero amplitude) = no seasonality.
+        NOTE: seasonality makes the process no longer *pure* Pareto/NBD, so the
+        Pareto/NBD benchmark becomes a misspecified baseline the neural models
+        (which receive week_sin/week_cos) can beat.
     id_col, target_col
         Output column names (defaults match the pipeline's conventions).
 
@@ -164,6 +206,13 @@ def simulate_pareto_nbd_panel(
         raise ValueError("r, alpha, s, beta must all be > 0")
     if n_customers <= 0 or n_weeks <= 0:
         raise ValueError("n_customers and n_weeks must be positive")
+    if seasonal_amplitude < 0 or seasonal_width < 0:
+        raise ValueError("seasonal_amplitude and seasonal_width must be >= 0")
+    bad_peaks = [p for p in seasonal_peaks if not (0 <= int(p) < WEEKS_PER_YEAR)]
+    if bad_peaks:
+        raise ValueError(
+            f"seasonal_peaks must be weeks-of-year in [0, {WEEKS_PER_YEAR}); got {bad_peaks}"
+        )
 
     rng = np.random.default_rng(seed)
     N, W = int(n_customers), int(n_weeks)
@@ -181,8 +230,12 @@ def simulate_pareto_nbd_panel(
     w_lo = np.arange(W)[None, :]                          # (1, W) week left edges
     alive_frac = np.clip(np.minimum(tau[:, None], w_lo + 1) - w_lo, 0.0, 1.0)  # (N, W)
 
-    # --- 3. Exact per-week counts (+ optional cohort-entry purchase) ----------
-    counts = rng.poisson(lam[:, None] * alive_frac)      # (N, W) purchases from the process
+    # --- 3. Exact per-week counts (+ optional seasonality + cohort entry) -----
+    # Recurring within-year multiplier (all-ones when seasonality is off), applied
+    # by week-of-year so the pattern repeats each year over the whole panel.
+    season = _seasonal_weekly_multiplier(seasonal_peaks, seasonal_amplitude, seasonal_width)
+    woy = np.arange(W) % WEEKS_PER_YEAR                   # (W,) week-of-year 0..51
+    counts = rng.poisson(lam[:, None] * alive_frac * season[woy][None, :])  # (N, W)
     if birth_purchase:
         counts[:, 0] += 1                                # week-0 acquisition, every customer
 
@@ -247,6 +300,9 @@ def generate_pnbd_study(
     s: float = 2.0,
     n_weeks_for_churn_rate: float = 521,
     birth_purchase: bool = False,
+    seasonal_peaks: Sequence[int] = (),
+    seasonal_amplitude: float = 0.0,
+    seasonal_width: float = 1.0,
     study_name: str | None = None,
     base_seed: int = 42,
     start_year: int = 1999,
@@ -286,6 +342,10 @@ def generate_pnbd_study(
         selects the cohort (and the retained cohort is smaller than ``n_customers``).
         ``True``: guarantee a week-0 acquisition purchase for every customer. See
         ``simulate_pareto_nbd_panel`` for the full trade-off.
+    seasonal_peaks, seasonal_amplitude, seasonal_width
+        Optional recurring within-year seasonality, applied identically to every
+        dataset in the study (fixed, not a grid axis). See
+        ``simulate_pareto_nbd_panel`` for the meaning; default = no seasonality.
     study_name
         Folder name for this study. Auto-generated (timestamped) when omitted.
     base_seed
@@ -334,6 +394,8 @@ def generate_pnbd_study(
                 r, alpha, s, beta,
                 n_customers=n_customers, n_weeks=n_weeks,
                 start_year=start_year, seed=seed, birth_purchase=birth_purchase,
+                seasonal_peaks=seasonal_peaks, seasonal_amplitude=seasonal_amplitude,
+                seasonal_width=seasonal_width,
                 id_col=_PANEL_SCHEMA["id_col"], target_col=_PANEL_SCHEMA["target_col"],
             )
             ds_name = f"Dataset_{k}"
@@ -357,6 +419,9 @@ def generate_pnbd_study(
                 "start_year": int(start_year),
                 "seed": int(seed),
                 "birth_purchase": bool(birth_purchase),
+                "seasonal_peaks": list(seasonal_peaks),
+                "seasonal_amplitude": float(seasonal_amplitude),
+                "seasonal_width": float(seasonal_width),
                 "schema": dict(_PANEL_SCHEMA),
                 "files": {"panel": "panel.csv", "ground_truth": "ground_truth.csv"},
                 "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -387,6 +452,9 @@ def generate_pnbd_study(
         "r": r, "s": s,
         "n_weeks_for_churn_rate": n_weeks_for_churn_rate,
         "birth_purchase": bool(birth_purchase),
+        "seasonal_peaks": list(seasonal_peaks),
+        "seasonal_amplitude": float(seasonal_amplitude),
+        "seasonal_width": float(seasonal_width),
         "alpha_values": [a for _, a in alpha_by_rate],
         "beta_values": [b for _, b in beta_by_churn],
         "n_customers": int(n_customers), "n_weeks": int(n_weeks),
