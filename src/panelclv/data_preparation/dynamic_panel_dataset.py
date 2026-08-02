@@ -17,8 +17,10 @@ What it does, in order: engineer the requested calendar features and the causal
 AR target-features → add a `period_start` anchor → slice the calibration and
 holdout date windows → apply the Valendin "active during calibration" cohort
 filter to both windows → (optionally) clip the training target → resolve
-embedding cardinalities → reshape each window and build the next-step AR
-`(samples, targets)` pair. It validates aggressively and fails *early* (before
+embedding cardinalities → reshape each window → standardize the numeric channels
+(calibration-fitted mean/std; embedded columns and the target are left alone) →
+build the next-step AR `(samples, targets)` pair. It validates aggressively and
+fails *early* (before
 any tensor is built): missing id/target/schema columns, non-numeric columns,
 ragged per-customer period counts, train/holdout cohorts that differ or are
 mis-ordered, NaNs in a selected column, and empty date windows all raise.
@@ -54,6 +56,9 @@ Output dict (full key list at the end of `prepare_dataset`)
     targets       (N, T_CAL - 1, 1) float32   AR labels  (next-step target)
     seq_cols, target_col, target_idx          channel names / target position
     embedded_cols                             resolved {col: cardinality} embeddings
+    covariate_stats                           {col: (mean, std)} for the numeric
+                                              channels standardized on calibration —
+                                              inference must re-apply this transform
     ar_features                               the AR feature names that were added
     N, T_CAL, T_HOLD, F, ids                  shapes + customer order of the tensors
     panel, train_panel, holdout_panel         engineered panel + the two slices
@@ -420,6 +425,82 @@ def warn_known_future_drift(
 # ---------------------------------------------------------------------------
 # Reshape
 # ---------------------------------------------------------------------------
+
+
+def standardize_covariates(
+    calibration: np.ndarray,
+    holdout: np.ndarray,
+    *,
+    seq_cols: Sequence[str],
+    embedded_cols: dict[str, int] | None,
+    target_col: str,
+) -> tuple[np.ndarray, np.ndarray, dict[str, tuple[float, float]]]:
+    """Put the NUMERIC channels on a common scale (mean 0 / std 1), fit on calibration.
+
+    Why this is needed: the models push every non-embedded column through ONE
+    shared ``nn.Linear(len(covariate_cols), embedding_dim)`` (see
+    ``_MultinomialLSTMBackbone.covariate_proj``). That layer computes
+    ``sum_k W_k * x_k`` with all ``W_k`` drawn from the same initial
+    distribution, so each column's contribution to the sum — and the gradient
+    that reaches its weights — scales with the column's RAW magnitude. Mixing
+    ``week_sin`` (std ~0.7) with ``period_since_last_transaction`` (std ~27)
+    therefore hands the recency channel ~99% of the pre-activation variance
+    purely because it is measured in weeks rather than in a sine wave. The
+    ``LayerNorm`` that follows cannot repair this: it normalises the SUM, i.e.
+    after the columns have already been mixed, so it fixes the output scale
+    while leaving the drowned-out columns drowned out. Equalising the inputs
+    BEFORE the sum is the only point where the imbalance can be corrected.
+
+    Scope — only the columns the model actually treats as numeric:
+      * everything in ``embedded_cols`` is excluded: those are integer class
+        indices, cast with ``.long()`` and used as embedding-table lookups, so
+        rescaling them would corrupt the lookup outright;
+      * ``target_col`` is excluded explicitly. It is always embedded in a valid
+        model config, but the exclusion also protects the autoregressive
+        contract: ``targets`` are sliced straight out of ``calibration`` as class
+        indices, and the Monte-Carlo rollout writes RAW sampled class indices
+        back into that channel.
+
+    Statistics are fitted on ``calibration`` ONLY and then applied to both
+    windows, so no holdout information reaches the transform. They are fitted
+    over the whole calibration window (all N x T_CAL cells), consistent with how
+    ``resolve_embedded_cols`` sizes embeddings from that same window.
+
+    A (near-)constant channel is centred but not divided (its std is forced to
+    1.0), so a constant covariate cannot blow up into infinities.
+
+    Returns
+    -------
+    (calibration, holdout, stats)
+        Standardised copies of both tensors, plus ``{col: (mean, std)}`` for the
+        columns that were transformed. Those stats MUST travel to inference: the
+        rollout recomputes the AR features in raw units at every step and has to
+        re-apply this exact transform before feeding them back, otherwise the
+        warm-up and the rollout disagree on units
+        (``models/monte_carlo_forecasting.simulate_one_path``).
+    """
+    embedded = set(embedded_cols or {})
+    seq_cols = list(seq_cols)
+    cov_cols = [c for c in seq_cols if c not in embedded and c != target_col]
+    if not cov_cols:
+        return calibration, holdout, {}
+
+    idx = [seq_cols.index(c) for c in cov_cols]
+
+    # Fit over customers AND periods together: one scalar mean/std per channel,
+    # matching how the shared Linear sees the column (a single input slot).
+    block = calibration[:, :, idx].reshape(-1, len(idx)).astype(np.float64)
+    mean = block.mean(axis=0)
+    std = block.std(axis=0)
+    std = np.where(std < 1e-8, 1.0, std)      # constant channel -> centre only
+
+    calibration = calibration.copy()
+    holdout = holdout.copy()
+    calibration[:, :, idx] = ((calibration[:, :, idx] - mean) / std).astype(np.float32)
+    holdout[:, :, idx] = ((holdout[:, :, idx] - mean) / std).astype(np.float32)
+
+    stats = {c: (float(m), float(s)) for c, m, s in zip(cov_cols, mean, std)}
+    return calibration, holdout, stats
 
 
 def make_block(
@@ -811,6 +892,22 @@ def prepare_dataset(
     # them straight into the tensors.
     calibration = make_block(train_panel,   ids, sort_cols, seq_cols)
     holdout     = make_block(holdout_panel, ids, sort_cols, seq_cols)
+
+    # 8b) Standardize the numeric channels (mean 0 / std 1, fitted on calibration
+    # only). Without this the single shared covariate Linear is dominated by
+    # whichever column happens to carry the largest raw units — typically the AR
+    # recency/tenure counters, which run 0..T_CAL while the calendar features sit
+    # in [-1, 1]. See `standardize_covariates` for the full argument. Done BEFORE
+    # the samples/targets slice so the training inputs carry the transform; the
+    # target channel is deliberately left untouched, so `targets` stay integer
+    # class indices for the cross-entropy head.
+    calibration, holdout, covariate_stats = standardize_covariates(
+        calibration, holdout,
+        seq_cols=seq_cols,
+        embedded_cols=resolved_embedded,
+        target_col=target_col,
+    )
+
     samples     = calibration[:, :-1, :]
     targets     = calibration[:, 1:, target_idx:target_idx + 1]
 
@@ -829,6 +926,13 @@ def prepare_dataset(
         )
         if resolved_embedded is not None:
             print(f"embedded_cols = {resolved_embedded}")
+        if covariate_stats:
+            print(
+                "standardized numeric channels (calibration-fitted mean/std): "
+                + ", ".join(
+                    f"{c}({m:.3f}/{s:.3f})" for c, (m, s) in covariate_stats.items()
+                )
+            )
 
     return {
         "calibration":   calibration,
@@ -853,6 +957,11 @@ def prepare_dataset(
         # Resolved {col: cardinality} embedding map (or None). Fed straight to
         # the model constructors' embedded_cols= argument.
         "embedded_cols": resolved_embedded,
+        # {col: (mean, std)} for the numeric channels standardized in step 8b
+        # (empty when every column is embedded). Carried so inference can re-apply
+        # the identical transform — the Monte-Carlo rollout recomputes AR features
+        # in raw units and must standardize them before feeding them back.
+        "covariate_stats": covariate_stats,
         "ar_features":   ar_features,
         "N  ":             N,
         "T_CAL":         T_CAL,

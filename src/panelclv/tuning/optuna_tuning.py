@@ -187,9 +187,11 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
     Feature selection is pure column slicing on the precomputed tensors, so it
     is cheap and deterministic (no re-running data prep per trial). We slice the
     feature axis of `calibration`/`holdout`, rebuild `samples`/`targets` and
-    `target_idx` for the reduced layout, and filter `embedded_cols`
-    in lockstep — the model validator requires embedded_cols ⊆ seq_cols. All
-    other keys (ids, N, T_*, panels, ...) pass through unchanged.
+    `target_idx` for the reduced layout, and filter `embedded_cols`,
+    `ar_features` and `covariate_stats` in lockstep — the model validator requires
+    embedded_cols ⊆ seq_cols. All other keys (ids, N, T_*, panels, ...) pass
+    through unchanged. Note the tensors are sliced, never recomputed, so the
+    standardization `prepare_dataset` already applied is preserved as-is.
 
     The same primitive is reused at forecast time: slice `data` to the best
     trial's feature set so the Monte Carlo simulator sees matching `seq_cols`
@@ -219,6 +221,12 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
     # Monte Carlo rollout would look it up via seq_cols.index(name) and raise.
     ar_features = [c for c in data.get("ar_features", []) if c in keep]
 
+    # Standardization stats are keyed by column name, so they need no reindexing —
+    # just drop the entries for columns this trial removed, keeping the dict an
+    # accurate description of the sliced layout.
+    stats = data.get("covariate_stats") or {}
+    kept_stats = {c: v for c, v in stats.items() if c in keep}
+
     out = dict(data)
     out.update(
         calibration=calibration,
@@ -230,6 +238,7 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
         target_idx=target_idx,
         embedded_cols=kept_embedded if kept_embedded else None,
         ar_features=ar_features,
+        covariate_stats=kept_stats,
         F=len(keep),
     )
     return out
@@ -626,6 +635,13 @@ def _validation_rollout_score(
         "seq_cols": seq_cols,
         "target_col": target_col,
         "ar_features": list(d.get("ar_features", [])),
+        # Carried so this pseudo-holdout rollout standardizes its recomputed AR
+        # features exactly as the real forecast does. Both slices above come out
+        # of the already-standardized `calibration` tensor, so omitting this would
+        # feed raw AR values into a model warmed up on standardized ones — and the
+        # selection score would rank trials on a rollout the final forecast never
+        # reproduces.
+        "covariate_stats": d.get("covariate_stats"),
     }
 
     if model_type == "lstm":

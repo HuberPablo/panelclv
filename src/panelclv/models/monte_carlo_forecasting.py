@@ -93,6 +93,7 @@ def simulate_one_path(
     target_col: str = "Transactions",
     device: str | torch.device | None = None,
     ar_features: Sequence[str] = (),
+    covariate_stats: dict[str, tuple[float, float]] | None = None,
 ) -> np.ndarray:
     """Simulate one autoregressive holdout path for a STATEFUL model (the LSTM).
 
@@ -110,6 +111,15 @@ def simulate_one_path(
     (target-derived recency/activity columns) are likewise recomputed at each
     step from the SAMPLED target history — never read from the holdout — so the
     forecast uses no future information for them.
+
+    `covariate_stats` is `data["covariate_stats"]` from `prepare_dataset`: the
+    calibration-fitted `{col: (mean, std)}` used to standardize the numeric
+    channels. `ARFeatureState` regenerates AR features in RAW units, so each
+    recomputed value is put back through that transform before it is written into
+    the step input. Skipping this would feed the model raw recency during the
+    rollout after warming it up on standardized recency — a silent unit mismatch
+    that no shape check can catch. Columns absent from the map (an AR feature the
+    caller chose to embed, or a dict from an older run) pass through unscaled.
 
     Returns
     -------
@@ -137,6 +147,10 @@ def simulate_one_path(
         ARFeatureState(calib_tensor[:, :, target_idx].detach().cpu().numpy(), ar_features)
         if ar_features else None
     )
+    # Per-AR-feature (mean, std) to match the standardization prepare_dataset
+    # applied to the tensors. (0.0, 1.0) is the identity, so an unstandardized
+    # column is written through untouched.
+    ar_norm = {n: (covariate_stats or {}).get(n, (0.0, 1.0)) for n in ar_features}
 
     with torch.inference_mode():
         # Step 1: warmup → its last-position sample IS the holdout step 0 forecast,
@@ -155,8 +169,10 @@ def simulate_one_path(
                 # input reflects the sampled (not the true) history.
                 feats = ar_state.update(previous_sample.detach().cpu().numpy())
                 for name, col in ar_idx.items():
+                    mean, std = ar_norm[name]
                     x_t[:, 0, col] = torch.as_tensor(
-                        feats[name], dtype=x_t.dtype, device=x_t.device
+                        (feats[name] - mean) / std,
+                        dtype=x_t.dtype, device=x_t.device,
                     )
             sampled, state = model(x_t, state=state)
             previous_sample        = sampled[:, 0, 0]         # (N,)
@@ -178,6 +194,7 @@ def simulate_transformer_path(
     target_col: str = "Transactions",
     device: str | torch.device | None = None,
     ar_features: Sequence[str] = (),
+    covariate_stats: dict[str, tuple[float, float]] | None = None,
 ) -> np.ndarray:
     """Simulate one autoregressive holdout path for a STATELESS model (the Transformer).
 
@@ -229,6 +246,10 @@ def simulate_transformer_path(
         ARFeatureState(calib_tensor[:, :, target_idx].detach().cpu().numpy(), ar_features)
         if ar_features else None
     )
+    # Same standardization the LSTM rollout applies (see `simulate_one_path`):
+    # AR features come back from ARFeatureState in raw units and must be put on
+    # the tensors' scale before they are appended to the context.
+    ar_norm = {n: (covariate_stats or {}).get(n, (0.0, 1.0)) for n in ar_features}
 
     with torch.inference_mode():
         # Growing context window. Starts as the full calibration; each iteration
@@ -251,8 +272,10 @@ def simulate_transformer_path(
             if ar_state is not None:
                 feats = ar_state.update(sample.detach().cpu().numpy())
                 for name, col in ar_idx.items():
+                    mean, std = ar_norm[name]
                     x_next[:, 0, col] = torch.as_tensor(
-                        feats[name], dtype=x_next.dtype, device=x_next.device
+                        (feats[name] - mean) / std,
+                        dtype=x_next.dtype, device=x_next.device,
                     )
             context = torch.cat([context, x_next], dim=1)     # grow by one period
 
@@ -362,6 +385,9 @@ def _run_monte_carlo(
     model.to(device).eval()
 
     ar_features = list(data.get("ar_features", []))
+    # Calibration-fitted {col: (mean, std)} from prepare_dataset. The rollout needs
+    # it to re-standardize the AR features it recomputes in raw units each step.
+    covariate_stats = data.get("covariate_stats")
 
     sims: list[np.ndarray] = []
     for _ in range(n_simulations):
@@ -373,6 +399,7 @@ def _run_monte_carlo(
             target_col=target_col,
             device=device,
             ar_features=ar_features,
+            covariate_stats=covariate_stats,
         ))
     simulations = np.stack(sims, axis=0)                       # (S, N, T_HOLD)
     prediction_mean = simulations.mean(axis=0)                 # (N, T_HOLD)
