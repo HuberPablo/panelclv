@@ -480,12 +480,26 @@ def list_pnbd_datasets(study_dir: str | Path) -> pd.DataFrame:
 
     Rebuilt from disk (the source of truth), so it stays correct even if
     ``index.csv`` is stale or missing.
+
+    Raises ``FileNotFoundError`` if ``study_dir`` is not a generation study. The
+    check matters because a *trained* suite tree (``Studies/<study>/<combo>__<dataset>/
+    <Model>/config.json``) puts a config.json at exactly the same glob depth as a
+    generation tree (``<combo>/<dataset>/config.json``). Pointing this function at
+    the trained folder therefore used to match those model-spec configs and die on
+    a bare ``KeyError: 'combo'`` deep inside the loop; now it says what is wrong.
     """
     study_dir = Path(study_dir)
+    if not study_dir.is_dir():
+        raise FileNotFoundError(f"study_dir does not exist: {study_dir}")
+
     rows: list[dict[str, Any]] = []
+    skipped = 0
     for cfg_path in sorted(study_dir.glob("*/*/config.json")):
         with open(cfg_path) as fh:
             cfg = json.load(fh)
+        if "combo" not in cfg:
+            skipped += 1          # not a dataset config (e.g. a trained model spec)
+            continue
         rows.append({
             "combo": cfg["combo"], "dataset": cfg["dataset"],
             "mean_transaction_rate": cfg["mean_transaction_rate"],
@@ -495,6 +509,18 @@ def list_pnbd_datasets(study_dir: str | Path) -> pd.DataFrame:
             "seed": cfg["seed"],
             "panel_path": str((cfg_path.parent / cfg["files"]["panel"]).as_posix()),
         })
+
+    if not rows:
+        # Distinguish the two ways an empty result happens: a path that looks like a
+        # study but is the trained-results tree, vs a path with nothing in it at all.
+        hint = (
+            f"found {skipped} config.json file(s) with no 'combo' key — this looks like a "
+            "trained-results folder (Studies/...), not a generation study"
+            if skipped
+            else "no <combo>/<dataset>/config.json files found"
+        )
+        raise FileNotFoundError(f"no Pareto/NBD datasets under {study_dir}: {hint}")
+
     return pd.DataFrame(rows)
 
 

@@ -39,7 +39,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from panelclv.data_preparation.pareto_simulation import list_pnbd_datasets
+from panelclv.data_preparation.pareto_simulation import (
+    list_pnbd_datasets,
+    load_pnbd_dataset,
+    _seasonal_weekly_multiplier,
+    WEEKS_PER_YEAR,
+)
 
 # Metric name (as we expose it) -> column name in each suite's results.csv. The
 # aggregate-style MAPE is stored under a longer key; we surface it as "mape".
@@ -119,6 +124,357 @@ def collect_grid_results(
             f"no results.csv found under {train_base}; has the training loop run?"
         )
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# 1b. Seasonality — how well each model recovers the KNOWN seasonal curve
+# ---------------------------------------------------------------------------
+#
+# This is a per-dataset diagnostic that results.csv cannot supply (it stores only
+# RMSE / bias / MAPE), so it re-reads the panels and the per-model prediction files.
+# The metric is deliberately the *strong* one: a naive correlation of predicted vs
+# actual weekly totals is contaminated by trend (a model that merely tracks volume
+# declining as customers die scores well without any seasonal ability). We instead
+# detrend the prediction and correlate it against the seasonal multiplier the
+# generator actually used — a curve no trend-fitting can fake.
+
+# Quarter-year window: long enough to be the "trend" that seasonality rides on,
+# short enough to leave the within-year seasonal wiggle intact after subtraction.
+_DETREND_WINDOW = 13
+
+
+def _holdout_weeks(cfg: dict, horizon: int) -> np.ndarray:
+    """Absolute (0-indexed) week numbers of the ``horizon``-week holdout.
+
+    The panel runs weeks ``0 .. n_weeks-1`` on the generator's clock; the holdout is
+    always the final ``horizon`` weeks (``horizon`` = the number of ``week_*`` columns
+    a model forecast), so no calendar year is assumed.
+    """
+    n_weeks = int(cfg["n_weeks"])
+    return np.arange(n_weeks - horizon, n_weeks)
+
+
+def _holdout_season(cfg: dict, holdout_weeks: np.ndarray) -> np.ndarray:
+    """The generator's true seasonal multiplier over the holdout weeks.
+
+    Reuses ``_seasonal_weekly_multiplier`` — the *same* function that produced the
+    data — rather than reimplementing it, so the reference curve is exact (0-indexed
+    week-of-year, amplitude, and the mean-1 normalisation all match the simulator).
+    Returns all-ones when the study has no seasonality.
+    """
+    season_year = _seasonal_weekly_multiplier(
+        cfg.get("seasonal_peaks", ()),
+        cfg.get("seasonal_amplitude", 0.0),
+        cfg.get("seasonal_width", 1.0),
+    )
+    return season_year[holdout_weeks % WEEKS_PER_YEAR]
+
+
+def _detrend(series: np.ndarray) -> np.ndarray:
+    """Subtract a centred rolling mean, leaving the seasonal residual."""
+    s = pd.Series(series, dtype=float)
+    return (s - s.rolling(_DETREND_WINDOW, center=True, min_periods=1).mean()).to_numpy()
+
+
+def _weekly_prediction(pred_path: Path) -> np.ndarray:
+    """Sum a model's per-customer prediction file into weekly holdout totals."""
+    pred = pd.read_csv(pred_path)
+    return pred.drop(columns=["Id"]).sum(axis=0).to_numpy()
+
+
+def seasonality_grid(
+    study_dir: str | Path,
+    train_base: str | Path | None = None,
+) -> pd.DataFrame:
+    """Per-``(rate, churn)`` seasonal-detection ability of each model.
+
+    For every trained dataset, each model's predicted weekly holdout totals are
+    detrended and correlated against the generator's true seasonal curve; the
+    correlations are then averaged over the replicate datasets in each grid cell.
+    A value near 1 means the model recovers the seasonal shape; near 0 (Pareto/NBD,
+    by construction) means no seasonal component.
+
+    Parameters
+    ----------
+    study_dir
+        The generation study folder (what ``generate_pnbd_study`` returned) — supplies
+        the panels, the holdout actuals, and the true seasonal curve per dataset.
+    train_base
+        The trained-suites folder (``<combo>__<dataset>/`` subfolders). Defaults to
+        ``Studies/<study_dir name>``, the convention the training loop uses.
+
+    Returns
+    -------
+    DataFrame indexed by ``(mean_transaction_rate, churn_rate)`` with one column per
+    model, holding the mean seasonal correlation across that cell's replicates — a
+    matrix you can read down (churn) and across (rate) to see how the ability evolves.
+
+    Raises
+    ------
+    ValueError
+        If the study has no seasonal component (``seasonal_peaks`` absent), so the
+        metric would be undefined.
+    """
+    study_dir = Path(study_dir)
+    if train_base is None:
+        train_base = Path("Studies") / study_dir.name
+    train_base = Path(train_base)
+
+    grid = list_pnbd_datasets(study_dir)
+    rows: list[dict] = []
+    for g in grid.itertuples(index=False):
+        suite = train_base / f"{g.combo}__{g.dataset}"
+        if not suite.is_dir():
+            continue                                       # dataset not trained yet — skip
+        _, _, cfg = load_pnbd_dataset(study_dir, g.combo, g.dataset)
+        if not cfg.get("seasonal_peaks"):
+            raise ValueError(
+                f"dataset {g.combo}/{g.dataset} has no seasonal_peaks; "
+                "seasonality_grid needs a study generated with seasonality"
+            )
+
+        for model_dir in sorted(p for p in suite.iterdir() if p.is_dir()):
+            pred_path = model_dir / "Predictions" / "Prediction_1.csv"
+            if not pred_path.exists():
+                continue
+            weekly_pred = _weekly_prediction(pred_path)
+
+            # Holdout length is the forecast horizon; the true seasonal curve over
+            # those exact weeks is the reference (detrended on both sides so only
+            # within-year shape is compared, never the slow volume trend).
+            weeks = _holdout_weeks(cfg, len(weekly_pred))
+            season_resid = _detrend(_holdout_season(cfg, weeks))
+            pred_resid = _detrend(weekly_pred)
+
+            corr = (
+                np.corrcoef(season_resid, pred_resid)[0, 1]
+                if pred_resid.std() > 1e-12 else np.nan     # a flat forecast has no shape
+            )
+            rows.append({
+                "mean_transaction_rate": g.mean_transaction_rate,
+                "churn_rate": g.churn_rate,
+                "model": model_dir.name,
+                "seasonal_corr": corr,
+            })
+
+    if not rows:
+        raise FileNotFoundError(
+            f"no predictions found under {train_base}; has the training loop run?"
+        )
+    long = pd.DataFrame(rows)
+    # Mean over the replicate datasets in each cell -> (rate, churn) x model matrix.
+    return long.pivot_table(
+        index=_AXES, columns="model", values="seasonal_corr", aggfunc="mean"
+    )
+
+
+def alive_volume_ratio_grid(
+    study_dir: str | Path,
+    train_base: str | Path | None = None,
+) -> pd.DataFrame:
+    """Per-``(rate, churn)`` alive-volume ratio of each model.
+
+    One half of the customer-*week* volume decomposition (the companion is
+    :func:`dead_volume_leakage_grid`). Every customer-week is classified by the true
+    churn week ``tau``: week ``t`` (absolute index) is *alive* if ``t < tau``. Summing
+    predicted volume ``y`` and oracle volume over the holdout gives
+
+        P_A = sum of predicted volume over alive customer-weeks
+        O_A = sum of oracle over alive customer-weeks   (all legitimate volume; the
+              oracle is zero after death, so this is the total oracle)
+
+    and the ratio is::
+
+        alive_volume_ratio  R_A = P_A / O_A
+
+    The oracle is the generator's own Poisson mean — each customer's rate ``lambda``
+    times the fraction of the week it is alive times the true seasonal multiplier —
+    so it is the correct target, not another estimate. Read the ratio as:
+
+        = 1   alive periods receive exactly their expected volume
+        < 1   the model **under**-serves alive periods (predicts too little)
+        > 1   the model **over**-serves alive periods (predicts too much)
+
+    Together with the leakage this is a clean split of the aggregate volume ratio::
+
+        R_A + L_D = (P_A + P_D) / O_A = total predicted volume / total oracle volume
+
+    — the legitimate half plus the leaked half. Only the customers a model actually
+    forecast are scored (calibration-inactive customers were dropped before training),
+    and ``P_A`` / ``O_A`` are summed over that same population.
+
+    Parameters
+    ----------
+    study_dir
+        The generation study folder — supplies the latent ground truth (``lambda``,
+        ``tau``) and the true seasonal curve per dataset.
+    train_base
+        The trained-suites folder. Defaults to ``Studies/<study_dir name>``.
+
+    Returns
+    -------
+    DataFrame indexed by ``(mean_transaction_rate, churn_rate)`` with one column per
+    model, holding the mean alive-volume ratio across that cell's replicates.
+    """
+    study_dir = Path(study_dir)
+    if train_base is None:
+        train_base = Path("Studies") / study_dir.name
+    train_base = Path(train_base)
+
+    grid = list_pnbd_datasets(study_dir)
+    rows: list[dict] = []
+    for g in grid.itertuples(index=False):
+        suite = train_base / f"{g.combo}__{g.dataset}"
+        if not suite.is_dir():
+            continue                                       # dataset not trained yet — skip
+        _, gt, cfg = load_pnbd_dataset(study_dir, g.combo, g.dataset)
+        latent = gt.set_index("Id")
+        lam = latent["lambda"]
+        tau = latent["tau"]
+
+        for model_dir in sorted(p for p in suite.iterdir() if p.is_dir()):
+            pred_path = model_dir / "Predictions" / "Prediction_1.csv"
+            if not pred_path.exists():
+                continue
+            pred = pd.read_csv(pred_path).set_index("Id")
+            horizon = pred.shape[1]                         # week_0 .. week_{H-1}, in order
+            weeks = _holdout_weeks(cfg, horizon)            # absolute holdout week indices
+            season = _holdout_season(cfg, weeks)            # true multiplier per holdout week
+
+            lam_i = lam.reindex(pred.index).to_numpy()[:, None]        # (N, 1)
+            tau_i = tau.reindex(pred.index).to_numpy()[:, None]        # (N, 1)
+            y = pred.to_numpy()                                        # (N, H) predicted per week
+
+            # O_A: total legitimate oracle volume. The oracle is zero on dead weeks
+            # (alive_frac collapses to 0 once tau has passed), so summing over all
+            # holdout weeks is the sum over alive customer-weeks.
+            alive_frac = np.clip(np.minimum(tau_i, weeks + 1) - weeks, 0.0, 1.0)  # (N, H)
+            oracle_alive = float((lam_i * alive_frac * season).sum())
+
+            # P_A: predicted volume on alive customer-weeks (t < tau), the hard
+            # week-level complement of the leakage mask.
+            alive_week = weeks[None, :] < tau_i                        # (N, H) bool
+            p_alive = float(y[alive_week].sum())
+
+            rows.append({
+                "mean_transaction_rate": g.mean_transaction_rate,
+                "churn_rate": g.churn_rate,
+                "model": model_dir.name,
+                "alive_volume_ratio": p_alive / oracle_alive if oracle_alive > 0 else np.nan,
+            })
+
+    if not rows:
+        raise FileNotFoundError(
+            f"no predictions found under {train_base}; has the training loop run?"
+        )
+    long = pd.DataFrame(rows)
+    return long.pivot_table(
+        index=_AXES, columns="model", values="alive_volume_ratio", aggfunc="mean"
+    )
+
+
+def dead_volume_leakage_grid(
+    study_dir: str | Path,
+    train_base: str | Path | None = None,
+) -> pd.DataFrame:
+    """Per-``(rate, churn)`` dead-volume leakage of each model.
+
+    The companion to :func:`alive_volume_ratio_grid`. Where that ratio classifies a
+    *customer* once, this classifies every *customer-week* by the true churn week
+    ``tau``: week ``t`` (absolute index) is an *alive* week if ``t < tau`` and a
+    *dead* week otherwise. Summing predicted volume ``y`` and oracle volume over the
+    holdout gives
+
+        O_A = sum of oracle over alive customer-weeks   (all legitimate volume;
+              oracle is zero after death by construction, so this is the total oracle)
+        P_D = sum of predicted volume over dead customer-weeks   (pure error)
+
+    and the leakage is that error normalised by the legitimate volume::
+
+        dead_volume_leakage  L_D = P_D / O_A
+
+    Because the oracle after death is exactly zero, every unit of ``P_D`` is spurious;
+    dividing by ``O_A`` expresses it as a fraction of the volume that *should* have
+    occurred. So ``L_D = 0`` means nothing predicted after death, ``L_D = 0.10`` means
+    dead periods received erroneous volume equal to 10% of all legitimate volume, and
+    ``L_D = 0.30`` is severe leakage. Lower is better. Unlike the aggregate
+    ``share of predicted volume on dead customers``, this counts the dead *weeks* of
+    customers who die mid-holdout, and normalises by the true volume rather than by
+    the model's own (possibly inflated) total.
+
+    Only the customers a model actually forecast are scored (calibration-inactive
+    customers were dropped before training), and both ``P_D`` and ``O_A`` are summed
+    over that same population.
+
+    Parameters
+    ----------
+    study_dir
+        The generation study folder — supplies ``lambda`` / ``tau`` and the true
+        seasonal curve per dataset.
+    train_base
+        The trained-suites folder. Defaults to ``Studies/<study_dir name>``.
+
+    Returns
+    -------
+    DataFrame indexed by ``(mean_transaction_rate, churn_rate)`` with one column per
+    model, holding the mean dead-volume leakage across that cell's replicates.
+    """
+    study_dir = Path(study_dir)
+    if train_base is None:
+        train_base = Path("Studies") / study_dir.name
+    train_base = Path(train_base)
+
+    grid = list_pnbd_datasets(study_dir)
+    rows: list[dict] = []
+    for g in grid.itertuples(index=False):
+        suite = train_base / f"{g.combo}__{g.dataset}"
+        if not suite.is_dir():
+            continue                                       # dataset not trained yet — skip
+        _, gt, cfg = load_pnbd_dataset(study_dir, g.combo, g.dataset)
+        latent = gt.set_index("Id")
+        lam = latent["lambda"]
+        tau = latent["tau"]
+
+        for model_dir in sorted(p for p in suite.iterdir() if p.is_dir()):
+            pred_path = model_dir / "Predictions" / "Prediction_1.csv"
+            if not pred_path.exists():
+                continue
+            pred = pd.read_csv(pred_path).set_index("Id")
+            horizon = pred.shape[1]                         # week_0 .. week_{H-1}, in order
+            weeks = _holdout_weeks(cfg, horizon)            # absolute holdout week indices
+            season = _holdout_season(cfg, weeks)            # true multiplier per holdout week
+
+            lam_i = lam.reindex(pred.index).to_numpy()[:, None]        # (N, 1)
+            tau_i = tau.reindex(pred.index).to_numpy()[:, None]        # (N, 1)
+            y = pred.to_numpy()                                        # (N, H) predicted per week
+
+            # O_A: total legitimate oracle volume. The oracle is zero on dead weeks
+            # (alive_frac collapses to 0 once tau has passed), so summing over all
+            # holdout weeks *is* the sum over alive customer-weeks.
+            alive_frac = np.clip(np.minimum(tau_i, weeks + 1) - weeks, 0.0, 1.0)  # (N, H)
+            oracle_alive = float((lam_i * alive_frac * season).sum())
+
+            # P_D: predicted volume falling on dead customer-weeks (t >= tau). This
+            # hard week-level mask catches the post-death tail of customers who churn
+            # partway through the holdout, not just those already dead at its start.
+            dead_week = weeks[None, :] >= tau_i                        # (N, H) bool
+            leaked = float(y[dead_week].sum())
+
+            rows.append({
+                "mean_transaction_rate": g.mean_transaction_rate,
+                "churn_rate": g.churn_rate,
+                "model": model_dir.name,
+                "dead_volume_leakage": leaked / oracle_alive if oracle_alive > 0 else np.nan,
+            })
+
+    if not rows:
+        raise FileNotFoundError(
+            f"no predictions found under {train_base}; has the training loop run?"
+        )
+    long = pd.DataFrame(rows)
+    return long.pivot_table(
+        index=_AXES, columns="model", values="dead_volume_leakage", aggfunc="mean"
+    )
 
 
 # ---------------------------------------------------------------------------

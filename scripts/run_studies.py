@@ -8,11 +8,17 @@ there is nothing new to learn — paste your ``data_info`` blocks verbatim.
 Usage:
     1. Edit ``load_panel()`` to read your panel CSV.
     2. Edit the ``PanelConfig`` and the ``models=[...]`` list.
-    3. Point ``studies_base_path`` at your ``Studies`` folder and pick a name.
+    3. Pick a ``study_name``.
     4. ``python scripts/run_studies.py``
+
+Output lands in ``<repo root>/Studies/<study_name>/``, resolved from this file's
+location rather than from an absolute path, so the script runs unchanged on a
+laptop or on a rented GPU box with no edit and no patching step.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pandas as pd
 import torch
@@ -24,6 +30,10 @@ from panelclv.studies import ModelSpec, StudySuiteConfig, run_study_suite
 # --- EDIT ME: tags that name this run (mirrors the notebook constants) ----------
 LOSS_TYPE = "cross_entropy"
 CONFIG_NAME = "baseline"
+
+# Repo root = the parent of scripts/. Everything the suite writes goes under it,
+# so the only machine-specific thing left is where you cloned the repo.
+STUDIES_BASE = Path(__file__).resolve().parents[1] / "Studies"
 
 
 def load_panel() -> pd.DataFrame:
@@ -105,8 +115,11 @@ def main() -> None:
     data_full = dynamic_panel_dataset.prepare_dataset(panel, cfg)
 
     # --- 2. the suite config ------------------------------------------------
+    # run_study_suite requires the base directory to already exist, and failing on
+    # that *after* every model has trained is the expensive way to find out.
+    STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     config = StudySuiteConfig(
-        studies_base_path="/home/virthian/Desktop/Thesis/panelclv/Studies",  # must exist
+        studies_base_path=str(STUDIES_BASE),
         study_name=f"{LOSS_TYPE}_{CONFIG_NAME}",     # new folder created under it
         n_studies_per_model=5,                       # X independent studies per model
         prediction_source="refit",                  # "refit" | "checkpoint"

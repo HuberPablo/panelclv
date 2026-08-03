@@ -40,6 +40,9 @@ from .analysis import (
 )
 from .pnbd_grid import (
     collect_grid_results,
+    seasonality_grid,
+    alive_volume_ratio_grid,
+    dead_volume_leakage_grid,
     group_summary,
     compare_models_table,
     plot_pattern,
@@ -60,6 +63,9 @@ __all__ = [
     "describe_dataset",
     "describe_suite_dataset",
     "collect_grid_results",
+    "seasonality_grid",
+    "alive_volume_ratio_grid",
+    "dead_volume_leakage_grid",
     "group_summary",
     "compare_models_table",
     "plot_pattern",
