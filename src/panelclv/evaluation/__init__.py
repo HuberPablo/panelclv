@@ -6,9 +6,11 @@ These consume a forecast that the model + Monte Carlo simulator (in
 ``panelclv.models``) already produced; they do not define the model, so they sit in
 their own subpackage.
 
-Scoring is not defined here. ``models.monte_carlo_forecasting.compute_forecast_metrics``
-is the single authority for ``rmse`` / ``bias_percent`` / ``mape_aggregate_style``, and
-everything in this subpackage delegates to it.
+``models.monte_carlo_forecasting.compute_forecast_metrics`` is the single authority for
+``rmse`` / ``bias_percent`` / ``mape_aggregate_style``; everything here delegates to it
+rather than defining its own. The one number it does not return is ``aggregate_bias``
+(raw-count bias), which the per-group table needs because percentage bias is
+uninformative for a group whose actual total is near zero.
 """
 
 from .plot_utils import (

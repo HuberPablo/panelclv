@@ -1,4 +1,4 @@
-# Migrate the notebooks onto the collapsed Pareto benchmark API
+# Migrate the notebooks onto the current model and benchmark APIs
 
 Status: ready-for-human
 
@@ -18,6 +18,21 @@ call, not at import, so a notebook runs happily until it reaches the benchmark c
 Note the two `pareto_nbd_benchmark=True` sites are not a rename but a **deletion**: they
 requested the MLE estimator, which is gone. A notebook that printed both `Pareto/NBD` and
 `Pareto/NBD (HB)` rows now gets one row, and its stored output showing two is stale.
+
+## Also: the embedder seam changed the model constructors
+
+Ticket 05 moved `seq_cols` / `embedded_cols` / `target_col` / the width off the model
+constructors and onto an embedder the model is given, so these raise `TypeError`:
+
+- `Data_integration_LSTM.ipynb` — `InferenceMultinomialLSTMModel(seq_cols=..., embedded_cols=..., target_col=..., embedding_dim=...)`
+- `Data_integration_TRANSFORMER.ipynb` — `InferenceMultinomialTransformerModel(seq_cols=..., embedded_cols=..., target_col=..., d_model=...)`
+
+Both become `embedder=ProjectedEmbedder(seq_cols=..., embedded_cols=..., target_col=...,
+embedding_dim=<embedding_dim or d_model>)` with the remaining arguments unchanged; see the
+updated call sites in `scripts/main_plot.py` for the exact shape.
+
+Any checkpoint those notebooks reload also predates the seam and needs
+`scripts/migrations/rename_embedder_checkpoint_keys.py` run over it first.
 
 Marked for a human for the same reason as ticket 09: the notebooks are experiment records
 as much as code, and which ones are still live is Pablo's call. Worth doing in one pass

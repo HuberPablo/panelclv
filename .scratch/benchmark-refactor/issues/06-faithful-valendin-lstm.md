@@ -46,9 +46,10 @@ the drift ADR-0004 exists to prevent. Lazily imported from `benchmarks/__init__.
 PEP 562, verified in a fresh interpreter: importing the subpackage does not load torch.
 
 **Reproduction.** `scripts/validate_valendin_lstm.py`, the neural counterpart to
-`validate_pareto_benchmark.py`. The published numbers are *not* in the notebook output —
-its metric cells are unrun. Pablo confirmed the notebook's own runs vary and that "quite
-similar" is the bar, so it judges against the two markdown claims with a tolerance band.
+`validate_pareto_benchmark.py`. The notebook's metric cells (34, 45) are unrun, so there
+are no computed numbers to match; the targets come from its markdown instead — cell 16
+"around 0.44" and cell 35 "less than 1%". Pablo confirmed the notebook's own runs vary and
+that "quite similar" is the bar, so it judges against those with a tolerance band.
 
 The data prep hits the notebook's printed figures exactly: 2,239 accounts, 744,015
 transactions, max 11 per account-week, 155-step sequences, 12 count classes. Result:
@@ -66,6 +67,21 @@ own callers afterwards — the Optuna objective and the rollout selection both g
 The reproduction runs the notebook's random 10%-of-customers split, not our temporal one
 (ADR-0001): a reproduction has to run the protocol it reproduces or the validation loss is
 not the same quantity. The departure applies to our studies, not to this check.
+
+**Not done — study-suite integration.** The benchmark is reachable only from its
+validation script: `studies/config.py` `VALID_MODEL_TYPES`, `studies/runner.py`
+`_FORECASTERS` and `tuning/optuna_tuning.py`'s `suggest_*_params` are all untouched, so it
+cannot yet be tuned or run in a suite. This ticket's done-when did not ask for it, but the
+"Optuna tuning" departure implies it, and it is what would let the benchmark enter the
+comparison. It needs a decision first: ADR-0004 freezes the architecture, so a
+`suggest_valendin_params` branch can only search *training* hyperparameters (learning
+rate, batch size, patience) — searching widths would unfreeze the benchmark.
+
+Note for whoever does it: `optuna_tuning.py:749`
+(`_build_lstm if model_type == "lstm" else _build_transformer`) and the same shape at
+`:655` are unguarded `else` branches. They are unreachable today because `:402` and `:729`
+raise on an unknown `model_type`, but adding a type to only some of the four sites builds
+a **Transformer** silently. See ticket 08.
 
 **Unresolved — needs your call.** This ticket lists "the covariate path" among deliberate
 departures that stay, while ticket 05 specifies the Valendin embedder has "no covariate

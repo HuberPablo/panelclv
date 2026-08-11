@@ -38,8 +38,20 @@ assumed**: logits captured from both models before the change are reproduced bit
 `backbone.*` -> `backbone.embedder.*` for the embedding modules. 26 shape tests in
 `tests/test_embedders.py`, none of which train anything.
 
-**Consequence:** that key rename means checkpoints written before this commit no longer
-load as-is. They need the same prefix rename.
+**Consequence:** checkpoints written before this commit no longer load as-is. There are
+**three** key renames, not one — the third is easy to miss, because the LSTM called its
+covariate module `covariate_proj` while the Transformer called the same thing
+`covariate_projection`, and `ProjectedEmbedder` unified them:
+
+    backbone._emb_modules.*         -> backbone.embedder._emb_modules.*
+    backbone.covariate_proj.*       -> backbone.embedder.covariate_proj.*
+    backbone.covariate_projection.* -> backbone.embedder.covariate_proj.*   (Transformer)
+
+`scripts/migrations/rename_embedder_checkpoint_keys.py` does all three (dry-runs by
+default, idempotent). Verified on real files from `checkpoints/`: a migrated checkpoint
+loads `strict=True` into the refactored model with its tensors bit-identical. 345
+checkpoints under `checkpoints/` are affected; the migration has **not** been run on them,
+since that rewrites Pablo's artifacts in place.
 
 **Judgement call worth your eye:** `ValendinEmbedder` *raises* if `seq_cols` carries a
 non-embedded column, rather than dropping it. See ticket 06's note on the conflict.
