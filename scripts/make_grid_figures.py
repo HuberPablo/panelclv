@@ -26,9 +26,12 @@ REPLICATES = [f"Dataset_{i}" for i in range(1, 11)]
 
 # Categorical identity is fixed per model and never cycled or re-assigned when a
 # panel shows a subset. Slots 1-3 of the reference palette (blue / green / magenta).
-MODELS = ["LSTM", "Transformer", "ParetoNBD"]
-LABEL = {"LSTM": "LSTM", "Transformer": "Transformer", "ParetoNBD": "Pareto/NBD"}
-COLOR = {"LSTM": "#2a78d6", "Transformer": "#008300", "ParetoNBD": "#e87ba4"}
+MODELS = ["LSTM", "Transformer", "ParetoNBD_MLE"]
+# This grid was trained against the frequentist-MLE Pareto/NBD (now retired to
+# archive/), so the label names the estimator rather than just the model family.
+LABEL = {"LSTM": "LSTM", "Transformer": "Transformer",
+         "ParetoNBD_MLE": "Pareto/NBD (MLE)"}
+COLOR = {"LSTM": "#2a78d6", "Transformer": "#008300", "ParetoNBD_MLE": "#e87ba4"}
 INK, INK_2, INK_MUTED = "#0b0b0b", "#52514e", "#8a8a85"
 
 mpl.rcParams.update({

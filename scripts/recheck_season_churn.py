@@ -30,7 +30,7 @@ from panelclv.data_preparation import pareto_simulation as ps
 GEN = Path("Datasets/Synthetic/pnbd_study_4x4x10_20260716-154143")
 TRAIN = Path("Studies/pnbd_study_4x4x10_20260716-154143")
 OUT = Path("figures")
-MODELS = ["LSTM", "Transformer", "ParetoNBD"]
+MODELS = ["LSTM", "Transformer", "ParetoNBD_MLE"]
 REPLICATES = [f"Dataset_{i}" for i in range(1, 11)]
 HOLDOUT_YEAR, T_CAL, DETREND_WIN = 2001, 104, 13
 
