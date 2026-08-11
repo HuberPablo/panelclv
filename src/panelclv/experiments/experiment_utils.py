@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader, TensorDataset
 # This orchestration glue sits above the model + tuning layers, so it imports
 # them by absolute path: inference wrappers from `panelclv.models`, the feature
 # selection helpers from `panelclv.tuning`.
+from panelclv.models.embedders import ProjectedEmbedder
 from panelclv.models.multinomial_lstm import (
     MultinomialLSTMModel,
     InferenceMultinomialLSTMModel,
@@ -218,15 +219,14 @@ def build_inference_from_trial(
 
     if family == "lstm":
         inference_model: torch.nn.Module = InferenceMultinomialLSTMModel(
-            **common,
-            embedding_dim=params["embedding_dim"],
+            embedder=ProjectedEmbedder(**common, embedding_dim=params["embedding_dim"]),
             lstm_hidden_size=params["lstm_hidden_size"],
             dense_units=params["dense_units"],
             dropout=params["dropout"],
         )
     else:
         inference_model = InferenceMultinomialTransformerModel(
-            **common,
+            embedder=ProjectedEmbedder(**common, embedding_dim=params["d_model"]),
             d_model=params["d_model"],
             nhead=params["nhead"],
             num_encoder_layers=params["num_encoder_layers"],
@@ -306,19 +306,24 @@ def refit_best_trial(
     }
     if family == "lstm":
         model: torch.nn.Module = MultinomialLSTMModel(
-            seq_cols=train_meta["seq_cols"],
-            embedded_cols=train_meta["embedded_cols"],
-            target_col=train_meta["target_col"],
-            embedding_dim=params["embedding_dim"],
+            embedder=ProjectedEmbedder(
+                seq_cols=train_meta["seq_cols"],
+                embedded_cols=train_meta["embedded_cols"],
+                target_col=train_meta["target_col"],
+                embedding_dim=params["embedding_dim"],
+            ),
             lstm_hidden_size=params["lstm_hidden_size"],
             dense_units=params["dense_units"],
             dropout=params["dropout"],
         )
     else:
         model = MultinomialTransformerModel(
-            seq_cols=train_meta["seq_cols"],
-            embedded_cols=train_meta["embedded_cols"],
-            target_col=train_meta["target_col"],
+            embedder=ProjectedEmbedder(
+                seq_cols=train_meta["seq_cols"],
+                embedded_cols=train_meta["embedded_cols"],
+                target_col=train_meta["target_col"],
+                embedding_dim=params["d_model"],
+            ),
             seq_len=train_meta["seq_len"],
             d_model=params["d_model"],
             nhead=params["nhead"],

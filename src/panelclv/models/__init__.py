@@ -1,9 +1,15 @@
 """Multinomial LSTM / Transformer model family for transaction-count forecasting.
 
 This subpackage is scoped to the **model definition** only — the architectures, the
-loss functions they optimise, and the autoregressive Monte Carlo simulator that
-turns the categorical head into a forecast (per the Valendin design, the simulator
-*is* the model's forecast mechanism, not a post-hoc step).
+embedders that feed them, the loss functions they optimise, and the autoregressive
+Monte Carlo simulator that turns the categorical head into a forecast (per the
+Valendin design, the simulator *is* the model's forecast mechanism, not a post-hoc
+step).
+
+``embedders`` is shared infrastructure rather than architecture: how features become
+a vector is a swappable component a model is given (ADR-0005), so the frozen
+benchmark in ``panelclv.benchmarks`` draws its strategy from here too, exactly as it
+draws the simulator.
 
 The surrounding concerns each have their own sibling subpackage under ``panelclv``:
 
@@ -14,6 +20,11 @@ The surrounding concerns each have their own sibling subpackage under ``panelclv
 - ``panelclv.experiments`` — thin prepare -> tune -> forecast orchestration glue.
 """
 
+from .embedders import (
+    Embedder,
+    ProjectedEmbedder,
+    ValendinEmbedder,
+)
 from .multinomial_lstm import (
     MultinomialLSTMModel,
     InferenceMultinomialLSTMModel,
@@ -47,6 +58,11 @@ from .monte_carlo_forecasting import (
 # (FocalLoss, SquaredEMDLoss, compute_class_weights, build_criterion) and the
 # per-path simulator entry points (mc_simulate_one_path, mc_simulate_transformer_path).
 __all__ = [
+    # The embedder seam: how features become a vector (ADR-0005). A model is given
+    # one; swapping it is how the published architecture and ours differ.
+    "Embedder",
+    "ProjectedEmbedder",
+    "ValendinEmbedder",
     # Model + inference wrappers, both families
     "MultinomialLSTMModel",
     "InferenceMultinomialLSTMModel",

@@ -6,19 +6,11 @@ encoder with sinusoidal positional encoding. Same dynamic input contract.
 
 Constructor inputs
 ------------------
-seq_cols : list[str]
-    Ordered column names matching the LAST axis of the input tensor.
-embedded_cols : dict
-    {col: num_categories, ...} — every column listed here is embedded with
-    a categorical embedding block: `nn.Embedding` into a square-root-heuristic
-    width, LayerNorm, then a linear projection to `d_model` followed by a final
-    LayerNorm. Values in those columns must be integer class indices in
-    [0, num_categories). Anything in `seq_cols` but not here is treated as a
-    numerical covariate (single shared linear projection to `d_model`).
-target_col : str = "Transactions"
-    Which embedded column is the autoregressive target. Its cardinality
-    sets the size of the output multinomial head (num_target_classes). Must
-    appear in both `seq_cols` and `embedded_cols`.
+embedder : Embedder
+    How features become a vector (ADR-0005). Its `output_dim` is projected to
+    `d_model` by `input_projection`, and its `num_target_classes` sets the softmax
+    head size. The embedder owns `seq_cols`, `embedded_cols` and `target_col`, so
+    the model no longer takes them.
 d_model
     Width of token embeddings/projections and the Transformer encoder.
 nhead
@@ -58,71 +50,14 @@ Architecture
 
 from __future__ import annotations
 
-from typing import Sequence
-
 import numpy as np
 import torch
 import torch.distributions as dist
 from torch import nn
 
-
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
+from .embedders import Embedder
 
 
-def _emb_size(n: int) -> int:
-    """Square-root heuristic for embedding dimensionality."""
-    return int(n ** 0.5) + 1
-
-
-def _cat_embedding(num_categories: int, d_model: int) -> nn.Sequential:
-    raw_embedding_dim = _emb_size(num_categories)
-    return nn.Sequential(
-        nn.Embedding(num_categories, raw_embedding_dim),
-        nn.LayerNorm(raw_embedding_dim),
-        nn.Linear(raw_embedding_dim, d_model),
-        nn.LayerNorm(d_model),
-    )
-
-
-def _validate_embedded_cols(
-    seq_cols: Sequence[str],
-    embedded_cols: dict[str, int],
-    target_col: str,
-) -> dict[str, int]:
-    """Assert the MODEL-critical invariants and return embedded_cols as a dict.
-
-    Only the facts the model itself depends on are checked here: that the input
-    is a dict, and that the target is a present, embedded column (its cardinality
-    is the softmax head size). The fuller spec validation — pinned-vs-"auto" types,
-    cardinalities covering the data, and `embedded_cols ⊆ seq_cols` — already
-    happened upstream in `PanelConfig._validate_embedded_cols` (static) and
-    `prepare_dataset`/`resolve_embedded_cols` (data-dependent), and `select_features`
-    only ever filters that resolved set, so it stays a subset by construction. We
-    don't re-derive any of that.
-    """
-    if not isinstance(embedded_cols, dict):
-        raise ValueError(
-            "embedded_cols must be a {column: cardinality} dict "
-            "(use PanelConfig.embedded_cols / prepare_dataset's data['embedded_cols'])"
-        )
-    embedded_cols = dict(embedded_cols)
-
-    if target_col not in seq_cols:
-        raise ValueError(
-            f"target_col {target_col!r} not in seq_cols={list(seq_cols)}"
-        )
-    if target_col not in embedded_cols:
-        raise ValueError(
-            f"target_col {target_col!r} must appear in embedded_cols "
-            f"(its cardinality drives the output head size)"
-        )
-    return embedded_cols
-
-
-# ---------------------------------------------------------------------------
-# Positional encoding
 # ---------------------------------------------------------------------------
 
 # Positional Encoding
@@ -161,9 +96,7 @@ class _MultinomialTransformerBackbone(nn.Module):
 
     def __init__(
         self,
-        seq_cols: Sequence[str],
-        embedded_cols: dict[str, int],
-        target_col: str = "Transactions",
+        embedder: Embedder,
         d_model: int = 64,
         nhead: int = 8,
         num_encoder_layers: int = 1,
@@ -173,51 +106,24 @@ class _MultinomialTransformerBackbone(nn.Module):
         if d_model % nhead != 0:
             raise ValueError(f"d_model={d_model} must be divisible by nhead={nhead}")
 
-        embedded_cols = _validate_embedded_cols(seq_cols, embedded_cols, target_col)
-        num_target_classes = int(embedded_cols[target_col])
-
-        self.seq_cols: list[str] = list(seq_cols)
-        self.target_col: str = target_col
-        self.num_target_classes: int = num_target_classes
-
+        self.embedder = embedder
+        # Read off the embedder rather than recomputing: it owns the column layout,
+        # and its output_dim is the only thing this model needs to know about the
+        # embedding strategy.
+        self.seq_cols: list[str] = embedder.seq_cols
+        self.target_col: str = embedder.target_col
+        self.num_target_classes: int = embedder.num_target_classes
         self.d_model: int = d_model
 
-        # Dynamic embeddings — ModuleList + index map (dot-safe alternative to
-        # ModuleDict, since real column names often contain '.'). -----------------------------------------------
-        self._emb_cols: list[str] = [c for c in self.seq_cols if c in embedded_cols]
-        self._emb_modules = nn.ModuleList(
-            _cat_embedding(int(embedded_cols[c]), d_model) for c in self._emb_cols
-        )
-        self._emb_index: dict[str, int] = {c: i for i, c in enumerate(self._emb_cols)}
-
-        # Numerical covariates: everything in seq_cols but not embedded.
-        self.covariate_cols: list[str] = [
-            c for c in self.seq_cols if c not in embedded_cols
-        ]
-        if self.covariate_cols:
-            self.covariate_projection: nn.Module | None = nn.Sequential(
-                nn.Linear(len(self.covariate_cols), d_model),
-                nn.LayerNorm(d_model),
-            )
-        else:
-            self.covariate_projection = None
-
-        n_context_embs = len(self._emb_cols) - 1
-        self.has_context: bool = (n_context_embs > 0) or (self.covariate_projection is not None)
-
-        
         # Setup the positional encoding  -----------------------------------------------
         self.positional_encoding = SinePositionalEncoding(d_model, dropout=dropout)
 
-        # Project the combined input representation to d_model.
-        # With context:
-        #     combined_input_repr = [context_repr, target_emb]
-        #     shape: (B, T, 2 * d_model) -> (B, T, d_model)
-        # Without context:
-        #     combined_input_repr = target_emb
-        #     shape: (B, T, d_model) -> (B, T, d_model)
-        proj_in = d_model * (2 if self.has_context else 1)
-        self.input_projection = nn.Linear(proj_in, d_model)
+        # Project whatever width the embedder produces onto d_model, which is the
+        # only width the encoder stack understands. A ProjectedEmbedder at
+        # embedding_dim=d_model gives (B, T, 2*d_model) -> (B, T, d_model); a
+        # ValendinEmbedder gives its much narrower concatenation. Either way the
+        # encoder below is unchanged.
+        self.input_projection = nn.Linear(embedder.output_dim, d_model)
         
         # Setup the Transformer encoder and output head -----------------------------------------------
         encoder_layer = nn.TransformerEncoderLayer(
@@ -244,7 +150,7 @@ class _MultinomialTransformerBackbone(nn.Module):
             nn.Linear(d_model, d_model),
             nn.ReLU(),
             nn.LayerNorm(d_model),
-            nn.Linear(d_model, num_target_classes),
+            nn.Linear(d_model, self.num_target_classes),
         )
 
     # ------------------------------------------------------------------
@@ -255,50 +161,15 @@ class _MultinomialTransformerBackbone(nn.Module):
         mask = torch.triu(torch.ones(sz, sz, device=device), diagonal=1).bool()
         return torch.zeros(sz, sz, device=device).masked_fill(mask, float("-inf"))
 
-    def _check_shape(self, x: torch.Tensor) -> None:
-        if x.shape[-1] != len(self.seq_cols):
-            raise ValueError(
-                f"Expected x.shape[-1] == {len(self.seq_cols)} (= len(seq_cols)), "
-                f"got {x.shape[-1]}"
-            )
-
-    def _encode(self, x: torch.Tensor) -> torch.Tensor:
-        self._check_shape(x)
-
-        target_emb: torch.Tensor | None = None
-        context_repr: torch.Tensor | None = None
-        numeric_covariate_chunks: list[torch.Tensor] = []
-
-        for i, col in enumerate(self.seq_cols):
-            if col in self._emb_index:
-                emb = self._emb_modules[self._emb_index[col]](x[:, :, i].long())
-                if col == self.target_col:
-                    target_emb = emb
-                else:
-                    context_repr = emb if context_repr is None else context_repr + emb
-            else:
-                numeric_covariate_chunks.append(x[:, :, i:i + 1])
-
-        if self.covariate_projection is not None:
-            numeric_covariates = torch.cat(numeric_covariate_chunks, dim=-1).float()
-            numeric_covariate_repr = self.covariate_projection(numeric_covariates)
-            context_repr = (
-                numeric_covariate_repr
-                if context_repr is None
-                else context_repr + numeric_covariate_repr
-            )
-
-        if context_repr is None:
-            return target_emb  # type: ignore[return-value]
-        return torch.cat([context_repr, target_emb], dim=-1)
-
     def forward(
         self,
         x: torch.Tensor,
         mask: torch.Tensor | None = None,
         only_last: bool = False,
     ) -> torch.Tensor:
-        combined_input_repr = self._encode(x)
+        # The embedder turns (B, T, F) into (B, T, embedder.output_dim); which
+        # features were summed, concatenated or projected is its business.
+        combined_input_repr = self.embedder(x)
 
         token_repr = self.input_projection(combined_input_repr)
 
@@ -335,9 +206,7 @@ class MultinomialTransformerModel(nn.Module):
 
     def __init__(
         self,
-        seq_cols: Sequence[str],
-        embedded_cols: dict[str, int],
-        target_col: str = "Transactions",
+        embedder: Embedder,
         seq_len: int | None = None,
         d_model: int = 64,
         nhead: int = 8,
@@ -346,9 +215,7 @@ class MultinomialTransformerModel(nn.Module):
     ) -> None:
         super().__init__()
         self.backbone = _MultinomialTransformerBackbone(
-            seq_cols=seq_cols,
-            embedded_cols=embedded_cols,
-            target_col=target_col,
+            embedder=embedder,
             d_model=d_model,
             nhead=nhead,
             num_encoder_layers=num_encoder_layers,
@@ -405,9 +272,7 @@ class InferenceMultinomialTransformerModel(nn.Module):
 
     def __init__(
         self,
-        seq_cols: Sequence[str],
-        embedded_cols: dict[str, int],
-        target_col: str = "Transactions",
+        embedder: Embedder,
         seq_len: int | None = None,  # accepted for API symmetry; unused here
         d_model: int = 64,
         nhead: int = 8,
@@ -416,9 +281,7 @@ class InferenceMultinomialTransformerModel(nn.Module):
     ) -> None:
         super().__init__()
         self.backbone = _MultinomialTransformerBackbone(
-            seq_cols=seq_cols,
-            embedded_cols=embedded_cols,
-            target_col=target_col,
+            embedder=embedder,
             d_model=d_model,
             nhead=nhead,
             num_encoder_layers=num_encoder_layers,

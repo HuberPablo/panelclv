@@ -590,10 +590,13 @@ def compute_forecast_metrics(
 #     run_monte_carlo_forecast, compute_forecast_metrics,
 # )
 # from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
+# from panelclv.models.embedders import ProjectedEmbedder
 #
 # inference_model = InferenceMultinomialLSTMModel(
-#     seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
-#     target_col=data["target_col"],
+#     embedder=ProjectedEmbedder(
+#         seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
+#         target_col=data["target_col"],
+#     ),
 # )
 # inference_model.load_state_dict(trained_model.state_dict())
 # forecast = run_monte_carlo_forecast(inference_model, data, n_simulations=30)
@@ -601,10 +604,13 @@ def compute_forecast_metrics(
 # Transformer:
 # from panelclv.models.monte_carlo_forecasting import run_monte_carlo_forecast_transformer
 # from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
+# from panelclv.models.embedders import ProjectedEmbedder
 #
 # inference_model = InferenceMultinomialTransformerModel(
-#     seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
-#     target_col=data["target_col"],
+#     embedder=ProjectedEmbedder(
+#         seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
+#         target_col=data["target_col"], embedding_dim=64,
+#     ),
 # )
 # inference_model.load_state_dict(trained_model.state_dict())
 # forecast = run_monte_carlo_forecast_transformer(inference_model, data, n_simulations=30)

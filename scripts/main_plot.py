@@ -23,6 +23,7 @@ import pandas as pd
 from panelclv.models import (
     InferenceMultinomialLSTMModel,
     InferenceMultinomialTransformerModel,
+    ProjectedEmbedder,
 )
 from panelclv.benchmarks import compute_pareto_predictions
 from panelclv.evaluation import (
@@ -104,10 +105,12 @@ def compute_and_save_lstm(
     """Build the inference LSTM, run MC on `data`, save predictions to a CSV."""
     def factory():
         return InferenceMultinomialLSTMModel(
-            seq_cols=data["seq_cols"],
-            embedded_cols=embedded_cols,
-            target_col=data["target_col"],
-            embedding_dim=embedding_dim,
+            embedder=ProjectedEmbedder(
+                seq_cols=data["seq_cols"],
+                embedded_cols=embedded_cols,
+                target_col=data["target_col"],
+                embedding_dim=embedding_dim,
+            ),
             lstm_hidden_size=lstm_hidden_size,
             dense_units=dense_units,
             dropout=dropout,
@@ -138,9 +141,12 @@ def compute_and_save_transformer(
     """Build the inference Transformer, run MC on `data`, save predictions to a CSV."""
     def factory():
         return InferenceMultinomialTransformerModel(
-            seq_cols=data["seq_cols"],
-            embedded_cols=embedded_cols,
-            target_col=data["target_col"],
+            embedder=ProjectedEmbedder(
+                seq_cols=data["seq_cols"],
+                embedded_cols=embedded_cols,
+                target_col=data["target_col"],
+                embedding_dim=d_model,
+            ),
             d_model=d_model, nhead=nhead,
             num_encoder_layers=num_encoder_layers,
             dropout=dropout,

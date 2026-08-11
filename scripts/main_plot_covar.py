@@ -21,7 +21,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from panelclv.models import InferenceMultinomialTransformerModel
+from panelclv.models import InferenceMultinomialTransformerModel, ProjectedEmbedder
 from panelclv.evaluation import (
     forecast_from_checkpoint,
     load_predictions_from_csv,
@@ -87,9 +87,12 @@ def compute_and_save_transformer_config(
     """Run MC from a checkpoint for one covariate configuration and save its CSV."""
     def factory():
         return InferenceMultinomialTransformerModel(
-            seq_cols=seq_cols,
-            embedded_cols=embedded_cols,
-            target_col=target_col,
+            embedder=ProjectedEmbedder(
+                seq_cols=seq_cols,
+                embedded_cols=embedded_cols,
+                target_col=target_col,
+                embedding_dim=d_model,
+            ),
             seq_len=seq_len, d_model=d_model, nhead=nhead,
             num_encoder_layers=num_encoder_layers, dropout=dropout,
         )

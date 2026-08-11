@@ -95,6 +95,7 @@ import torch
 # Model definitions and the Monte Carlo simulator live in `panelclv.models`; the
 # training loop lives in `panelclv.training`. After the subpackage split these are
 # cross-package imports, so they are absolute rather than relative.
+from panelclv.models.embedders import ProjectedEmbedder
 from panelclv.models.multinomial_lstm import MultinomialLSTMModel, InferenceMultinomialLSTMModel
 from panelclv.models.multinomial_transformer import (
     MultinomialTransformerModel,
@@ -456,10 +457,12 @@ def _build_lstm(
     params: dict[str, Any], metadata: dict[str, Any]
 ) -> MultinomialLSTMModel:
     return MultinomialLSTMModel(
-        seq_cols=metadata["seq_cols"],
-        embedded_cols=metadata["embedded_cols"],
-        target_col=metadata.get("target_col", "Transactions"),
-        embedding_dim=params["embedding_dim"],
+        embedder=ProjectedEmbedder(
+            seq_cols=metadata["seq_cols"],
+            embedded_cols=metadata["embedded_cols"],
+            target_col=metadata.get("target_col", "Transactions"),
+            embedding_dim=params["embedding_dim"],
+        ),
         lstm_hidden_size=params["lstm_hidden_size"],
         dense_units=params["dense_units"],
         dropout=params["dropout"],
@@ -470,9 +473,14 @@ def _build_transformer(
     params: dict[str, Any], metadata: dict[str, Any]
 ) -> MultinomialTransformerModel:
     return MultinomialTransformerModel(
-        seq_cols=metadata["seq_cols"],
-        embedded_cols=metadata["embedded_cols"],
-        target_col=metadata.get("target_col", "Transactions"),
+        # The Transformer projects the embedder's width onto d_model, and has always
+        # embedded at d_model, so that is the width the ProjectedEmbedder uses.
+        embedder=ProjectedEmbedder(
+            seq_cols=metadata["seq_cols"],
+            embedded_cols=metadata["embedded_cols"],
+            target_col=metadata.get("target_col", "Transactions"),
+            embedding_dim=params["d_model"],
+        ),
         seq_len=metadata.get("seq_len"),
         d_model=params["d_model"],
         nhead=params["nhead"],
@@ -646,14 +654,20 @@ def _validation_rollout_score(
 
     if model_type == "lstm":
         model = InferenceMultinomialLSTMModel(
-            seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
-            embedding_dim=params["embedding_dim"], lstm_hidden_size=params["lstm_hidden_size"],
+            embedder=ProjectedEmbedder(
+                seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
+                embedding_dim=params["embedding_dim"],
+            ),
+            lstm_hidden_size=params["lstm_hidden_size"],
             dense_units=params["dense_units"], dropout=params["dropout"],
         )
         forecaster = run_monte_carlo_forecast
     else:
         model = InferenceMultinomialTransformerModel(
-            seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
+            embedder=ProjectedEmbedder(
+                seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
+                embedding_dim=params["d_model"],
+            ),
             d_model=params["d_model"], nhead=params["nhead"],
             num_encoder_layers=params["num_encoder_layers"],
             dropout=params["dropout"],
