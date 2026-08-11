@@ -27,7 +27,7 @@ from typing import Any
 
 # Recognised model families. The two neural families go through Optuna; the
 # Pareto/NBD baseline is a single deterministic fit (no tuning, one prediction).
-NEURAL_MODEL_TYPES = ("lstm", "transformer")
+NEURAL_MODEL_TYPES = ("lstm", "transformer", "valendin_lstm")
 VALID_MODEL_TYPES = NEURAL_MODEL_TYPES + ("pareto_nbd",)
 VALID_PREDICTION_SOURCES = ("refit", "checkpoint")
 
@@ -46,7 +46,10 @@ class ModelSpec:
     name
         Folder name for this model under the study root (e.g. ``"LSTM"``).
     model_type
-        ``"lstm"``, ``"transformer"`` (Optuna-tuned) or ``"pareto_nbd"`` (baseline).
+        ``"lstm"``, ``"transformer"``, ``"valendin_lstm"`` (Optuna-tuned) or
+        ``"pareto_nbd"`` (baseline). ``"valendin_lstm"`` is the frozen published
+        benchmark: its architecture is fixed, so only training hyperparameters
+        (learning rate, weight decay, batch size) are searched.
     data_info
         The training-knobs dict from the README quickstart (``n_epochs``,
         ``patience``, ``loss_type``, …). Ignored for ``pareto_nbd``. The runner

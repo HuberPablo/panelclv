@@ -68,20 +68,22 @@ The reproduction runs the notebook's random 10%-of-customers split, not our temp
 (ADR-0001): a reproduction has to run the protocol it reproduces or the validation loss is
 not the same quantity. The departure applies to our studies, not to this check.
 
-**Not done — study-suite integration.** The benchmark is reachable only from its
-validation script: `studies/config.py` `VALID_MODEL_TYPES`, `studies/runner.py`
-`_FORECASTERS` and `tuning/optuna_tuning.py`'s `suggest_*_params` are all untouched, so it
-cannot yet be tuned or run in a suite. This ticket's done-when did not ask for it, but the
-"Optuna tuning" departure implies it, and it is what would let the benchmark enter the
-comparison. It needs a decision first: ADR-0004 freezes the architecture, so a
-`suggest_valendin_params` branch can only search *training* hyperparameters (learning
-rate, batch size, patience) — searching widths would unfreeze the benchmark.
+**Study-suite integration.** Done. `model_type="valendin_lstm"` is registered in
+`studies/config.py` `NEURAL_MODEL_TYPES`, `studies/runner.py` `_FORECASTERS` (the stateful
+LSTM simulator, same as ours) and `tuning/optuna_tuning.py`.
 
-Note for whoever does it: `optuna_tuning.py:749`
-(`_build_lstm if model_type == "lstm" else _build_transformer`) and the same shape at
-`:655` are unguarded `else` branches. They are unreachable today because `:402` and `:729`
-raise on an unknown `model_type`, but adding a type to only some of the four sites builds
-a **Transformer** silently. See ticket 08.
+The search space is `VALENDIN_SEARCH_DEFAULTS = {learning_rate, weight_decay, batch_size}`
+— training hyperparameters only. ADR-0004 freezes the architecture, so `memory_units` and
+`dense_units` stay at the published 128/128 and are never sampled; searching a width would
+quietly unfreeze the reference implementation. A test asserts the search space is exactly
+those three and that the built model still has the published sizes.
+
+Verified end to end on a synthetic panel: a one-trial suite runs Optuna -> refit ->
+rollout -> `results.csv`, and its only `param_*` columns are the three training knobs.
+
+That run is also what caught the last dispatch site. `run_optuna_study` carried its own
+hardcoded `{"lstm", "transformer"}` guard, so the new type passed every unit test and was
+rejected at the entry point. Now registry-driven, and pinned by a test.
 
 **Resolved: the benchmark takes no covariates.** This ticket's "deliberate departures
 that stay" line listed the covariate path, which read as conflicting with ticket 05's "no

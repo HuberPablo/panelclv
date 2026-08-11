@@ -22,17 +22,15 @@ from torch.utils.data import DataLoader, TensorDataset
 # This orchestration glue sits above the model + tuning layers, so it imports
 # them by absolute path: inference wrappers from `panelclv.models`, the feature
 # selection helpers from `panelclv.tuning`.
-from panelclv.models.embedders import ProjectedEmbedder
-from panelclv.models.multinomial_lstm import (
-    MultinomialLSTMModel,
-    InferenceMultinomialLSTMModel,
-)
-from panelclv.models.multinomial_transformer import (
-    MultinomialTransformerModel,
-    InferenceMultinomialTransformerModel,
-)
 from panelclv.training.training_utils import refit_full_calibration
-from panelclv.tuning.optuna_tuning import select_features, select_features_for_trial
+# Models are built through the tuning registry rather than constructed here, so this
+# module never has to know which architectures exist.
+from panelclv.tuning.optuna_tuning import (
+    select_features,
+    select_features_for_trial,
+    _build_inference_model_for,
+    _build_model_for,
+)
 
 if TYPE_CHECKING:  # optuna only needed for the type hint; avoid an import-time dep here
     import optuna
@@ -199,10 +197,6 @@ def build_inference_from_trial(
     tuning checkpoint. Default ``None`` loads the best trial's own checkpoint.
     """
     family = model_type.strip().lower()
-    if family not in ("lstm", "transformer"):
-        raise ValueError(
-            f"model_type must be 'lstm' or 'transformer', got {model_type!r}"
-        )
 
     best = study.best_trial
     params = best.params
@@ -217,21 +211,9 @@ def build_inference_from_trial(
         target_col=data_best["target_col"],
     )
 
-    if family == "lstm":
-        inference_model: torch.nn.Module = InferenceMultinomialLSTMModel(
-            embedder=ProjectedEmbedder(**common, embedding_dim=params["embedding_dim"]),
-            lstm_hidden_size=params["lstm_hidden_size"],
-            dense_units=params["dense_units"],
-            dropout=params["dropout"],
-        )
-    else:
-        inference_model = InferenceMultinomialTransformerModel(
-            embedder=ProjectedEmbedder(**common, embedding_dim=params["d_model"]),
-            d_model=params["d_model"],
-            nhead=params["nhead"],
-            num_encoder_layers=params["num_encoder_layers"],
-            dropout=params["dropout"],
-        )
+    # Same registry the rollout-selection path uses, so the inference model always
+    # matches the trained one it will load a state_dict from.
+    inference_model, _ = _build_inference_model_for(family, params, common)
 
     state = torch.load(checkpoint_path, map_location="cpu")
     # The training Transformer may register a fixed-length "_cached_mask" buffer that
@@ -281,10 +263,6 @@ def refit_best_trial(
     value (the paper's big-batch final step).
     """
     family = model_type.strip().lower()
-    if family not in ("lstm", "transformer"):
-        raise ValueError(
-            f"model_type must be 'lstm' or 'transformer', got {model_type!r}"
-        )
 
     best = study.best_trial
     params = best.params
@@ -304,32 +282,10 @@ def refit_best_trial(
         "target_col":    data_best["target_col"],
         "seq_len":       data_best["samples"].shape[1],
     }
-    if family == "lstm":
-        model: torch.nn.Module = MultinomialLSTMModel(
-            embedder=ProjectedEmbedder(
-                seq_cols=train_meta["seq_cols"],
-                embedded_cols=train_meta["embedded_cols"],
-                target_col=train_meta["target_col"],
-                embedding_dim=params["embedding_dim"],
-            ),
-            lstm_hidden_size=params["lstm_hidden_size"],
-            dense_units=params["dense_units"],
-            dropout=params["dropout"],
-        )
-    else:
-        model = MultinomialTransformerModel(
-            embedder=ProjectedEmbedder(
-                seq_cols=train_meta["seq_cols"],
-                embedded_cols=train_meta["embedded_cols"],
-                target_col=train_meta["target_col"],
-                embedding_dim=params["d_model"],
-            ),
-            seq_len=train_meta["seq_len"],
-            d_model=params["d_model"],
-            nhead=params["nhead"],
-            num_encoder_layers=params["num_encoder_layers"],
-            dropout=params["dropout"],
-        )
+    # Built through the tuning registry, so a model type reaches refit only if it is
+    # wired everywhere else too — and an unregistered one raises here rather than
+    # silently refitting another architecture.
+    model: torch.nn.Module = _build_model_for(family, params, train_meta)
 
     refit_loader = make_refit_loader(data_best, batch_size)
     result = refit_full_calibration(

@@ -46,7 +46,13 @@ from . import layout
 # Map the LSTM/Transformer family to its Monte Carlo forecaster (the two rollouts
 # differ because the architectures carry history differently — see
 # monte_carlo_forecasting.py).
-_FORECASTERS = {"lstm": mc_forecast, "transformer": mc_forecast_transformer}
+# The Valendin benchmark is a stateful LSTM, so it rolls out through the same
+# simulator as our own LSTM — only the architecture differs.
+_FORECASTERS = {
+    "lstm": mc_forecast,
+    "transformer": mc_forecast_transformer,
+    "valendin_lstm": mc_forecast,
+}
 
 # Period length (days) per PanelConfig.frequency, for the Pareto/NBD RFM summary.
 _PERIOD_DAYS = {"daily": 1.0, "weekly": 7.0, "monthly": 30.0}

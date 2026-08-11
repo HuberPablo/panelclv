@@ -307,6 +307,17 @@ TRANSFORMER_SEARCH_DEFAULTS: dict[str, Any] = {
     "batch_size":         {64, 128, 256},
 }
 
+# The Valendin benchmark's architecture is FROZEN (ADR-0004): its widths are the
+# published `memory_units = 128` / `dense_units = 128`, and its embeddings are raw
+# sqrt(n)+1 vectors, so none of them appear here. Only training hyperparameters are
+# searched — Optuna over fixed sizes is the deliberate departure ADR-0004 records, and
+# searching a width would quietly unfreeze the reference implementation.
+VALENDIN_SEARCH_DEFAULTS: dict[str, Any] = {
+    "learning_rate": (1e-4, 3e-3, "log"),
+    "weight_decay":  (1e-6, 1e-2, "log"),
+    "batch_size":    {64, 128, 256},
+}
+
 # `data_info` keys that are NOT search-space parameters — training control and
 # loss/logging settings. `n_epochs`/`patience` are special: they are training
 # control, but the caller may still hand them a search spec (e.g. patience over
@@ -319,6 +330,16 @@ _NON_SEARCH_DATA_INFO_KEYS: frozenset[str] = frozenset({
     "loss_type", "class_weights", "focal_gamma",   # loss configuration
     "grad_clip", "log_wandb", "seed",              # optimiser / logging / RNG
 })
+
+
+# Search space per model type. The four dispatch sites below read this rather than
+# each carrying its own `if model_type == ...` cascade, so a type registered here is
+# recognised by all of them or by none — never by some.
+_SEARCH_DEFAULTS: dict[str, dict[str, Any]] = {
+    "lstm": LSTM_SEARCH_DEFAULTS,
+    "transformer": TRANSFORMER_SEARCH_DEFAULTS,
+    "valendin_lstm": VALENDIN_SEARCH_DEFAULTS,
+}
 
 
 def _suggest_param(trial: optuna.Trial, name: str, spec: Any) -> Any:
@@ -399,12 +420,12 @@ def validate_data_info(model_type: str, data_info: dict[str, Any]) -> None:
     name (`"hiddendim"`) would otherwise be silently dropped and the default
     range used instead — exactly the kind of silent miss this guard prevents.
     """
-    if model_type == "lstm":
-        search_keys = set(LSTM_SEARCH_DEFAULTS)
-    elif model_type == "transformer":
-        search_keys = set(TRANSFORMER_SEARCH_DEFAULTS)
-    else:
-        raise ValueError(f"Unknown model_type {model_type!r}")
+    if model_type not in _SEARCH_DEFAULTS:
+        raise ValueError(
+            f"Unknown model_type {model_type!r}; "
+            f"registered types: {sorted(_SEARCH_DEFAULTS)}"
+        )
+    search_keys = set(_SEARCH_DEFAULTS[model_type])
     allowed = search_keys | set(_NON_SEARCH_DATA_INFO_KEYS)
     unknown = [k for k in data_info if k not in allowed]
     if unknown:
@@ -420,6 +441,19 @@ def suggest_lstm_params(
 ) -> dict[str, Any]:
     """Sample the LSTM hyperparameters, honouring `overrides` (from data_info)."""
     specs = _merge_specs(LSTM_SEARCH_DEFAULTS, overrides)
+    return {name: _suggest_param(trial, name, spec) for name, spec in specs.items()}
+
+
+def suggest_valendin_params(
+    trial: optuna.Trial, overrides: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Sample the Valendin benchmark's TRAINING hyperparameters only.
+
+    Its architecture is frozen at the published sizes (ADR-0004), so there is nothing
+    architectural to search — `VALENDIN_SEARCH_DEFAULTS` carries learning rate, weight
+    decay and batch size and nothing else.
+    """
+    specs = _merge_specs(VALENDIN_SEARCH_DEFAULTS, overrides)
     return {name: _suggest_param(trial, name, spec) for name, spec in specs.items()}
 
 
@@ -469,6 +503,19 @@ def _build_lstm(
     )
 
 
+def _build_valendin(
+    params: dict[str, Any], metadata: dict[str, Any]
+) -> "ValendinLSTMModel":
+    """Build the frozen benchmark. `params` carries no architecture, by design."""
+    from panelclv.benchmarks.valendin_lstm import ValendinLSTMModel
+
+    return ValendinLSTMModel(
+        seq_cols=metadata["seq_cols"],
+        embedded_cols=metadata["embedded_cols"],
+        target_col=metadata.get("target_col", "Transactions"),
+    )
+
+
 def _build_transformer(
     params: dict[str, Any], metadata: dict[str, Any]
 ) -> MultinomialTransformerModel:
@@ -486,6 +533,103 @@ def _build_transformer(
         nhead=params["nhead"],
         num_encoder_layers=params["num_encoder_layers"],
         dropout=params["dropout"],
+    )
+
+
+# Parameter suggester and training-model builder per registered type. Every dispatch
+# site goes through these two helpers, so a type is either wired everywhere or nowhere.
+# Before this table two sites fell through to the Transformer on an unrecognised type,
+# which would have trained the wrong architecture under the right name.
+_SUGGESTERS = {
+    "lstm": suggest_lstm_params,
+    "transformer": suggest_transformer_params,
+    "valendin_lstm": suggest_valendin_params,
+}
+
+_BUILDERS = {
+    "lstm": _build_lstm,
+    "transformer": _build_transformer,
+    "valendin_lstm": _build_valendin,
+}
+
+
+def _require_registered(model_type: str, table: dict, what: str) -> Any:
+    """Look `model_type` up, or say plainly that it is not registered."""
+    try:
+        return table[model_type]
+    except KeyError:
+        raise ValueError(
+            f"Unknown model_type {model_type!r} — no {what} registered. "
+            f"Registered types: {sorted(table)}"
+        ) from None
+
+
+def _suggest_params_for(
+    model_type: str, trial: optuna.Trial, data_info: dict[str, Any]
+) -> dict[str, Any]:
+    """Sample this model type's hyperparameters."""
+    return _require_registered(model_type, _SUGGESTERS, "parameter suggester")(
+        trial, data_info
+    )
+
+
+def _build_model_for(
+    model_type: str, params: dict[str, Any], metadata: dict[str, Any]
+):
+    """Build this model type's TRAINING model."""
+    return _require_registered(model_type, _BUILDERS, "model builder")(params, metadata)
+
+
+def _build_inference_model_for(
+    model_type: str, params: dict[str, Any], metadata: dict[str, Any]
+):
+    """Build the matching INFERENCE model and the simulator that drives it.
+
+    Returns ``(inference_model, forecaster)``. Constructor arguments mirror the
+    training model's, since the rollout loads that model's ``state_dict`` into this one.
+    """
+    seq_cols = metadata["seq_cols"]
+    embedded_cols = metadata["embedded_cols"]
+    target_col = metadata.get("target_col", "Transactions")
+
+    if model_type == "lstm":
+        return (
+            InferenceMultinomialLSTMModel(
+                embedder=ProjectedEmbedder(
+                    seq_cols=seq_cols, embedded_cols=embedded_cols,
+                    target_col=target_col, embedding_dim=params["embedding_dim"],
+                ),
+                lstm_hidden_size=params["lstm_hidden_size"],
+                dense_units=params["dense_units"], dropout=params["dropout"],
+            ),
+            run_monte_carlo_forecast,
+        )
+    if model_type == "transformer":
+        return (
+            InferenceMultinomialTransformerModel(
+                embedder=ProjectedEmbedder(
+                    seq_cols=seq_cols, embedded_cols=embedded_cols,
+                    target_col=target_col, embedding_dim=params["d_model"],
+                ),
+                d_model=params["d_model"], nhead=params["nhead"],
+                num_encoder_layers=params["num_encoder_layers"],
+                dropout=params["dropout"],
+            ),
+            run_monte_carlo_forecast_transformer,
+        )
+    if model_type == "valendin_lstm":
+        from panelclv.benchmarks.valendin_lstm import InferenceValendinLSTMModel
+
+        # Frozen architecture, so no params are read: the sizes are the published ones.
+        return (
+            InferenceValendinLSTMModel(
+                seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
+            ),
+            run_monte_carlo_forecast,   # stateful rollout, as for the LSTM
+        )
+    raise ValueError(
+        f"Unknown model_type {model_type!r} — no inference model registered. "
+        f"Registered types: {sorted(_BUILDERS)}"
     )
 
 
@@ -652,27 +796,11 @@ def _validation_rollout_score(
         "covariate_stats": d.get("covariate_stats"),
     }
 
-    if model_type == "lstm":
-        model = InferenceMultinomialLSTMModel(
-            embedder=ProjectedEmbedder(
-                seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
-                embedding_dim=params["embedding_dim"],
-            ),
-            lstm_hidden_size=params["lstm_hidden_size"],
-            dense_units=params["dense_units"], dropout=params["dropout"],
-        )
-        forecaster = run_monte_carlo_forecast
-    else:
-        model = InferenceMultinomialTransformerModel(
-            embedder=ProjectedEmbedder(
-                seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
-                embedding_dim=params["d_model"],
-            ),
-            d_model=params["d_model"], nhead=params["nhead"],
-            num_encoder_layers=params["num_encoder_layers"],
-            dropout=params["dropout"],
-        )
-        forecaster = run_monte_carlo_forecast_transformer
+    model, forecaster = _build_inference_model_for(
+        model_type,
+        params,
+        {"seq_cols": seq_cols, "embedded_cols": embedded_cols, "target_col": target_col},
+    )
 
     state = torch.load(checkpoint_path, map_location="cpu")
     # Transformer training caches a fixed-length mask buffer the inference model
@@ -726,12 +854,7 @@ def objective(
                               the `val_loss` user attribute. Requires
                               `rollout_cfg` (assembled by `run_optuna_study`).
     """
-    if model_type == "lstm":
-        params = suggest_lstm_params(trial, data_info)
-    elif model_type == "transformer":
-        params = suggest_transformer_params(trial, data_info)
-    else:
-        raise ValueError(f"Unknown model_type {model_type!r}")
+    params = _suggest_params_for(model_type, trial, data_info)
 
     # Which covariates to drop this trial (empty list ⇒ fixed feature set).
     drop_cols = suggest_covariate_selection(trial, removable_features)
@@ -746,7 +869,7 @@ def objective(
     trial.set_user_attr("dropped_features", ",".join(sorted(drop_cols)))
     trial.set_user_attr("target_col", metadata.get("target_col", "Transactions"))
 
-    model = (_build_lstm if model_type == "lstm" else _build_transformer)(params, metadata)
+    model = _build_model_for(model_type, params, metadata)
 
     # `focal_gamma` is either a scalar (fixed) or `(low, high, step)`
     # (Optuna-tuned on a step grid). Missing / None → 2.0.
@@ -921,8 +1044,12 @@ def run_optuna_study(
     `checkpoint_path`) is preserved, so the downstream workflow is unaffected; you
     only lose the ability to rebuild a NON-winning trial from its weights.
     """
-    if model_type not in {"lstm", "transformer"}:
-        raise ValueError(f"model_type must be 'lstm' or 'transformer', got {model_type!r}")
+    # Reject an unregistered type here rather than after the first trial trains.
+    if model_type not in _BUILDERS:
+        raise ValueError(
+            f"Unknown model_type {model_type!r}; "
+            f"registered types: {sorted(_BUILDERS)}"
+        )
 
     # Resolve the selection mode up front: a typo'd metric should fail loudly
     # here, not silently fall back to cross-entropy after hours of tuning.
