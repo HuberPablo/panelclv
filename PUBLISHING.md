@@ -103,7 +103,5 @@ pip install panelclv          # final sanity check from real PyPI, in a clean en
 - **Heavy deps:** `dependencies` includes `torch` by design. `pip install panelclv`
   leaves an already-installed torch (ROCm / CUDA / CPU) untouched and only pulls the
   default build into an env that has none — existing environments are unaffected.
-- **`lifetimes`** (the MLE Pareto/NBD dep) is an older package; confirm it resolves on
-  your target Python (esp. 3.12) before advertising that version.
 - **README is the PyPI long-description** — make sure its top heading and quickstart are
   current before uploading, since that's the project's public page.

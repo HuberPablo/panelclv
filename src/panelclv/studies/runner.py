@@ -170,7 +170,13 @@ def _rebuild_winner(
 def _run_pareto_model(
     spec: ModelSpec, config: StudySuiteConfig, root: Path
 ) -> list[dict[str, Any]]:
-    """Single deterministic Pareto/NBD fit — no Optuna, one prediction."""
+    """Single Pareto/NBD fit — no Optuna, one prediction.
+
+    The benchmark is a hierarchical-Bayes MCMC sampler, so the fit is reproducible
+    rather than deterministic: it repeats only under the same seed. The suite's
+    ``base_seed`` supplies it (a user ``pareto_kwargs["seed"]`` still wins), and the
+    seed actually used is recorded alongside the metrics.
+    """
     dirs = layout.model_dirs(root, spec.name, make_optuna=False)
     model_dir = dirs["model_dir"]
     layout.write_json(model_dir / "config.json", _model_record(spec, config))
@@ -182,6 +188,7 @@ def _run_pareto_model(
         "target_col": data.get("target_col", "Transactions"),
         "time_col": "period_start",
         "period_in_days": _PERIOD_DAYS.get(freq, 7.0),
+        "seed": config.base_seed,
         **spec.pareto_kwargs,
     }
     predictions, ids = compute_pareto_predictions(
@@ -205,7 +212,7 @@ def _run_pareto_model(
         "model": spec.name,
         "model_type": spec.model_type,
         "study": 1,
-        "seed": None,
+        "seed": pareto_kwargs["seed"],
         "objective": float("nan"),  # no Optuna objective for the baseline
         **metrics,
     }

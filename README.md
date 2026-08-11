@@ -1,7 +1,7 @@
 # panelclv
 
 Modular **LSTM** and **Transformer** models for customer-base transaction-count
-forecasting, with **Pareto/NBD** benchmarks. The thesis target is the Valendin et al.
+forecasting, with a **Pareto/NBD** benchmark. The thesis target is the Valendin et al.
 workflow: the models are *classifiers over transaction-count classes* that forecast by
 **autoregressive Monte Carlo simulation** (sample a count per period, feed it back,
 average many paths) — not point regressors.

@@ -591,6 +591,10 @@ def plot_diff_grid(
 ):
     """Heatmap of ``model_a - model_b`` mean metric over the ``rate x churn`` grid.
 
+    ``model_b`` defaults to the live benchmark name. Suites archived before the MLE
+    Pareto/NBD was retired store theirs as ``"ParetoNBD_MLE"``; pass that explicitly
+    for those. A name absent from ``results`` raises, listing what is available.
+
     Collapses the comparison to one glance: near-zero (white) cells are where
     ``model_a`` matches ``model_b``; strong colour is where they diverge. On error
     metrics (rmse/mape) blue = ``model_a`` lower (better). Both models are scored on

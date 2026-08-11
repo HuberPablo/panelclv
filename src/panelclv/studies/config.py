@@ -55,7 +55,8 @@ class ModelSpec:
         Optuna trials per study. Ignored for ``pareto_nbd``.
     pareto_kwargs
         Extra arguments forwarded to ``compute_pareto_predictions`` (the MCMC
-        knobs ``mcmc``, ``burnin``, ``thin``, ``chains``, ``seed``). Only used
+        knobs ``mcmc``, ``burnin``, ``thin``, ``chains``, ``seed``,
+        ``param_init``). ``seed`` defaults to the suite's ``base_seed``. Only used
         for ``pareto_nbd``.
     """
 
