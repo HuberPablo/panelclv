@@ -1,0 +1,183 @@
+"""The Valendin et al. (2022, IJRM) LSTM — a frozen reference implementation.
+
+A transcription of the reference notebook's Keras model
+(`Original_paper_model/banking_transactions_demo.ipynb`), layer for layer:
+
+    week  ──► Embedding(52, 8) ──┐
+                                 ├─► concat (12) ──► LSTM(128) ──► Dense(128) ──► Dense(K)
+    trans ──► Embedding(K,  4) ──┘
+
+That is the whole model. There is no normalisation, no projection to a common
+width, no dropout, and no covariate path — the published architecture reads week
+and transaction count only, both categorical.
+
+Why this is not `models.MultinomialLSTMModel`
+---------------------------------------------
+Ours departs from the paper in two ways nobody chose: its embeddings pass through
+LayerNorm and a projection to a common width, and it sums the context and
+concatenates the target, giving a 256-wide LSTM input where the paper's is 12.
+Renaming ours would give a benchmark that quietly differs from what it claims to
+reproduce, so the two live side by side (ADR-0004): this module is frozen, and
+`models.MultinomialLSTMModel` is free to develop.
+
+For the same reason this module does **not** reuse
+`models.multinomial_lstm._MultinomialLSTMBackbone`. Sharing it would mean the frozen
+reference silently followed every change to the model under development. What *is*
+shared is the infrastructure around the architecture — the embedder seam (ADR-0005),
+the training loop, the Monte Carlo simulator and evaluation — applied identically to
+every model, which is what makes the comparison isolate architecture.
+
+Deliberate departures that stay
+-------------------------------
+Temporal validation split (ADR-0001) and Optuna tuning. Everything else matches.
+
+Faithfulness check
+------------------
+The reference notebook's `model.summary()` reports these parameter counts, which
+`tests/test_valendin_lstm.py` pins:
+
+    embed_week    416      Embedding(52, 8)
+    embed_trans    48      Embedding(12, 4)
+    concat          -      (None, 155, 12)
+    lstm        72192      LSTM(128) over a 12-wide input
+    dense       16512      Dense(128)
+    softmax      1548      Dense(12)
+
+The LSTM is the one line that cannot match exactly: Keras carries a single bias
+vector per gate, PyTorch carries two (`b_ih` and `b_hh`), so ours has 4 * 128 = 512
+more parameters. That is a framework convention, not an architectural choice, and it
+is the only difference.
+"""
+
+from __future__ import annotations
+
+from typing import Sequence
+
+import torch
+import torch.distributions as dist
+from torch import nn
+
+from panelclv.models.embedders import ValendinEmbedder
+
+# The paper's sizes: `memory_units = 128`, `dense_units = 128` in the notebook.
+_MEMORY_UNITS = 128
+_DENSE_UNITS = 128
+
+
+class _ValendinLSTMBackbone(nn.Module):
+    """Embeddings -> LSTM -> Dense -> softmax head, exactly as published.
+
+    The dense layer has no activation (the notebook leaves `activation=` commented
+    out, so Keras applies the linear default), and the head emits raw logits — the
+    published `Dense(..., activation='softmax')` is folded into the cross-entropy
+    loss at training time and into sampling at inference time, which is the same
+    function computed in a numerically stabler order.
+    """
+
+    def __init__(
+        self,
+        seq_cols: Sequence[str],
+        embedded_cols: dict[str, int],
+        target_col: str = "Transactions",
+        memory_units: int = _MEMORY_UNITS,
+        dense_units: int = _DENSE_UNITS,
+    ) -> None:
+        super().__init__()
+
+        # The embedder is the seam (ADR-0005), and this is the strategy that makes
+        # the model the paper's: raw sqrt(n)+1 embeddings concatenated. It rejects a
+        # numerical covariate, which is what keeps this benchmark honest.
+        self.embedder = ValendinEmbedder(seq_cols, embedded_cols, target_col)
+
+        self.seq_cols: list[str] = self.embedder.seq_cols
+        self.target_col: str = self.embedder.target_col
+        self.num_target_classes: int = self.embedder.num_target_classes
+
+        self.lstm = nn.LSTM(
+            input_size=self.embedder.output_dim,
+            hidden_size=memory_units,
+            batch_first=True,
+        )
+        self.dense = nn.Linear(memory_units, dense_units)
+        self.output_layer = nn.Linear(dense_units, self.num_target_classes)
+
+    def forward(self, x: torch.Tensor, state=None):
+        encoded_input = self.embedder(x)                 # (B, T, 12) on the demo data
+        lstm_out, state = self.lstm(encoded_input, state)
+        dense_out = self.dense(lstm_out)
+        logits = self.output_layer(dense_out)
+        return logits, state
+
+
+class ValendinLSTMModel(nn.Module):
+    """Training-mode Valendin LSTM returning raw logits.
+
+    Forward output shape: (B, T, num_target_classes). Use with `nn.CrossEntropyLoss`,
+    which is the notebook's `sparse_categorical_crossentropy`.
+    """
+
+    def __init__(
+        self,
+        seq_cols: Sequence[str],
+        embedded_cols: dict[str, int],
+        target_col: str = "Transactions",
+        memory_units: int = _MEMORY_UNITS,
+        dense_units: int = _DENSE_UNITS,
+    ) -> None:
+        super().__init__()
+        self.backbone = _ValendinLSTMBackbone(
+            seq_cols=seq_cols,
+            embedded_cols=embedded_cols,
+            target_col=target_col,
+            memory_units=memory_units,
+            dense_units=dense_units,
+        )
+        self.seq_cols: list[str] = self.backbone.seq_cols
+        self.target_col: str = self.backbone.target_col
+        self.num_target_classes: int = self.backbone.num_target_classes
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        logits, _ = self.backbone(x)
+        return logits
+
+
+class InferenceValendinLSTMModel(nn.Module):
+    """Inference-mode Valendin LSTM. Returns (sample, state).
+
+    Same contract as `models.InferenceMultinomialLSTMModel`, so the shared Monte
+    Carlo simulator drives this benchmark with no special-casing:
+
+        sample : (B, T, 1) float — a count class drawn from Categorical(softmax(logits)).
+        state  : the LSTM hidden state, threaded across autoregressive steps. This is
+                 the notebook's `stateful=True` prediction LSTM, whose state it also
+                 manages by hand across steps.
+
+    Constructor arguments must match the trained model's, since the rollout loads
+    that model's `state_dict` into this one.
+    """
+
+    def __init__(
+        self,
+        seq_cols: Sequence[str],
+        embedded_cols: dict[str, int],
+        target_col: str = "Transactions",
+        memory_units: int = _MEMORY_UNITS,
+        dense_units: int = _DENSE_UNITS,
+    ) -> None:
+        super().__init__()
+        self.backbone = _ValendinLSTMBackbone(
+            seq_cols=seq_cols,
+            embedded_cols=embedded_cols,
+            target_col=target_col,
+            memory_units=memory_units,
+            dense_units=dense_units,
+        )
+        self.seq_cols: list[str] = self.backbone.seq_cols
+        self.target_col: str = self.backbone.target_col
+        self.num_target_classes: int = self.backbone.num_target_classes
+
+    def forward(self, x: torch.Tensor, state=None):
+        logits, state = self.backbone(x, state)
+        probs = torch.softmax(logits, dim=-1)
+        sample = dist.Categorical(probs=probs).sample().unsqueeze(-1).float()
+        return sample, state
