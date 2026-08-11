@@ -83,11 +83,9 @@ Note for whoever does it: `optuna_tuning.py:749`
 raise on an unknown `model_type`, but adding a type to only some of the four sites builds
 a **Transformer** silently. See ticket 08.
 
-**Unresolved — needs your call.** This ticket lists "the covariate path" among deliberate
-departures that stay, while ticket 05 specifies the Valendin embedder has "no covariate
-path". I followed ticket 05 and the notebook, whose model has exactly two `Input` layers
-(`week`, `transaction`) with nowhere for a covariate to enter, so `ValendinLSTMModel`
-raises on a non-embedded column. My reading is that this ticket's line restated ADR-0004's
-deviations list, which describes *our* model, not the benchmark. If you meant the
-benchmark to carry a covariate path, it stops matching the notebook layer for layer and
-the pinned parameter counts change.
+**Resolved: the benchmark takes no covariates.** This ticket's "deliberate departures
+that stay" line listed the covariate path, which read as conflicting with ticket 05's "no
+covariate path". Pablo confirmed the benchmark takes none and `ValendinEmbedder` should
+keep raising on a non-embedded column. No code change — that is what shipped. The
+departures line describes our model in `models/`, not the benchmark; ADR-0004 now says so
+explicitly, so the same question does not come back.

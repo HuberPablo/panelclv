@@ -53,5 +53,6 @@ loads `strict=True` into the refactored model with its tensors bit-identical. 34
 checkpoints under `checkpoints/` are affected; the migration has **not** been run on them,
 since that rewrites Pablo's artifacts in place.
 
-**Judgement call worth your eye:** `ValendinEmbedder` *raises* if `seq_cols` carries a
-non-embedded column, rather than dropping it. See ticket 06's note on the conflict.
+`ValendinEmbedder` *raises* if `seq_cols` carries a non-embedded column rather than
+dropping it. Confirmed by Pablo as intended: the benchmark takes no covariates. Recorded
+in ADR-0004 so it stays settled.

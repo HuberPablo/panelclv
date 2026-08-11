@@ -13,16 +13,26 @@ identically to every model. That is what makes a comparison isolate architecture
 
 ## Deviations from Valendin et al.
 
-Their code is in `Original_paper_model/`. These departures are deliberate:
+Their code is in `Original_paper_model/`. These departures describe **our** model in
+`models/`, not the benchmark — `benchmarks/valendin_lstm.py` is the published
+architecture, and the whole point of it being a separate module is that it does not
+inherit our choices:
 
 - **Validation split** — temporal rather than a random 10% of customers (ADR-0001).
 - **Tuning** — Optuna over architecture and feature subset; they use fixed sizes.
 - **Covariates** — their model reads week and transaction count only; ours accepts
   arbitrary covariates through a projection.
 
-Anything else that differs is a bug, not a decision. Two were found and are being
-fixed: their embeddings are raw `sqrt(n)+1` vectors concatenated together, where ours
-were projected to a common width through LayerNorm and summed.
+The covariate line is settled for the benchmark: **it takes none**. The published model
+has two inputs, `week` and `transaction`, with nowhere for a covariate to enter, so
+`ValendinEmbedder` raises on a non-embedded column rather than dropping it — silently
+ignoring a requested feature would make the benchmark differ from what the caller asked
+for without saying so. A covariate run is our model's job.
+
+Anything else that differs is a bug, not a decision. Two were found and are now fixed:
+their embeddings are raw `sqrt(n)+1` vectors concatenated together, where ours were
+projected to a common width through LayerNorm and summed. Rather than change our model,
+both strategies became embedders (ADR-0005) and the published one backs the benchmark.
 
 ## Which Pareto/NBD
 
