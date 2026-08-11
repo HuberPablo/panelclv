@@ -82,10 +82,13 @@ Swap `model_type="lstm"` / `"transformer"` (and `mc_forecast` /
 
 ## Notebooks
 
-All notebooks live in `notebooks/`. `notebooks/Data_integration_LSTM_v2.ipynb` and
-`notebooks/Data_integration_TRANSFORMER_v2.ipynb` are the runnable, annotated
-walkthroughs of the flow above (built on the helpers); the un-suffixed
-`Data_integration_{LSTM,TRANSFORMER}.ipynb` are kept for reference, and
-`dataset_building.ipynb` builds the clean panels from raw data. Each notebook opens with
-a small bootstrap cell that locates the repo root and makes `panelclv` importable, so
-they run whether or not the package is pip-installed.
+The four live notebooks are in `notebooks/`. `Data_integration_LSTM_v2.ipynb` and
+`Data_integration_TRANSFORMER_v2.ipynb` are the runnable, annotated walkthroughs of the
+flow above (built on the helpers); `Study.ipynb` runs study suites, and
+`Pareto_Datasets.ipynb` runs them over synthetic Pareto/NBD panels. Each opens with a
+small bootstrap cell that locates the repo root and makes `panelclv` importable, so they
+run whether or not the package is pip-installed.
+
+Finished experiments frozen against an older API sit in `notebooks/archive/` — see its
+README for which and why. Nothing there is expected to run, and
+`tests/test_notebooks_current_api.py` checks only the live four.

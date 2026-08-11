@@ -443,6 +443,6 @@ drift.
 - **Unbounded counters extrapolate.** `cumulative_*` and tenure leave their calibration
   range during a long holdout; `transaction_rate` exists as the bounded alternative.
 - **Uniform panels only.** Every customer must have an identical number of periods in
-  each window; ragged panels must be padded upstream (`notebooks/dataset_building.ipynb`).
+  each window; ragged panels must be padded upstream (`notebooks/archive/dataset_building.ipynb`).
 - **Static covariates must already be broadcast** to every row of a customer and must be
   numerically encoded — the pipeline does not label-encode strings for you.
