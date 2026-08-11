@@ -66,3 +66,10 @@ Issues = "https://github.com/HuberPablo/panelclv/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["panelclv*"]
+
+# src-layout means `src/` is not on `sys.path` by default, so a bare `pytest` from the
+# repo root cannot import the package. `pythonpath` puts it there for the test run only
+# — no install required, and nothing changes in the (user-maintained) venv.
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
