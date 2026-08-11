@@ -251,7 +251,7 @@ def _pareto_from_data(
     stays importable without it. Returns an (N, T_HOLD) per-customer prediction.
 
     `variant` selects the estimator:
-        "mle"   — `pareto_nbd.compute_pareto_predictions` (lifetimes MLE; fast).
+        "mle"   — `archive.pareto_nbd.compute_pareto_predictions` (lifetimes MLE; fast).
         "paper" — `pareto_paper.compute_pareto_paper_predictions` (hierarchical-Bayes
                   MCMC, BTYDplus-faithful; the estimator Valendin et al. actually use).
 
@@ -288,7 +288,7 @@ def _pareto_from_data(
         return pred
     if variant != "mle":
         raise ValueError(f"unknown Pareto variant {variant!r}; use 'mle' or 'paper'.")
-    from panelclv.benchmarks.pareto_nbd import compute_pareto_predictions
+    from panelclv.benchmarks.archive.pareto_nbd import compute_pareto_predictions
     pareto_pred, _ = compute_pareto_predictions(
         data["train_panel"],
         holdout_length=data["T_HOLD"],
