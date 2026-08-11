@@ -10,7 +10,7 @@ The surrounding concerns each have their own sibling subpackage under ``panelclv
 - ``panelclv.training``    — the training loop (``fit_model``, ...).
 - ``panelclv.tuning``      — Optuna architecture / covariate-subset search.
 - ``panelclv.evaluation``  — metrics, plotting, forecast diagnostics, prediction CSV I/O.
-- ``panelclv.benchmarks``  — the non-neural Pareto/NBD comparators.
+- ``panelclv.benchmarks``  — the non-neural Pareto/NBD comparator.
 - ``panelclv.experiments`` — thin prepare -> tune -> forecast orchestration glue.
 """
 

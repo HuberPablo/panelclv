@@ -11,7 +11,7 @@ One experiment "run" is a numbered folder under a config name:
 `ForecastRun.new` creates the next run as `max(existing numbers) + 1` (monotonic,
 so a number always refers to the same run even after deletions). `ForecastRun.open`
 reads an existing run by number. Saving and loading use the SAME model names — the
-manifest maps each display name (e.g. "Pareto/NBD (HB)") to its slugified folder —
+manifest maps each display name (e.g. "Pareto/NBD") to its slugified folder —
 so retrieval never needs a hand-typed path.
 """
 

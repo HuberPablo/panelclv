@@ -239,9 +239,9 @@ _PERIOD_IN_DAYS: dict[str, float] = {"weekly": 7.0, "monthly": 30.4368, "daily":
 
 
 def _pareto_from_data(
-    data: dict[str, Any] | None, variant: str = "mle", **fit_kwargs: Any
+    data: dict[str, Any] | None, **fit_kwargs: Any
 ) -> np.ndarray:
-    """Fit a Pareto/NBD benchmark on a `prepare_dataset` output.
+    """Fit the Pareto/NBD benchmark on a `prepare_dataset` output.
 
     Shared by `plot_weekly_aggregated` and `metrics_table` so the benchmark is
     fit ONE way. Everything is read from `data` (train_panel, T_HOLD, cohort
@@ -250,14 +250,9 @@ def _pareto_from_data(
     cohort `data` describes. The heavy fitter is imported lazily so plot_utils
     stays importable without it. Returns an (N, T_HOLD) per-customer prediction.
 
-    `variant` selects the estimator:
-        "mle"   — `archive.pareto_nbd.compute_pareto_predictions` (lifetimes MLE; fast).
-        "paper" — `pareto_paper.compute_pareto_paper_predictions` (hierarchical-Bayes
-                  MCMC, BTYDplus-faithful; the estimator Valendin et al. actually use).
-
-    `fit_kwargs` are forwarded to the chosen fitter for its estimator-specific
-    knobs (MLE: `penalizer_coef`; HB: `mcmc`, `burnin`, `thin`, `chains`, `seed`,
-    `param_init`). The data-derived arguments are always supplied from `data`.
+    `fit_kwargs` are forwarded to the fitter for its MCMC knobs (`mcmc`, `burnin`,
+    `thin`, `chains`, `seed`, `param_init`). The data-derived arguments are always
+    supplied from `data`.
     """
     if data is None:
         raise ValueError("a Pareto/NBD benchmark requires data=<prepare_dataset output>.")
@@ -274,21 +269,7 @@ def _pareto_from_data(
             f"cannot map frequency {data['frequency']!r} to a period length; "
             f"known frequencies: {sorted(_PERIOD_IN_DAYS)}."
         )
-    if variant == "paper":
-        from panelclv.benchmarks.pareto_paper import compute_pareto_paper_predictions
-        pred, _ = compute_pareto_paper_predictions(
-            data["train_panel"],
-            holdout_length=data["T_HOLD"],
-            id_col=data["id_col"],
-            target_col=data["target_col"],
-            period_in_days=period_in_days,
-            customer_ids=data["ids"],
-            **fit_kwargs,
-        )
-        return pred
-    if variant != "mle":
-        raise ValueError(f"unknown Pareto variant {variant!r}; use 'mle' or 'paper'.")
-    from panelclv.benchmarks.archive.pareto_nbd import compute_pareto_predictions
+    from panelclv.benchmarks import compute_pareto_predictions
     pareto_pred, _ = compute_pareto_predictions(
         data["train_panel"],
         holdout_length=data["T_HOLD"],
@@ -303,7 +284,6 @@ def _pareto_from_data(
 
 def pareto_forecast(
     data: dict[str, Any],
-    variant: str = "mle",
     *,
     save_predictions: bool = False,
     output_dir: str | Path | None = None,
@@ -322,7 +302,6 @@ def pareto_forecast(
         prediction_mean : ndarray (N, T_HOLD) — expected holdout counts.
         actual          : ndarray (N, T_HOLD) — true holdout counts, pulled from
                           `data["holdout"]` for evaluation only (never fed in).
-        variant         : "mle" or "paper".
         predictions_path: Path to the written CSV, only if save_predictions.
 
     Per-customer prediction dump (opt-in, off by default) — same arguments as
@@ -332,14 +311,14 @@ def pareto_forecast(
         output_dir       : BASE directory the run subfolder is created in
                            (required when save_predictions=True).
         file_name        : name of the CSV inside that subfolder.
-        run_name         : tag for the subfolder (defaults to f"pareto_{variant}").
+        run_name         : tag for the subfolder (defaults to "pareto").
                            The subfolder is `{tag}_{YYYYMMDD_HHMMSS}` (seconds
                            resolution avoids same-minute collisions).
 
-    `fit_kwargs` are forwarded to the estimator (MLE: `penalizer_coef`; HB:
-    `mcmc`, `burnin`, `thin`, `chains`, `seed`, `param_init`).
+    `fit_kwargs` are forwarded to the estimator (`mcmc`, `burnin`, `thin`,
+    `chains`, `seed`, `param_init`).
     """
-    prediction_mean = _pareto_from_data(data, variant, **fit_kwargs)    # (N, T_HOLD)
+    prediction_mean = _pareto_from_data(data, **fit_kwargs)             # (N, T_HOLD)
 
     # True holdout counts for scoring; read straight from the data dict so the
     # actual lines up with the NN forecasts' actual on the same cohort/order.
@@ -349,7 +328,6 @@ def pareto_forecast(
     result: dict[str, Any] = {
         "prediction_mean": prediction_mean,
         "actual": actual,
-        "variant": variant,
     }
 
     if save_predictions:
@@ -360,7 +338,7 @@ def pareto_forecast(
             )
         # IDs map each prediction row back to a customer; save_predictions_to_csv
         # falls back to a plain row index when they are absent.
-        tag = run_name if run_name else f"pareto_{variant}"
+        tag = run_name if run_name else "pareto"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_dir = Path(output_dir) / f"{tag}_{timestamp}"
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -383,8 +361,7 @@ def plot_weekly_aggregated(
     figsize: tuple[float, float] | None = None,
     save_path: str | Path | None = None,
     *,
-    pareto_nbd_benchmark: bool = False,
-    pareto_paper_benchmark: bool = False,
+    pareto_benchmark: bool = False,
     data: dict[str, Any] | None = None,
 ):
     """Plot weekly-aggregate actuals vs each model's weekly-aggregate forecast.
@@ -401,14 +378,14 @@ def plot_weekly_aggregated(
     show_ci : bool
         Draw the 95% MC ribbon for any prediction supplied as a Monte Carlo
         array.
-    pareto_nbd_benchmark : bool
+    pareto_benchmark : bool
         When True, fit the Pareto/NBD benchmark and add it to the plot as one
         more (no-CI) line. Requires `data`; everything the model needs
         (train_panel, T_HOLD, cohort ids, target_col, id_col, frequency) is read
         from it, so no Pareto-specific arguments are taken — it is fit and
         aligned on exactly the cohort `data` describes.
     data : dict, optional
-        A `prepare_dataset` output. Only used when `pareto_nbd_benchmark=True`.
+        A `prepare_dataset` output. Only used when `pareto_benchmark=True`.
 
     A 95% MC confidence ribbon is drawn for any model whose predictions are a
     Monte Carlo array. Returns `(fig, ax)`.
@@ -418,10 +395,8 @@ def plot_weekly_aggregated(
     # Optionally fit + append the Pareto/NBD benchmark as one more line. The
     # caller's dict is copied so it is never mutated.
     models = dict(predictions_by_model)
-    if pareto_nbd_benchmark:
-        models["Pareto/NBD"] = _pareto_from_data(data, "mle")     # (N, T_HOLD) line, no CI
-    if pareto_paper_benchmark:
-        models["Pareto/NBD (HB)"] = _pareto_from_data(data, "paper")
+    if pareto_benchmark:
+        models["Pareto/NBD"] = _pareto_from_data(data)             # (N, T_HOLD) line, no CI
 
     if figsize is None:
         figsize = (15, 4.5) if train_actuals is not None else (10, 5)
@@ -471,8 +446,7 @@ def metrics_table(
     actuals: np.ndarray,
     predictions_by_model: dict[str, np.ndarray],
     *,
-    pareto_nbd_benchmark: bool = False,
-    pareto_paper_benchmark: bool = False,
+    pareto_benchmark: bool = False,
     data: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Per-model evaluation table — same three numbers as the notebooks print.
@@ -498,13 +472,13 @@ def metrics_table(
           - (N, T_HOLD)        already a per-customer mean (e.g. Pareto/NBD).
         `_reduce_to_customer_week` normalises all three to (N, T_HOLD)
         before scoring, so the function is shape-polymorphic at the input.
-    pareto_nbd_benchmark : bool
+    pareto_benchmark : bool
         When True, fit the Pareto/NBD benchmark on `data` and add it as a
         `"Pareto/NBD"` row, so the LSTM and the benchmark land in one table on
         the same actuals. Requires `data` (a `prepare_dataset` output); nothing
         else is needed — it is fit + aligned on exactly that cohort.
     data : dict, optional
-        A `prepare_dataset` output. Only used when `pareto_nbd_benchmark=True`.
+        A `prepare_dataset` output. Only used when `pareto_benchmark=True`.
 
     Notes
     -----
@@ -525,10 +499,8 @@ def metrics_table(
     # Optionally fit + append the Pareto/NBD benchmark as one more row (copy so
     # the caller's dict is never mutated). Same primitive as the plot helper.
     models = dict(predictions_by_model)
-    if pareto_nbd_benchmark:
-        models["Pareto/NBD"] = _pareto_from_data(data, "mle")
-    if pareto_paper_benchmark:
-        models["Pareto/NBD (HB)"] = _pareto_from_data(data, "paper")
+    if pareto_benchmark:
+        models["Pareto/NBD"] = _pareto_from_data(data)
 
     rows = []
     for name, preds in models.items():

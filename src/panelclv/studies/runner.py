@@ -73,7 +73,7 @@ def run_study_suite(config: StudySuiteConfig) -> Path:
         all_rows.extend(rows)
 
     # Tidy, analysis-ready table across every model/study. Differing per-model
-    # columns (e.g. neural param_* vs pareto param_penalizer_coef) are unioned by
+    # columns (e.g. the neural models' param_* hyperparameters) are unioned by
     # pandas, with NaN where a column does not apply.
     pd.DataFrame(all_rows).to_csv(root / "results.csv", index=False)
     return root
@@ -208,7 +208,6 @@ def _run_pareto_model(
         "seed": None,
         "objective": float("nan"),  # no Optuna objective for the baseline
         **metrics,
-        "param_penalizer_coef": pareto_kwargs.get("penalizer_coef"),
     }
     pd.DataFrame([row]).to_csv(model_dir / "metrics.csv", index=False)
     return [row]

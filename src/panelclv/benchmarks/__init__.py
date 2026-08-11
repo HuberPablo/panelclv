@@ -1,20 +1,19 @@
-"""Non-neural benchmark models (Pareto/NBD family).
+"""Non-neural benchmark models (Pareto/NBD).
 
-These are baseline comparators, not part of the neural model family in
-``panelclv.models``. Both share the same
-``(train_panel, holdout_length, ...) -> (N, H)`` contract and are drop-in
-interchangeable:
+The frozen reference comparator for the neural model family in
+``panelclv.models``. It shares their
+``(train_panel, holdout_length, ...) -> (N, H)`` contract, so it drops into the
+same plots, metrics tables and study runner:
 
-- ``compute_pareto_predictions``       — frequentist MLE via ``lifetimes`` (default),
-                                         archived under ``benchmarks/archive/``.
-- ``compute_pareto_paper_predictions`` — hierarchical-Bayes MCMC port of R's
-                                         BTYDplus (the estimator Valendin et al. use).
+- ``compute_pareto_predictions`` — hierarchical-Bayes MCMC port of R's BTYDplus
+                                   (the estimator Valendin et al. use).
+
+An earlier frequentist-MLE variant (via ``lifetimes``) is kept for provenance
+under ``benchmarks/archive/`` and is not part of the public API.
 """
 
-from .archive.pareto_nbd import compute_pareto_predictions
-from .pareto_paper import compute_pareto_paper_predictions
+from .pareto_benchmark import compute_pareto_predictions
 
 __all__ = [
     "compute_pareto_predictions",
-    "compute_pareto_paper_predictions",
 ]

@@ -162,7 +162,6 @@ def compute_and_save_pareto_nbd(
     id_col: str = "Id",
     time_col: str = "period_start",
     period_in_days: float = 7.0,
-    penalizer_coef: float = 0.01,
 ) -> Path:
     """Fit Pareto/NBD on `data["train_panel"]` and save the per-period forecast."""
     preds, ids = compute_pareto_predictions(
@@ -172,7 +171,6 @@ def compute_and_save_pareto_nbd(
         target_col=data["target_col"],
         time_col=time_col,
         period_in_days=period_in_days,
-        penalizer_coef=penalizer_coef,
         customer_ids=data["ids"],
     )
     return save_predictions_to_csv(

@@ -54,8 +54,9 @@ class ModelSpec:
     n_trials
         Optuna trials per study. Ignored for ``pareto_nbd``.
     pareto_kwargs
-        Extra arguments forwarded to ``compute_pareto_predictions`` (e.g.
-        ``penalizer_coef``). Only used for ``pareto_nbd``.
+        Extra arguments forwarded to ``compute_pareto_predictions`` (the MCMC
+        knobs ``mcmc``, ``burnin``, ``thin``, ``chains``, ``seed``). Only used
+        for ``pareto_nbd``.
     """
 
     name: str

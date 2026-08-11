@@ -1,5 +1,5 @@
-"""Validate Models/pareto_paper.py (pure-Python HB Pareto/NBD) against the real
-R BTYDplus package it ports.
+"""Validate benchmarks/pareto_benchmark.py (pure-Python HB Pareto/NBD) against the
+real R BTYDplus package it ports.
 
 Generates one synthetic Pareto/NBD cohort, runs BOTH estimators on the identical
 calibration event log, and compares per-customer expected holdout transactions.
@@ -8,7 +8,7 @@ Monte Carlo noise — we check the aggregate forecast and the per-customer
 correlation, not bit-equality.
 
 Run:
-    .../thesis_rocm/bin/python scripts/validate_pareto_paper.py
+    .../thesis_rocm/bin/python scripts/validate_pareto_benchmark.py
 (needs R on PATH with BTYDplus installed.)
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ import pandas as pd
 # src-layout: the package lives under <repo>/src, so add that to the path as a
 # fallback for running this script without an editable install.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from panelclv.benchmarks.pareto_paper import compute_pareto_paper_predictions  # noqa: E402
+from panelclv.benchmarks import compute_pareto_predictions  # noqa: E402
 
 PERIOD_DAYS = 7.0
 T_CAL_W = 78          # 1.5y calibration
@@ -115,7 +115,7 @@ def run_r_btydplus(elog: pd.DataFrame, t_cal_w, h, seed):
 def main():
     elog_full, panel_full = make_synthetic_elog(N_CUST, T_CAL_W, H, SEED)
 
-    # Slice BOTH sides to the CALIBRATION window only — `compute_pareto_paper_predictions`
+    # Slice BOTH sides to the CALIBRATION window only — `compute_pareto_predictions`
     # (like the real pipeline) is given the calibration panel and infers cal_end from
     # its max period, so the panel must not contain holdout weeks. R gets the same cut
     # via an explicit T.cal date. Cohort = customers with >=1 calibration purchase.
@@ -131,7 +131,7 @@ def main():
     r_map = dict(zip(r_ids, r_exp))
 
     # --- Python port (forecast aligned to R's customer order) ---
-    py_pred, py_ids = compute_pareto_paper_predictions(
+    py_pred, py_ids = compute_pareto_predictions(
         panel, holdout_length=H, id_col="Id", target_col="Transactions",
         time_col="period_start", period_in_days=PERIOD_DAYS,
         mcmc=2500, burnin=500, thin=50, chains=2, seed=SEED,

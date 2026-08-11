@@ -1,15 +1,13 @@
-"""Paper-faithful Pareto/NBD benchmark — hierarchical-Bayes MCMC.
+"""The Pareto/NBD benchmark — hierarchical-Bayes MCMC.
 
-This is the "high-fidelity" companion to `Models/pareto_nbd.py`. Where that module
-fits the Pareto/NBD by **frequentist MLE** (`lifetimes.ParetoNBDFitter`), this one
-reproduces the **hierarchical-Bayes MCMC** estimator that Valendin et al. (2022,
-IJRM) actually use as their benchmark — the `pnbd.mcmc.DrawParameters` /
-`mcmc.DrawFutureTransactions` routines from Platzer's R package **BTYDplus**.
+This is the estimator Valendin et al. (2022, IJRM) use as their benchmark: the
+`pnbd.mcmc.DrawParameters` / `mcmc.DrawFutureTransactions` routines from Platzer's
+R package **BTYDplus**.
 
 It is a pure NumPy/SciPy port (no R, no PyMC) of BTYDplus 1.2.0's Gibbs sampler,
 transcribed line-by-line from the package source so the two agree up to Monte
-Carlo noise (see `scripts/validate_pareto_paper.py`, which cross-checks against the
-installed R package).
+Carlo noise (see `scripts/validate_pareto_benchmark.py`, which cross-checks against
+the installed R package).
 
 Model (Schmittlein, Morrison & Colombo 1987)
 --------------------------------------------
@@ -50,9 +48,9 @@ over the posterior draws is the exact expectation of BTYDplus's
 
 Public API
 ----------
-`compute_pareto_paper_predictions` mirrors `pareto_nbd.compute_pareto_predictions`
-exactly (same inputs, same `(predictions (N, H), ids)` return), so it is a drop-in
-second benchmark for the plots / metrics tables.
+`compute_pareto_predictions` takes a `prepare_dataset` training panel and returns
+`(predictions (N, H), ids)` — the contract the plots, metrics tables and the study
+runner all consume.
 """
 
 from __future__ import annotations
@@ -273,11 +271,11 @@ def _run_single_chain(x: np.ndarray, t_x: np.ndarray, T_cal: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# 4. Public API — fit + forecast, same contract as compute_pareto_predictions
+# 4. Public API — fit + forecast
 # ---------------------------------------------------------------------------
 
 
-def compute_pareto_paper_predictions(
+def compute_pareto_predictions(
     train_panel: pd.DataFrame,
     holdout_length: int,
     *,
@@ -295,11 +293,10 @@ def compute_pareto_paper_predictions(
 ) -> tuple[np.ndarray, list]:
     """Hierarchical-Bayes Pareto/NBD forecast (BTYDplus-faithful).
 
-    Drop-in replacement for `pareto_nbd.compute_pareto_predictions`: same inputs
-    and the same `(predictions (N, holdout_length), ids)` return, so it can back
-    the `pareto_nbd_benchmark` plots/metrics. MCMC controls default to BTYDplus's
-    own (`mcmc=2500, burnin=500, thin=50, chains=2`); `seed` makes the whole run
-    reproducible.
+    Fits on the calibration panel and returns `(predictions (N, holdout_length),
+    ids)` — the shape the `pareto_benchmark` plots/metrics consume. MCMC controls
+    default to BTYDplus's own (`mcmc=2500, burnin=500, thin=50, chains=2`); `seed`
+    makes the whole run reproducible.
 
     `param_init` seeds the population (r, alpha, s, beta); the (1,1,1,1) default
     matches BTYDplus's fallback and is washed out by burn-in.

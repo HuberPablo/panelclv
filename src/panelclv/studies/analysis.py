@@ -419,8 +419,7 @@ def plot_suite_forecast(
     ci: float = 0.95,
     save_path: str | Path | None = None,
     title: str | None = None,
-    pareto_nbd_benchmark: bool = False,
-    pareto_paper_benchmark: bool = False,
+    pareto_benchmark: bool = False,
     **plot_kwargs: Any,
 ):
     """Overlay every model's holdout forecast on the training+holdout actuals.
@@ -466,11 +465,11 @@ def plot_suite_forecast(
         file is written after the bands are drawn, so they are included.
     title
         Overrides the auto-generated, mode-aware title.
-    pareto_nbd_benchmark, pareto_paper_benchmark
-        Add the live Pareto/NBD benchmark (MLE and/or hierarchical-Bayes). It is fit
-        on the **full** cohort and then restricted to the same customer selection, so
-        it is the identical model shown in the full-cohort plot — only the customers
-        aggregated differ. Requires ``data`` (rebuilt from ``panel_path`` if needed).
+    pareto_benchmark
+        Add the live Pareto/NBD benchmark. It is fit on the **full** cohort and then
+        restricted to the same customer selection, so it is the identical model shown
+        in the full-cohort plot — only the customers aggregated differ. Requires
+        ``data`` (rebuilt from ``panel_path`` if needed).
     **plot_kwargs
         Forwarded verbatim to ``plot_weekly_aggregated`` (e.g. ``figsize=...``,
         ``show_ci=...``). Note MC confidence ribbons will not appear for disk-loaded
@@ -531,13 +530,9 @@ def plot_suite_forecast(
     # same customers — so a group plot shows the same model as the full-cohort plot.
     # Pre-computing here (rather than letting plot_weekly_aggregated fit it) is what
     # lets the benchmark honour the selection.
-    if pareto_nbd_benchmark:
+    if pareto_benchmark:
         predictions_by_model["Pareto/NBD"] = _subset(
-            pareto_forecast(data, "mle")["prediction_mean"]
-        )
-    if pareto_paper_benchmark:
-        predictions_by_model["Pareto/NBD (HB)"] = _subset(
-            pareto_forecast(data, "paper")["prediction_mean"]
+            pareto_forecast(data)["prediction_mean"]
         )
 
     # When averaging, also persist the (full-cohort) aggregated datasets on disk.

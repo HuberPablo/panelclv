@@ -34,15 +34,14 @@ classifiers = [
 ]
 # torch ships as a hard dependency by design: pip leaves an already-installed
 # torch (ROCm / CUDA / CPU) untouched, and only pulls the default build into an
-# environment that has none. numpy/pandas/scikit-learn/optuna/lifetimes/matplotlib
-# are all required at import or run time by the model and data-prep modules.
+# environment that has none. numpy/pandas/scikit-learn/optuna/matplotlib are all
+# required at import or run time by the model and data-prep modules.
 dependencies = [
     "torch",
     "numpy",
     "pandas",
     "scikit-learn",
     "optuna",
-    "lifetimes",
     "matplotlib",
 ]
 

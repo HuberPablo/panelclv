@@ -44,10 +44,7 @@ def test_public_api_resolves_from_new_homes():
     from panelclv.training import fit_model
     from panelclv.tuning import run_optuna_study, select_features
     from panelclv.evaluation import compute_metrics, plot_weekly_aggregated
-    from panelclv.benchmarks import (
-        compute_pareto_predictions,
-        compute_pareto_paper_predictions,
-    )
+    from panelclv.benchmarks import compute_pareto_predictions
     from panelclv.experiments import make_data_builder, build_inference_from_trial
 
     # `mc_forecast` is documented as an alias for `run_monte_carlo_forecast`.

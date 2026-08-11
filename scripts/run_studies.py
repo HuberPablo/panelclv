@@ -94,7 +94,7 @@ def build_models() -> list[ModelSpec]:
     pareto = ModelSpec(
         name="ParetoNBD",
         model_type="pareto_nbd",
-        pareto_kwargs={"penalizer_coef": 0.01},  # no Optuna; single deterministic fit
+        # no Optuna; a single deterministic fit on BTYDplus's default MCMC settings
     )
 
     return [lstm, transformer, pareto]
