@@ -8,8 +8,8 @@ same plots, metrics tables and study runner:
 - ``compute_pareto_predictions`` — hierarchical-Bayes MCMC port of R's BTYDplus
                                    (the estimator Valendin et al. use).
 
-An earlier frequentist-MLE variant (via ``lifetimes``) is kept for provenance
-under ``benchmarks/archive/`` and is not part of the public API.
+An earlier frequentist-MLE variant (via ``lifetimes``) was retired; it is kept for
+provenance in the repo-root ``archive/``, outside the package.
 """
 
 from .pareto_benchmark import compute_pareto_predictions
