@@ -33,8 +33,18 @@ import numpy as np
 import pandas as pd
 
 from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
-from .evaluation_utils import aggregate_bias
 from .plot_utils import load_predictions_from_csv
+
+
+def aggregate_bias(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """sum(y_pred) - sum(y_true), in raw counts.
+
+    Positive = over-forecast, negative = under-forecast. This is the one number the
+    group table wants that `compute_forecast_metrics` does not return: it reports
+    bias as a percentage of actual, which is uninformative for a small group whose
+    actual total is near zero. Kept here because this is its only caller.
+    """
+    return float(np.sum(y_pred) - np.sum(y_true))
 
 
 # ---------------------------------------------------------------------------

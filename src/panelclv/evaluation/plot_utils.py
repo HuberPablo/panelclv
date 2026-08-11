@@ -15,10 +15,9 @@ Given Monte Carlo forecast arrays from `monte_carlo_forecasting.mc_forecast`
 # `mape_aggregate_style` — all in **percent scale** and all computed on
 # per-customer per-week arrays of shape (N, T_HOLD). `metrics_table` below
 # delegates to `monte_carlo_forecasting.compute_forecast_metrics` so the
-# notebook printouts and the plot helper agree to the last decimal.
-# The older `evaluation_utils.compute_metrics` keys (mae, mape_positive,
-# cumulative_mape, ...) are kept for back-compat but are NOT the convention
-# used by the package's notebooks.
+# notebook printouts and the plot helper agree to the last decimal. That
+# function is the package's single scoring authority — there is no second
+# definition of these numbers to drift from.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .evaluation_utils import compute_metrics  # same (evaluation) package
 # The Monte Carlo simulator stays in `panelclv.models` (it is the model's forecast
 # mechanism), so this is a cross-package import after the split.
 from panelclv.models.monte_carlo_forecasting import (

@@ -43,7 +43,7 @@ def test_public_api_resolves_from_new_homes():
     )
     from panelclv.training import fit_model
     from panelclv.tuning import run_optuna_study, select_features
-    from panelclv.evaluation import compute_metrics, plot_weekly_aggregated
+    from panelclv.evaluation import metrics_table, plot_weekly_aggregated
     from panelclv.benchmarks import compute_pareto_predictions
     from panelclv.experiments import make_data_builder, build_inference_from_trial
 
@@ -51,23 +51,53 @@ def test_public_api_resolves_from_new_homes():
     assert mc_forecast is run_monte_carlo_forecast
 
 
-def test_rmse_matches_hand_computation():
-    """rmse(y_true, y_pred) = sqrt(mean(squared error))."""
-    from panelclv.evaluation import rmse
-
-    y_true = np.array([1.0, 2.0, 3.0])
-    y_pred = np.array([1.0, 2.0, 5.0])  # errors 0, 0, 2 -> mse = 4/3
-    assert rmse(y_true, y_pred) == pytest.approx((4.0 / 3.0) ** 0.5)
+# `compute_forecast_metrics` is the package's single scoring authority — plots, group
+# tables and study results all delegate to it — so its three definitions are pinned
+# here against hand-computed values rather than only exercised indirectly.
 
 
-def test_compute_metrics_returns_expected_keys():
-    """compute_metrics returns a dict that includes the primary metrics."""
-    from panelclv.evaluation import compute_metrics
+def test_forecast_metrics_match_hand_computation():
+    """rmse, bias_percent and mape_aggregate_style on a worked (N, T_HOLD) example."""
+    from panelclv.models import mc_compute_metrics
 
-    y_true = np.array([0.0, 1.0, 2.0, 3.0])
-    y_pred = np.array([0.0, 1.0, 2.0, 3.0])
-    metrics = compute_metrics(y_true, y_pred)
-    assert isinstance(metrics, dict)
-    assert "rmse" in metrics
-    # A perfect prediction has zero RMSE.
-    assert metrics["rmse"] == pytest.approx(0.0)
+    # 2 customers x 3 holdout periods. Errors are +1 in one cell and -2 in another,
+    # so mse = (1 + 4) / 6 and the totals differ by -1 out of 9.
+    actual = np.array([[1.0, 2.0, 3.0],
+                       [0.0, 1.0, 2.0]])
+    pred = np.array([[1.0, 3.0, 3.0],
+                     [0.0, 1.0, 0.0]])
+
+    m = mc_compute_metrics(actual, pred)
+    assert m["rmse"] == pytest.approx((5.0 / 6.0) ** 0.5)
+    # bias is on the grand total: (8 - 9) / 9.
+    assert m["bias_percent"] == pytest.approx(100.0 * -1.0 / 9.0)
+    # MAPE is aggregate-style: per-period totals, summed abs error over total actual.
+    # actual_t = [1, 3, 5], pred_t = [1, 4, 3] -> abs diff [0, 1, 2] = 3 of 9.
+    assert m["mape_aggregate_style"] == pytest.approx(100.0 * 3.0 / 9.0)
+
+
+def test_forecast_metrics_perfect_prediction_is_zero():
+    """A perfect forecast scores zero on all three numbers."""
+    from panelclv.models import mc_compute_metrics
+
+    actual = np.array([[0.0, 1.0, 2.0], [3.0, 0.0, 1.0]])
+    m = mc_compute_metrics(actual, actual.copy())
+    assert set(m) == {"rmse", "bias_percent", "mape_aggregate_style"}
+    assert m["rmse"] == pytest.approx(0.0)
+    assert m["bias_percent"] == pytest.approx(0.0)
+    assert m["mape_aggregate_style"] == pytest.approx(0.0)
+
+
+def test_retired_metric_helpers_are_gone():
+    """`evaluation_utils` and its keys were retired; one scoring path remains.
+
+    Guards the consolidation: a re-added `compute_metrics` would reintroduce a second
+    set of definitions on a different scale (fractions vs percent).
+    """
+    import panelclv.evaluation as ev
+
+    for name in ("compute_metrics", "mae", "mape_positive",
+                 "cumulative_mape", "aggregate_bias_fraction"):
+        assert not hasattr(ev, name), f"{name} should have been retired"
+    with pytest.raises(ImportError):
+        importlib.import_module("panelclv.evaluation.evaluation_utils")

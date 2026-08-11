@@ -550,8 +550,10 @@ def compute_forecast_metrics(
 ) -> dict[str, float]:
     """Return RMSE, %-bias and aggregate-style MAPE — both inputs (N, T_HOLD).
 
-    Argument order follows the Python / sklearn convention `(y_true, y_pred)`,
-    matching `evaluation_utils.compute_metrics(y_true, y_pred)`.
+    Argument order follows the Python / sklearn convention `(y_true, y_pred)`.
+
+    This is the package's single scoring authority: plots, group tables and study
+    results all delegate here, so they agree to the last decimal.
     """
     pred = np.asarray(prediction_mean, dtype=np.float64)
     act  = np.asarray(actual,          dtype=np.float64)

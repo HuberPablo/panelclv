@@ -1,18 +1,16 @@
 """Evaluation: metrics and forecast diagnostics / plotting.
 
-Scoring (``evaluation_utils``) and the weekly-aggregate plotting / metrics-table /
-alignment / prediction-CSV-I/O helpers (``plot_utils``) live here. These consume a
-forecast that the model + Monte Carlo simulator (in ``panelclv.models``) already
-produced; they do not define the model, so they sit in their own subpackage.
+The weekly-aggregate plotting / metrics-table / alignment / prediction-CSV-I/O
+helpers (``plot_utils``) and the per-group tables (``segment_analysis``) live here.
+These consume a forecast that the model + Monte Carlo simulator (in
+``panelclv.models``) already produced; they do not define the model, so they sit in
+their own subpackage.
+
+Scoring is not defined here. ``models.monte_carlo_forecasting.compute_forecast_metrics``
+is the single authority for ``rmse`` / ``bias_percent`` / ``mape_aggregate_style``, and
+everything in this subpackage delegates to it.
 """
 
-from .evaluation_utils import (
-    compute_metrics,
-    rmse,
-    mae,
-    mape_positive,
-    aggregate_bias,
-)
 from .plot_utils import (
     weekly_actuals,
     holdout_actuals_NT,
@@ -28,15 +26,11 @@ from .plot_utils import (
 from .segment_analysis import (
     assign_customer_groups,
     group_metrics_table,
+    aggregate_bias,
 )
 from .forecast_run import ForecastRun
 
 __all__ = [
-    "compute_metrics",
-    "rmse",
-    "mae",
-    "mape_positive",
-    "aggregate_bias",
     "weekly_actuals",
     "holdout_actuals_NT",
     "weekly_aggregate_predictions",
@@ -49,5 +43,6 @@ __all__ = [
     "load_predictions_from_csv",
     "assign_customer_groups",
     "group_metrics_table",
+    "aggregate_bias",
     "ForecastRun",
 ]
