@@ -7,6 +7,15 @@ reproduce rather than develop: the Valendin et al. LSTM and Pareto/NBD. Their
 architectures are frozen; improving them is out of scope by definition. New LSTM
 variants are new classes in `models/`.
 
+**Frozen means the numbers, not the surrounding code.** A benchmark's *architecture* — its
+layers, widths, activations and the arithmetic that produces a forecast — may not change.
+Everything else in the file may: the plumbing that hands it data, the way its rollout model
+is paired with its training model, its imports and its documentation. The test is not
+whether the file was edited but whether `scripts/validate_pareto_benchmark.py` and
+`scripts/validate_valendin_lstm.py` still land in their bands afterwards. Those two scripts
+are the executable definition of this ADR, and any change touching `benchmarks/` is gated
+on them.
+
 Everything around the architecture — data preparation, embeddings as configured, the
 training loop, tuning, the simulator, evaluation — is shared infrastructure applied
 identically to every model. That is what makes a comparison isolate architecture.
@@ -48,8 +57,11 @@ estimator cannot be defended later.
 
 ## Consequences
 
-`benchmarks/` is no longer torch-free, so the neural benchmark is imported lazily —
-callers who only want Pareto/NBD do not pay for torch.
+**The validation scripts re-implement what they check, deliberately.** Each carries its own
+`WEEKS_PER_YEAR`, cohort filter and week index rather than importing the package's. A gate
+that imports the code it gates stops being a gate: a future bug in a shared cohort filter
+would move the benchmark and its own check in lockstep and still pass. These copies are
+insulation and are not to be deduplicated.
 
 Retired reference implementations move to the repo-root `archive/` rather than out of
 the repo, so a stored result stays traceable to the code that produced it. `src/` holds

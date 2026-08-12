@@ -152,6 +152,22 @@ The budget lands at **~10-11 execution issues**, inside the ticket's ~15 tripwir
    model touches three places"** rather than restating it — the highest-value item in the
    ledger. Input to ticket 07.
 
+   **Amended by ticket 07 (2026-08-12).** The entry's *inference builder* field is gone —
+   `_build_inference_model_for` is deleted outright, along with `build_inference_from_trial`
+   and the two notebook cells that call it. No *rollout class* field replaces it either:
+   `trained.to_rollout()` puts that pairing on the training class, inside `models/` and
+   `benchmarks/`. Remaining fields: **search space, builder, forecaster / rollout function.**
+   **Amended by ticket 08 (2026-08-12).** Entries hold **direct** references, not lazy ones.
+   The lazy design existed so `studies/config.py` could validate a `model_type` without
+   importing torch; the torch-free guarantee is dropped, and it was protecting a property
+   `panelclv.studies` does not have — that package already pulls torch at import. There is no
+   cycle either way, since `models/` does not import `studies/`.
+
+   Ticket 07 also fixes the entry shape — one table with optional fields, so `pareto_nbd`
+   sits in it and `NEURAL_MODEL_TYPES` derives as "this entry has a training builder".
+   Decision 5 is untouched: the model-to-rollout-*function* pairing is a different pairing
+   from the model-to-rollout-*class* one ticket 07 settles.
+
 5. **The model to rollout pairing is declared through the registry, not enforced by
    sealing.** The forecast entry point reads the required rollout from the registry instead
    of trusting the caller. Both rollout functions stay importable: the residual hole (a

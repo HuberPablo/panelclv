@@ -71,12 +71,24 @@ The component that turns a customer's per-period features into the vector a mode
 consumes. Which embedder a model uses is part of its identity.
 _Avoid_: encoder, feature extractor, input layer
 
+**Registry**:
+The single table that declares every model the package knows: for each one, its search
+space, how to build it and the rollout function it forecasts through. Adding a model means
+adding an entry (ADR-0006). Every list of model types derives from its keys.
+_Avoid_: factory, dispatch table, model map
+
 ### Forecasting and scoring
 
 **Rollout**:
 Stepping a trained model forward through future periods by feeding its own sampled
 output back as the next period's input, without ever reading the true future.
 _Avoid_: inference, prediction loop, autoregression
+
+**Rollout model**:
+The object that performs a rollout: it draws a count from the model's own softmax and
+carries its recurrent state from one period to the next. It is obtained from a trained
+model, which hands over its weights (ADR-0007) — never built alongside one.
+_Avoid_: inference model, prediction model, sampler
 
 **Simulated path**:
 One rollout. A forecast is the average over many of them, because a single path is a
@@ -106,6 +118,17 @@ One trained model with one sampled set of hyperparameters and features.
 **Study**:
 One search over trials, yielding a single winning trial.
 _Avoid_: run, experiment, sweep
+
+There is deliberately **no term for "experiment"**. Every unit of work here is a trial, a
+study or a study suite; a fourth word for the same thing would only blur which of the three
+is meant.
+
+**Refit**:
+Warm-start fine-tuning of a study's winning trial over the full calibration window — the
+validation window included — for a few large-batch epochs, so the weights also learn the
+most recent periods instead of only conditioning on them at forecast time. Every forecast
+comes from a refit (ADR-0008).
+_Avoid_: retrain, fine-tune, final training
 
 **Study suite**:
 Several studies per model over one shared dataset, so each model's result is reported
