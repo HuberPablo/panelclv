@@ -1,0 +1,207 @@
+module,symbol,line,public,reached,scenarios
+src/panelclv/benchmarks/__init__.py,__getattr__,34,False,True,valendin_lstm
+src/panelclv/benchmarks/__init__.py,__dir__,47,False,False,
+src/panelclv/benchmarks/pareto_benchmark.py,_build_cbs,70,False,True,pareto_nbd
+src/panelclv/benchmarks/pareto_benchmark.py,_post_gamma,122,False,True,pareto_nbd
+src/panelclv/benchmarks/pareto_benchmark.py,_slice_sample_gamma,142,False,True,pareto_nbd
+src/panelclv/benchmarks/pareto_benchmark.py,_slice_sample_gamma.f,162,False,True,pareto_nbd
+src/panelclv/benchmarks/pareto_benchmark.py,_draw_tau,198,False,True,pareto_nbd
+src/panelclv/benchmarks/pareto_benchmark.py,_run_single_chain,229,False,True,pareto_nbd
+src/panelclv/benchmarks/pareto_benchmark.py,compute_pareto_predictions,278,True,True,pareto_nbd
+src/panelclv/benchmarks/valendin_lstm.py,_ValendinLSTMBackbone.__init__,77,False,True,valendin_lstm
+src/panelclv/benchmarks/valendin_lstm.py,_ValendinLSTMBackbone.forward,104,False,True,valendin_lstm
+src/panelclv/benchmarks/valendin_lstm.py,ValendinLSTMModel.__init__,119,False,True,valendin_lstm
+src/panelclv/benchmarks/valendin_lstm.py,ValendinLSTMModel.forward,139,True,True,valendin_lstm
+src/panelclv/benchmarks/valendin_lstm.py,InferenceValendinLSTMModel.__init__,159,False,True,valendin_lstm
+src/panelclv/benchmarks/valendin_lstm.py,InferenceValendinLSTMModel.forward,179,True,True,valendin_lstm
+src/panelclv/configs/panel_config.py,_as_col_tuple,140,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/configs/panel_config.py,normalize_embedded_cols,161,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig.__post_init__,256,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig._resolve_time_features,351,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig._validate_embedded_cols,373,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig.data_config,392,True,True,lstm transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig.to_dict,414,True,False,
+src/panelclv/configs/panel_config.py,PanelConfig.from_dict,449,True,False,
+src/panelclv/configs/panel_config.py,PanelConfig.schema,464,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/ar_features.py,parse_ar_feature,75,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/ar_features.py,validate_ar_features,106,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/ar_features.py,_base_states,112,False,True,lstm transformer
+src/panelclv/data_preparation/ar_features.py,_render,151,False,True,lstm transformer
+src/panelclv/data_preparation/ar_features.py,compute_ar_feature_columns,176,True,True,lstm transformer
+src/panelclv/data_preparation/ar_features.py,ARFeatureState.__init__,194,False,True,lstm transformer
+src/panelclv/data_preparation/ar_features.py,ARFeatureState.update,206,True,True,lstm transformer
+src/panelclv/data_preparation/dynamic_panel_dataset.py,get_seq_cols,99,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,_known_future_cols,107,False,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,resolve_embedded_cols,119,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,resolve_embedded_cols._observed_max,164,False,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,_resolve_time_index,209,False,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,add_time_features,242,True,True,lstm transformer
+src/panelclv/data_preparation/dynamic_panel_dataset.py,add_period_start,312,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,validate_columns,342,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,warn_known_future_drift,370,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,standardize_covariates,430,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,make_block,506,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,select_active_cohort,530,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,prepare_dataset,560,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/pareto_simulation.py,_seasonal_weekly_multiplier,108,False,False,
+src/panelclv/data_preparation/pareto_simulation.py,simulate_pareto_nbd_panel,134,True,False,
+src/panelclv/data_preparation/pareto_simulation.py,_pct,271,False,False,
+src/panelclv/data_preparation/pareto_simulation.py,_beta_for_churn,276,False,False,
+src/panelclv/data_preparation/pareto_simulation.py,_auto_study_name,285,False,False,
+src/panelclv/data_preparation/pareto_simulation.py,generate_pnbd_study,291,True,False,
+src/panelclv/data_preparation/pareto_simulation.py,list_pnbd_datasets,478,True,False,
+src/panelclv/data_preparation/pareto_simulation.py,load_pnbd_dataset,527,True,False,
+src/panelclv/evaluation/forecast_run.py,_slug,33,False,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.__init__,42,False,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.new,49,True,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.open,60,True,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.path,69,True,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.save_config,75,True,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.save_predictions,84,True,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun.predictions,105,True,False,
+src/panelclv/evaluation/forecast_run.py,ForecastRun._read_manifest,109,False,False,
+src/panelclv/evaluation/plot_utils.py,_reduce_to_customer_week,46,False,False,
+src/panelclv/evaluation/plot_utils.py,save_predictions_to_csv,61,True,False,
+src/panelclv/evaluation/plot_utils.py,load_predictions_from_csv,97,True,False,
+src/panelclv/evaluation/plot_utils.py,holdout_actuals_NT,125,True,False,
+src/panelclv/evaluation/plot_utils.py,weekly_actuals,173,True,False,
+src/panelclv/evaluation/plot_utils.py,weekly_aggregate_predictions,194,True,False,
+src/panelclv/evaluation/plot_utils.py,_pareto_from_data,239,False,False,
+src/panelclv/evaluation/plot_utils.py,pareto_forecast,283,True,False,
+src/panelclv/evaluation/plot_utils.py,plot_weekly_aggregated,353,True,False,
+src/panelclv/evaluation/plot_utils.py,metrics_table,443,True,False,
+src/panelclv/evaluation/plot_utils.py,alignment_check,526,True,False,
+src/panelclv/evaluation/plot_utils.py,forecast_from_checkpoint,586,True,False,
+src/panelclv/evaluation/segment_analysis.py,aggregate_bias,39,True,False,
+src/panelclv/evaluation/segment_analysis.py,_at_risk,54,False,False,
+src/panelclv/evaluation/segment_analysis.py,_opportunity,59,False,False,
+src/panelclv/evaluation/segment_analysis.py,_counts,73,False,False,
+src/panelclv/evaluation/segment_analysis.py,_resolve_rows,82,False,False,
+src/panelclv/evaluation/segment_analysis.py,_load_aligned,96,False,False,
+src/panelclv/evaluation/segment_analysis.py,assign_customer_groups,119,True,False,
+src/panelclv/evaluation/segment_analysis.py,group_metrics_table,138,True,False,
+src/panelclv/experiments/experiment_utils.py,_require_val_start_idx,50,False,True,lstm transformer valendin_lstm
+src/panelclv/experiments/experiment_utils.py,make_loaders,75,True,True,lstm transformer valendin_lstm
+src/panelclv/experiments/experiment_utils.py,make_refit_loader,137,True,False,
+src/panelclv/experiments/experiment_utils.py,make_data_builder,158,True,False,
+src/panelclv/experiments/experiment_utils.py,make_data_builder.data_builder,169,True,False,
+src/panelclv/experiments/experiment_utils.py,build_inference_from_trial,176,True,False,
+src/panelclv/experiments/experiment_utils.py,refit_best_trial,230,True,False,
+src/panelclv/models/embedders.py,_emb_size,36,False,True,lstm transformer valendin_lstm
+src/panelclv/models/embedders.py,Embedder.__init__,67,False,True,lstm transformer valendin_lstm
+src/panelclv/models/embedders.py,Embedder._check_shape,108,False,True,lstm transformer valendin_lstm
+src/panelclv/models/embedders.py,ProjectedEmbedder.__init__,133,False,True,lstm transformer
+src/panelclv/models/embedders.py,ProjectedEmbedder.forward,166,True,True,lstm transformer
+src/panelclv/models/embedders.py,ValendinEmbedder.__init__,215,False,True,valendin_lstm
+src/panelclv/models/embedders.py,ValendinEmbedder.forward,239,True,True,valendin_lstm
+src/panelclv/models/losses.py,FocalLoss.__init__,42,False,False,
+src/panelclv/models/losses.py,FocalLoss.forward,54,True,False,
+src/panelclv/models/losses.py,SquaredEMDLoss.forward,78,True,False,
+src/panelclv/models/losses.py,compute_class_weights,92,True,False,
+src/panelclv/models/losses.py,build_criterion,174,True,True,lstm transformer valendin_lstm
+src/panelclv/models/monte_carlo_forecasting.py,_as_tensor,55,False,True,lstm transformer valendin_lstm
+src/panelclv/models/monte_carlo_forecasting.py,_get_target_idx,66,False,True,lstm transformer valendin_lstm
+src/panelclv/models/monte_carlo_forecasting.py,_device_of,76,False,False,
+src/panelclv/models/monte_carlo_forecasting.py,simulate_one_path,88,True,True,lstm valendin_lstm
+src/panelclv/models/monte_carlo_forecasting.py,simulate_transformer_path,189,True,True,transformer
+src/panelclv/models/monte_carlo_forecasting.py,_save_predictions_run,290,False,False,
+src/panelclv/models/monte_carlo_forecasting.py,_run_monte_carlo,344,False,True,lstm transformer valendin_lstm
+src/panelclv/models/monte_carlo_forecasting.py,run_monte_carlo_forecast,442,True,True,lstm valendin_lstm
+src/panelclv/models/monte_carlo_forecasting.py,run_monte_carlo_forecast_transformer,502,True,True,transformer
+src/panelclv/models/monte_carlo_forecasting.py,compute_forecast_metrics,547,True,True,lstm transformer valendin_lstm
+src/panelclv/models/multinomial_lstm.py,_MultinomialLSTMBackbone.__init__,95,False,True,lstm
+src/panelclv/models/multinomial_lstm.py,_MultinomialLSTMBackbone.forward,121,False,True,lstm
+src/panelclv/models/multinomial_lstm.py,MultinomialLSTMModel.__init__,148,False,True,lstm
+src/panelclv/models/multinomial_lstm.py,MultinomialLSTMModel.forward,167,True,True,lstm
+src/panelclv/models/multinomial_lstm.py,InferenceMultinomialLSTMModel.__init__,189,False,True,lstm
+src/panelclv/models/multinomial_lstm.py,InferenceMultinomialLSTMModel.forward,207,True,True,lstm
+src/panelclv/models/multinomial_transformer.py,SinePositionalEncoding.__init__,72,False,True,transformer
+src/panelclv/models/multinomial_transformer.py,SinePositionalEncoding.forward,85,True,True,transformer
+src/panelclv/models/multinomial_transformer.py,_MultinomialTransformerBackbone.__init__,97,False,True,transformer
+src/panelclv/models/multinomial_transformer.py,_MultinomialTransformerBackbone.generate_causal_mask,159,False,True,transformer
+src/panelclv/models/multinomial_transformer.py,_MultinomialTransformerBackbone.forward,164,False,True,transformer
+src/panelclv/models/multinomial_transformer.py,MultinomialTransformerModel.__init__,207,False,True,transformer
+src/panelclv/models/multinomial_transformer.py,MultinomialTransformerModel.forward,244,True,True,transformer
+src/panelclv/models/multinomial_transformer.py,InferenceMultinomialTransformerModel.__init__,273,False,True,transformer
+src/panelclv/models/multinomial_transformer.py,InferenceMultinomialTransformerModel.forward,296,True,True,transformer
+src/panelclv/studies/analysis.py,_read_suite_config,48,False,False,
+src/panelclv/studies/analysis.py,_discover_models,57,False,False,
+src/panelclv/studies/analysis.py,_id_col,91,False,False,
+src/panelclv/studies/analysis.py,_prediction_index,108,False,False,
+src/panelclv/studies/analysis.py,_is_deterministic_model,120,False,False,
+src/panelclv/studies/analysis.py,load_model_predictions,130,True,False,
+src/panelclv/studies/analysis.py,aggregate_suite_predictions,200,True,False,
+src/panelclv/studies/analysis.py,_actuals_from_panel,229,False,False,
+src/panelclv/studies/analysis.py,_aggregate_actuals,259,False,False,
+src/panelclv/studies/analysis.py,_other_ids,288,False,False,
+src/panelclv/studies/analysis.py,_rows_for_ids,299,False,False,
+src/panelclv/studies/analysis.py,_select_rows,323,False,False,
+src/panelclv/studies/analysis.py,_across_study_band,376,False,False,
+src/panelclv/studies/analysis.py,plot_suite_forecast,413,True,False,
+src/panelclv/studies/analysis.py,plot_suite_forecast._subset,504,False,False,
+src/panelclv/studies/analysis.py,_suite_prediction_paths,617,False,False,
+src/panelclv/studies/analysis.py,group_metrics_suite_table,639,True,False,
+src/panelclv/studies/analysis.py,group_metrics_suite_distribution,701,True,False,
+src/panelclv/studies/analysis.py,study_metrics,790,True,False,
+src/panelclv/studies/analysis.py,_study_metrics_from_data,861,False,False,
+src/panelclv/studies/analysis.py,compare_study_metrics,985,True,False,
+src/panelclv/studies/analysis.py,describe_dataset,1071,True,False,
+src/panelclv/studies/analysis.py,describe_dataset.pct,1120,True,False,
+src/panelclv/studies/analysis.py,describe_dataset.cfg,1127,True,False,
+src/panelclv/studies/analysis.py,describe_suite_dataset,1176,True,False,
+src/panelclv/studies/config.py,ModelSpec.__post_init__,72,False,False,
+src/panelclv/studies/config.py,ModelSpec.is_neural,77,True,False,
+src/panelclv/studies/config.py,StudySuiteConfig.validate,133,True,False,
+src/panelclv/studies/layout.py,create_suite_root,31,True,False,
+src/panelclv/studies/layout.py,model_dirs,54,True,False,
+src/panelclv/studies/layout.py,study_dir,71,True,False,
+src/panelclv/studies/layout.py,prediction_path,76,True,False,
+src/panelclv/studies/layout.py,jsonify,81,True,False,
+src/panelclv/studies/layout.py,write_json,115,True,False,
+src/panelclv/studies/pnbd_grid.py,collect_grid_results,67,True,False,
+src/panelclv/studies/pnbd_grid.py,_holdout_weeks,146,False,False,
+src/panelclv/studies/pnbd_grid.py,_holdout_season,157,False,False,
+src/panelclv/studies/pnbd_grid.py,_detrend,173,False,False,
+src/panelclv/studies/pnbd_grid.py,_weekly_prediction,179,False,False,
+src/panelclv/studies/pnbd_grid.py,seasonality_grid,185,True,False,
+src/panelclv/studies/pnbd_grid.py,alive_volume_ratio_grid,271,True,False,
+src/panelclv/studies/pnbd_grid.py,dead_volume_leakage_grid,376,True,False,
+src/panelclv/studies/pnbd_grid.py,_mean_ci,485,False,False,
+src/panelclv/studies/pnbd_grid.py,group_summary,500,True,False,
+src/panelclv/studies/pnbd_grid.py,compare_models_table,531,True,False,
+src/panelclv/studies/pnbd_grid.py,plot_pattern,553,True,False,
+src/panelclv/studies/pnbd_grid.py,plot_diff_grid,585,True,False,
+src/panelclv/studies/runner.py,run_study_suite,61,True,False,
+src/panelclv/studies/runner.py,_run_neural_model,88,False,False,
+src/panelclv/studies/runner.py,_rebuild_winner,161,False,False,
+src/panelclv/studies/runner.py,_run_pareto_model,176,False,False,
+src/panelclv/studies/runner.py,_suite_record,229,False,False,
+src/panelclv/studies/runner.py,_model_record,276,False,False,
+src/panelclv/training/training_utils.py,_validate_targets,52,False,True,lstm transformer valendin_lstm
+src/panelclv/training/training_utils.py,_select_device,67,False,True,lstm transformer valendin_lstm
+src/panelclv/training/training_utils.py,train_one_epoch,78,True,True,lstm transformer valendin_lstm
+src/panelclv/training/training_utils.py,validate_one_epoch,126,True,True,lstm transformer valendin_lstm
+src/panelclv/training/training_utils.py,fit_model,199,True,True,lstm transformer valendin_lstm
+src/panelclv/training/training_utils.py,refit_full_calibration,376,True,False,
+src/panelclv/tuning/optuna_tuning.py,_as_group,124,False,False,
+src/panelclv/tuning/optuna_tuning.py,validate_removable_features,135,True,False,
+src/panelclv/tuning/optuna_tuning.py,suggest_covariate_selection,162,True,False,
+src/panelclv/tuning/optuna_tuning.py,select_features,185,True,False,
+src/panelclv/tuning/optuna_tuning.py,select_features_for_trial,248,True,False,
+src/panelclv/tuning/optuna_tuning.py,_suggest_param,345,False,False,
+src/panelclv/tuning/optuna_tuning.py,_merge_specs,404,False,False,
+src/panelclv/tuning/optuna_tuning.py,validate_data_info,416,True,False,
+src/panelclv/tuning/optuna_tuning.py,suggest_lstm_params,439,True,False,
+src/panelclv/tuning/optuna_tuning.py,suggest_valendin_params,447,True,False,
+src/panelclv/tuning/optuna_tuning.py,suggest_transformer_params,460,True,False,
+src/panelclv/tuning/optuna_tuning.py,_build_lstm,490,False,False,
+src/panelclv/tuning/optuna_tuning.py,_build_valendin,506,False,False,
+src/panelclv/tuning/optuna_tuning.py,_build_transformer,519,False,False,
+src/panelclv/tuning/optuna_tuning.py,_require_registered,556,False,False,
+src/panelclv/tuning/optuna_tuning.py,_suggest_params_for,567,False,False,
+src/panelclv/tuning/optuna_tuning.py,_build_model_for,576,False,False,
+src/panelclv/tuning/optuna_tuning.py,_build_inference_model_for,583,False,False,
+src/panelclv/tuning/optuna_tuning.py,weekly_aggregate_rollout_metrics,648,True,False,
+src/panelclv/tuning/optuna_tuning.py,_validation_rollout_score,722,False,False,
+src/panelclv/tuning/optuna_tuning.py,objective,825,True,False,
+src/panelclv/tuning/optuna_tuning.py,run_optuna_study,956,True,False,
