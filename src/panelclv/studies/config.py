@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Recognised model families. The two neural families go through Optuna; the
+# Recognised model families. The neural families go through Optuna; the
 # Pareto/NBD baseline is a single deterministic fit (no tuning, one prediction).
 NEURAL_MODEL_TYPES = ("lstm", "transformer", "valendin_lstm")
 VALID_MODEL_TYPES = NEURAL_MODEL_TYPES + ("pareto_nbd",)

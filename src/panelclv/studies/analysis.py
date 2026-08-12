@@ -37,6 +37,8 @@ from typing import Any
 
 import numpy as np
 
+from .config import NEURAL_MODEL_TYPES
+
 
 # ---------------------------------------------------------------------------
 # Suite discovery
@@ -109,9 +111,10 @@ def _prediction_index(path: Path) -> int:
     return int(m.group(1)) if m else -1
 
 
-# Model families the runner runs per study (one Prediction_i.csv each). Any other
-# model_type (e.g. Pareto/NBD) is a single deterministic fit -> only Prediction_1.csv.
-_NEURAL_TYPES = {"lstm", "transformer"}
+# Which families the runner runs per study (one Prediction_i.csv each) is decided by
+# ``NEURAL_MODEL_TYPES``, imported rather than restated: a local copy is a fourth
+# model-type list to keep in step with ``config``/``runner``/``optuna_tuning``, and a
+# stale one misreads a whole model's archive as a single deterministic fit.
 
 
 def _is_deterministic_model(model_dir: Path) -> bool:
@@ -121,7 +124,7 @@ def _is_deterministic_model(model_dir: Path) -> bool:
         return False
     with open(cfg_path) as f:
         mt = json.load(f).get("model_type")
-    return mt is not None and mt not in _NEURAL_TYPES
+    return mt is not None and mt not in NEURAL_MODEL_TYPES
 
 
 def load_model_predictions(

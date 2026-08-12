@@ -10,6 +10,8 @@ would train the wrong architecture under the right name. Membership alone would 
 catch that, so the built model's *class* is checked per type.
 """
 
+import json
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -144,3 +146,23 @@ def test_valendin_architecture_is_not_searched():
     # The published sizes, whatever Optuna sampled.
     assert model.backbone.lstm.hidden_size == 128
     assert model.backbone.dense.out_features == 128
+
+
+@pytest.mark.parametrize("model_type", VALID_MODEL_TYPES)
+def test_read_side_agrees_on_which_types_run_per_study(model_type, tmp_path):
+    """The archive reader classifies each registered type the way the runner ran it.
+
+    `studies.analysis` decides whether a model's folder holds one prediction per study
+    or a single deterministic fit. It used to answer from its own copy of the neural
+    list, which drifted: `valendin_lstm` was missing, so every study index resolved to
+    `Prediction_1.csv` and the benchmark's across-study spread silently collapsed to
+    one study. Nothing crashed — the reported distribution was just wrong.
+    """
+    from panelclv.studies.analysis import _is_deterministic_model
+
+    model_dir = tmp_path / "SomeModel"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text(json.dumps({"model_type": model_type}))
+
+    # Neural types are Optuna-tuned once per study; anything else is a single fit.
+    assert _is_deterministic_model(model_dir) is (model_type not in NEURAL_MODEL_TYPES)
