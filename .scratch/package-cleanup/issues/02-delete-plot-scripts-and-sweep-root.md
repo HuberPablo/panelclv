@@ -11,7 +11,7 @@ targets.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 Source: `.scratch/package-simplification/issues/10-scripts-and-root-clutter.md`
 
@@ -56,10 +56,71 @@ vendored skills directory.
   benchmark gate, or a documented tool; a one-off check goes in the commit that needed it
   and is deleted with it.
 
-- [ ] Both plot scripts and all three one-shots deleted
-- [ ] The two orphaned evaluation symbols deleted with them
-- [ ] Input-config directory and publishing guide deleted
-- [ ] Provenance fact present in the archive README
-- [ ] `.Rhistory` ignored; no tracked copy remains
-- [ ] README line for the GPU-rental scripts; `CLAUDE.md` line for `scripts/`
-- [ ] Golden test green; notebook API test green
+- [x] Both plot scripts and all three one-shots deleted
+- [x] The two orphaned evaluation symbols deleted with them
+- [x] Input-config directory and publishing guide deleted
+- [x] Provenance fact present in the archive README
+- [x] `.Rhistory` ignored; no tracked copy remains
+- [x] README line for the GPU-rental scripts; `CLAUDE.md` line for `scripts/`
+- [x] Golden test green; notebook API test green
+
+## Comments
+
+Landed 2026-08-12. Full suite green (191 passed), including the golden end-to-end test
+and the notebook API test.
+
+### `weekly_actuals` was a thin wrapper over a symbol this issue deletes
+
+`holdout_actuals_NT` had one caller left inside `src/`: `weekly_actuals`, which summed its
+`(N, T_HOLD)` result down the customer axis. Deleting the reshaper alone would have left
+`weekly_actuals` raising `NameError` on call. It is not this issue's to delete — issue 08
+kills it, along with `weekly_aggregate_predictions` and `alignment_check` — so its two-line
+body absorbed the stacking loop and it keeps working until then. The count is still two
+symbols: `plot_utils.py` goes 609 -> 553 lines, 71 deleted against 15 re-added as
+`weekly_actuals`' new body.
+
+### Two dead imports went with `forecast_from_checkpoint`
+
+It was the only user of `torch` and of `run_monte_carlo_forecast as _mc_forecast` in
+`plot_utils.py`, so both top-level imports are gone. No `evaluation` module imports `torch`
+directly any more — it still arrives transitively through
+`models.monte_carlo_forecasting`, which supplies `compute_forecast_metrics`, so this is one
+fewer edge for issue 08's acyclicity work rather than a load-cost win.
+`metrics_table`'s docstring and its `ndim != 2` error
+message both named `holdout_actuals_NT` as the way to get a per-customer array; they now
+point at `forecast["actual"]` instead.
+
+### Three dangling doc references, not listed in the issue
+
+Deleting the files broke references that the issue's inventory did not carry:
+
+- `docs/running-a-model.md:263` sent pre-ADR-0005 checkpoints to
+  `scripts/migrations/rename_embedder_checkpoint_keys.py`. It now states the key mismatch
+  and says the migration is recoverable from git history — which is decision 2's own
+  "git history is the provenance", written where someone would hit the problem.
+- `notebooks/archive/README.md` cited `scripts/main_plot.py` as the current
+  `ProjectedEmbedder` call shape and the same migration for reloading old checkpoints.
+  Both now point at `docs/running-a-model.md`, which shows that call shape anyway.
+
+### The provenance fact, checked against the migration before relocating
+
+`archive/README.md` gains a *Why the archived results say `ParetoNBD_MLE`* section. It
+lists what the relabel actually touched — model folder, `aggregated_<model>.csv` filename,
+`name` in both the model-level and suite-level `config.json`, and the `model` column of
+`metrics.csv` and `results.csv` — read off the deleted script rather than paraphrased, and
+records that a bare `ParetoNBD` folder is therefore safe to read as hierarchical-Bayes.
+
+### The tracer confirms the orphan count, and its report was left alone
+
+`scripts/trace_golden_reachability.py` runs clean over all four arms after the deletions.
+Its regenerated report differs from the committed one by exactly the two deleted symbols
+(206 → 204 defined, 110 → 108 public), so nothing else was orphaned. The regenerated
+`.scratch/package-simplification/reachability.{md,csv}` were reverted: they are the closed
+effort's dated record, not this issue's to rewrite, and issues 03-15 will churn them far
+harder.
+
+### `.Rhistory`
+
+The rule has no leading slash, so it covers both the queued root copy and the tracked
+`.claude/.Rhistory`, whose removal is now staged. The unrelated `.claude/settings.json`
+deletion already in the working tree was left as-is.

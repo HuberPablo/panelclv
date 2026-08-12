@@ -67,6 +67,10 @@ scoring authority — `rmse`, `bias_percent`, `mape_aggregate`, on per-customer
 per-period arrays. Plots, tables and study results all delegate to it so they agree
 to the last decimal.
 
+**`scripts/`.** A script there is either a live entry point, a benchmark gate, or a
+documented tool. A one-off check goes in the commit that needed it and is deleted with
+it.
+
 **Comments.** Comment so a thesis reader follows the code without prior context:
 the intent of a block, what a tensor's shape means, why a step exists. Explain the
 non-obvious.

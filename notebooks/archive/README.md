@@ -26,9 +26,9 @@ of ADR-0002 / ticket 05 and construct inference models the old way:
 
 Both become `embedder=ProjectedEmbedder(seq_cols=..., embedded_cols=..., target_col=...,
 embedding_dim=<embedding_dim or d_model>)` with the remaining arguments unchanged; see
-`scripts/main_plot.py` for the current call shape. Any checkpoint they reload also
-predates the seam and needs `scripts/migrations/rename_embedder_checkpoint_keys.py` run
-over it first.
+`docs/running-a-model.md` for the current call shape. Any checkpoint they reload also
+predates the seam, so its `state_dict` keys need renaming before it will load — see the
+same document.
 
 The move does not break their data paths: all four open with a bootstrap cell that walks
 up to the repo root — three by locating `pyproject.toml` and calling `os.chdir`,

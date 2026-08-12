@@ -92,3 +92,10 @@ run whether or not the package is pip-installed.
 Finished experiments frozen against an older API sit in `notebooks/archive/` — see its
 README for which and why. Nothing there is expected to run, and
 `tests/test_notebooks_current_api.py` checks only the live four.
+
+## Running on rented hardware
+
+`VastAI/` holds the launch scripts for training on a rented [vast.ai](https://vast.ai)
+machine: `vast_search.py` picks an offer (the workload is CPU-bound, so it filters on CPU
+generation rather than GPU), `vast_launch.sh` rents it, and `vast_onstart.sh` /
+`script_on_start` clone the repo and install the package on the machine once it boots.

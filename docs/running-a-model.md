@@ -260,8 +260,11 @@ config value → resolved cardinality → softmax width — is why changing
 `clip_target_upper` changes the model's output shape.
 
 The state dict is prefixed by the seam: `backbone.embedder.*`, `backbone.lstm.*`,
-`backbone.dense.*`, `backbone.output_layer.*`. (Checkpoints predating ADR-0005 need
-`scripts/migrations/rename_embedder_checkpoint_keys.py`.)
+`backbone.dense.*`, `backbone.output_layer.*`. (Checkpoints predating ADR-0005 keep the
+embedding modules directly under `backbone.*` and fail `load_state_dict(strict=True)`
+against the current classes. The key-renaming migration that fixed them was applied and
+then deleted once the archived checkpoints were; recover it from git history if a
+pre-seam checkpoint ever resurfaces.)
 
 ### 4.3 `fit_model`
 

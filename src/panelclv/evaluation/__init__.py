@@ -15,12 +15,10 @@ uninformative for a group whose actual total is near zero.
 
 from .plot_utils import (
     weekly_actuals,
-    holdout_actuals_NT,
     weekly_aggregate_predictions,
     plot_weekly_aggregated,
     metrics_table,
     alignment_check,
-    forecast_from_checkpoint,
     pareto_forecast,
     save_predictions_to_csv,
     load_predictions_from_csv,
@@ -34,12 +32,10 @@ from .forecast_run import ForecastRun
 
 __all__ = [
     "weekly_actuals",
-    "holdout_actuals_NT",
     "weekly_aggregate_predictions",
     "plot_weekly_aggregated",
     "metrics_table",
     "alignment_check",
-    "forecast_from_checkpoint",
     "pareto_forecast",
     "save_predictions_to_csv",
     "load_predictions_from_csv",

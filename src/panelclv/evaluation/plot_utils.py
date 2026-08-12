@@ -28,14 +28,10 @@ from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
-import torch
 
-# The Monte Carlo simulator stays in `panelclv.models` (it is the model's forecast
-# mechanism), so this is a cross-package import after the split.
-from panelclv.models.monte_carlo_forecasting import (
-    compute_forecast_metrics,
-    run_monte_carlo_forecast as _mc_forecast,
-)
+# The metric authority stays in `panelclv.models` (it scores the model's own
+# forecast), so this is a cross-package import after the split.
+from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
 
 
 # ---------------------------------------------------------------------------
@@ -122,19 +118,19 @@ def load_predictions_from_csv(
 # ---------------------------------------------------------------------------
 
 
-def holdout_actuals_NT(
+def weekly_actuals(
     holdout: Sequence[pd.DataFrame],
     *,
     target_col: str | None = None,
     count_col: str | int | None = None,
 ) -> np.ndarray:
-    """Return per-customer per-week actuals over the holdout as `(N, T_HOLD)`.
+    """Sum transaction counts across customers per holdout week, shape `(T_HOLD,)`.
 
-    `holdout` is a list of per-customer dataframes (each shape `(T, num_features)`),
-    matching the layout `run_monte_carlo_forecast` consumes. Exactly the same
-    array shape the LSTM / Transformer notebooks pass to
-    `compute_forecast_metrics`, so callers can score directly without
-    aggregating first.
+    `holdout` is a list of per-customer dataframes (each shape `(T, num_features)`).
+    The counts are stacked along the customer axis into `(N, T_HOLD)` and then summed
+    over customers — use this for the plot overlay (`plot_weekly_aggregated`). For
+    metrics, score the per-customer `(N, T_HOLD)` array instead (`forecast["actual"]`),
+    because the aggregate hides the individual RMSE the thesis reports.
 
     Parameters
     ----------
@@ -165,30 +161,9 @@ def holdout_actuals_NT(
             arrs.append(df.iloc[:, count_col].to_numpy(dtype=np.float64))
         else:
             arrs.append(df[count_col].to_numpy(dtype=np.float64))
-    # Stack along customer axis -> (N, T_HOLD). Callers that want the
-    # weekly aggregate (T_HOLD,) for the plot should sum over axis 0.
-    return np.stack(arrs, axis=0)
+    # Stack along the customer axis -> (N, T_HOLD), then sum it away -> (T_HOLD,).
+    return np.stack(arrs, axis=0).sum(axis=0)
 
-
-def weekly_actuals(
-    holdout: Sequence[pd.DataFrame],
-    *,
-    target_col: str | None = None,
-    count_col: str | int | None = None,
-) -> np.ndarray:
-    """Sum transaction counts across customers per holdout week, shape `(T_HOLD,)`.
-
-    Thin wrapper over `holdout_actuals_NT` that sums along the customer axis —
-    use this for the plot overlay (`plot_weekly_aggregated`). For metrics, use
-    `holdout_actuals_NT` directly and pass the `(N, T_HOLD)` array to
-    `metrics_table` / `compute_forecast_metrics`.
-
-    See `holdout_actuals_NT` for the `target_col` / `count_col` contract;
-    the legacy positional default (`count_col=3`) is no longer accepted.
-    """
-    return holdout_actuals_NT(
-        holdout, target_col=target_col, count_col=count_col,
-    ).sum(axis=0)
 
 
 def weekly_aggregate_predictions(
@@ -460,7 +435,7 @@ def metrics_table(
     ----------
     actuals : np.ndarray, shape (N, T_HOLD)
         Per-customer per-week actuals — the natural output of
-        `holdout_actuals_NT` or `forecast["actual"]`. NOT the aggregated
+        `forecast["actual"]` from the Monte Carlo simulator. NOT the aggregated
         (T_HOLD,) vector; the metric definitions need the per-customer
         granularity to compute individual RMSE.
     predictions_by_model : dict[str, np.ndarray]
@@ -490,8 +465,8 @@ def metrics_table(
     if actuals.ndim != 2:
         raise ValueError(
             f"actuals must be (N, T_HOLD); got shape {actuals.shape}. "
-            f"If you have the aggregated (T_HOLD,) vector, use "
-            f"holdout_actuals_NT(...) instead of weekly_actuals(...)."
+            f"If you have the aggregated (T_HOLD,) vector from "
+            f"weekly_actuals(...), score the per-customer array instead."
         )
 
     # Optionally fit + append the Pareto/NBD benchmark as one more row (copy so
@@ -576,34 +551,3 @@ def alignment_check(
         rows.append(row)
 
     return pd.DataFrame(rows).set_index("model")
-
-
-# ---------------------------------------------------------------------------
-# Convenience: run MC directly from a checkpoint
-# ---------------------------------------------------------------------------
-
-
-def forecast_from_checkpoint(
-    checkpoint_path: str | Path,
-    inference_model_factory,                # callable: () -> nn.Module
-    data: dict[str, Any],
-    n_simulations: int = 30,
-    device: str | torch.device | None = None,
-) -> dict[str, Any]:
-    """Load an inference model from disk and run the Valendin-style MC forecast.
-
-    `inference_model_factory` is a zero-arg callable that constructs the
-    inference model with the exact architecture used during training (so the
-    checkpoint loads cleanly). `data` is the dict returned by
-    `dynamic_panel_dataset.prepare_dataset`.
-
-    Returns the dict produced by `mc_forecast`: `prediction_mean`, `actual`,
-    `simulations`, `target_col`, `target_idx`, `n_simulations`.
-    """
-    model = inference_model_factory()
-    state = torch.load(checkpoint_path, map_location="cpu")
-    # The training-mode Transformer registers a `_cached_mask` buffer the
-    # inference model doesn't have. Drop it; no-op for the LSTM.
-    state.pop("_cached_mask", None)
-    model.load_state_dict(state)
-    return _mc_forecast(model, data, n_simulations=n_simulations, device=device)
