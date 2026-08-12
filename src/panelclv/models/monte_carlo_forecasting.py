@@ -548,7 +548,7 @@ def compute_forecast_metrics(
     actual: np.ndarray,
     prediction_mean: np.ndarray,
 ) -> dict[str, float]:
-    """Return RMSE, %-bias and aggregate-style MAPE — both inputs (N, T_HOLD).
+    """Return RMSE, %-bias and aggregate MAPE — both inputs (N, T_HOLD).
 
     Argument order follows the Python / sklearn convention `(y_true, y_pred)`.
 
@@ -577,7 +577,7 @@ def compute_forecast_metrics(
     return {
         "rmse": rmse,
         "bias_percent": bias_percent,
-        "mape_aggregate_style": mape_agg,
+        "mape_aggregate": mape_agg,
     }
 
 

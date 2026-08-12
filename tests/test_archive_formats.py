@@ -115,11 +115,20 @@ RESULTS_LEADING_COLS = [
     "objective",
     "rmse",
     "bias_percent",
-    "mape_aggregate_style",
+    "mape_aggregate",
 ]
-# The three metric names are an on-disk contract: `analysis._STUDY_METRIC_COLS` and
-# `pnbd_grid._METRIC_SOURCE` both name them, and renaming one breaks every archived read.
-RESULTS_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate_style"]
+# The three metric names the package writes today — `compute_forecast_metrics`' own
+# keys, which `analysis._STUDY_METRIC_COLS` and `pnbd_grid._METRIC_SOURCE` both name.
+RESULTS_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
+
+# The one column the archive spells differently: every archived suite was written
+# before `compute_forecast_metrics` renamed this key, and archived suites are no
+# longer required to stay readable, so the old spelling is recorded here rather than
+# reconciled. The two lists below differ from their current-spelling counterparts in
+# this column alone.
+ARCHIVE_MAPE_COL = "mape_aggregate_style"
+ARCHIVE_RESULTS_LEADING_COLS = RESULTS_LEADING_COLS[:-1] + [ARCHIVE_MAPE_COL]
+ARCHIVE_RESULTS_METRIC_COLS = RESULTS_METRIC_COLS[:-1] + [ARCHIVE_MAPE_COL]
 
 # A prediction file: `Prediction_{i}.csv`, wide, `<id_col>` then `week_0..week_{T-1}`.
 PREDICTION_FILE_RE = re.compile(r"^Prediction_(\d+)\.csv$")
@@ -344,17 +353,17 @@ FIXTURE_METRICS = {
     ("LSTM", 1): {
         "rmse": 0.385275875185561,
         "bias_percent": 3.8461538461538463,
-        "mape_aggregate_style": 19.23076923076923,
+        "mape_aggregate": 19.23076923076923,
     },
     ("LSTM", 2): {
         "rmse": 0.4759858191164943,
         "bias_percent": 34.61538461538461,
-        "mape_aggregate_style": 34.61538461538461,
+        "mape_aggregate": 34.61538461538461,
     },
     ("ParetoNBD_MLE", 1): {
         "rmse": 0.7180703308172536,
         "bias_percent": 0.0,
-        "mape_aggregate_style": 23.076923076923077,
+        "mape_aggregate": 23.076923076923077,
     },
 }
 
@@ -529,7 +538,7 @@ def test_results_csv_column_contract(suite):
     assert list(df.columns) == RESULTS_LEADING_COLS + FIXTURE_RESULTS_PARAM_UNION
     assert all(c.startswith("param_") for c in df.columns[len(RESULTS_LEADING_COLS):])
     # The three metric names `analysis._STUDY_METRIC_COLS` and `pnbd_grid._METRIC_SOURCE`
-    # read out of an archived file. Renaming one orphans every archive.
+    # read out of a suite this package wrote.
     assert analysis._STUDY_METRIC_COLS == RESULTS_METRIC_COLS
     from panelclv.studies.pnbd_grid import _METRIC_SOURCE
     assert set(_METRIC_SOURCE.values()) <= set(RESULTS_METRIC_COLS)
@@ -750,23 +759,25 @@ def test_legacy_suite_has_no_panel_config_to_rebuild_actuals(legacy_suite, panel
 # --------------------------------------------------------------------------------------
 
 # The nine numbers `Studies/cross_entropy_cfg_2yTrain_1yPred_NoCov_TestDimanche/results.csv`
-# holds — three models x three metrics — copied from that file. The gate recomputes them
-# from the stored prediction CSVs and requires agreement.
+# holds — three models x three metrics — copied from that file. Keyed by the metric
+# names the package uses today; the stored column each one came from is the matching
+# entry of ARCHIVE_RESULTS_METRIC_COLS. The gate recomputes them from the stored
+# prediction CSVs and requires agreement.
 PINNED_SUITE_RESULTS = {
     "LSTM": {
         "rmse": 0.3766844079321802,
         "bias_percent": -53.40695337290179,
-        "mape_aggregate_style": 58.60463556558676,
+        "mape_aggregate": 58.60463556558676,
     },
     "Transformer": {
         "rmse": 0.3782859045756142,
         "bias_percent": 73.72835716429461,
-        "mape_aggregate_style": 83.17552828690229,
+        "mape_aggregate": 83.17552828690229,
     },
     "ParetoNBD_MLE": {
         "rmse": 0.3754635997751549,
         "bias_percent": -58.6238973833398,
-        "mape_aggregate_style": 62.835018151643645,
+        "mape_aggregate": 62.835018151643645,
     },
 }
 
@@ -785,8 +796,9 @@ def test_archived_suite_matches_the_pinned_format():
     assert panel_config.id_col == ARCHIVE_ID_COL
 
     results = pd.read_csv(PINNED_SUITE / "results.csv")
-    assert list(results.columns[: len(RESULTS_LEADING_COLS)]) == RESULTS_LEADING_COLS
-    assert all(c.startswith("param_") for c in results.columns[len(RESULTS_LEADING_COLS):])
+    n_lead = len(ARCHIVE_RESULTS_LEADING_COLS)
+    assert list(results.columns[:n_lead]) == ARCHIVE_RESULTS_LEADING_COLS
+    assert all(c.startswith("param_") for c in results.columns[n_lead:])
 
     names = [m["name"] for m in stored["models"]]
     assert [n for n, _ in analysis._discover_models(PINNED_SUITE)] == names
@@ -829,12 +841,13 @@ def test_every_archived_neural_suite_still_parses():
 def test_pnbd_grid_archive_is_a_directory_of_standard_suites():
     """The grid tree is one level deeper: `<grid>/<combo>__<dataset>/` is a normal suite.
 
-    `pnbd_grid.collect_grid_results` reads each sub-suite's `results.csv` by that path and
-    pulls `_METRIC_SOURCE`'s columns out of it. Only the first three sub-suites are checked
-    — the grid holds 160 of them and they are written by one code path.
+    `pnbd_grid.collect_grid_results` reads each sub-suite's `results.csv` by that path.
+    The archived grid predates the `mape_aggregate` rename, so what is asserted is that
+    it still carries the metric columns it was written with (`ARCHIVE_MAPE_COL`). Only
+    the first three
+    sub-suites are checked — the grid holds 160 of them and they are written by one
+    code path.
     """
-    from panelclv.studies.pnbd_grid import _METRIC_SOURCE
-
     sub_suites = sorted(p for p in PNBD_GRID.iterdir() if p.is_dir())
     assert len(sub_suites) > 1
     assert all("__" in p.name for p in sub_suites)
@@ -844,7 +857,7 @@ def test_pnbd_grid_archive_is_a_directory_of_standard_suites():
             continue
         _assert_suite_shape(root)
         results = pd.read_csv(root / "results.csv")
-        assert set(_METRIC_SOURCE.values()) <= set(results.columns)
+        assert set(ARCHIVE_RESULTS_METRIC_COLS) <= set(results.columns)
         checked += 1
         if checked == 3:
             break
@@ -864,9 +877,16 @@ def test_pnbd_grid_results_still_join_to_their_generation_study():
     grid coordinates. It silently `continue`s past any sub-suite whose `results.csv` is
     missing, so a path change would thin the frame rather than raise — hence the row count
     is checked against what is actually on disk, not merely asserted non-empty.
+
+    Scored on `rmse` / `bias_percent` only: the reader's third column is now
+    `mape_aggregate`, which this archive — written before issue 04's rename — does not
+    carry. What is under test here is the join and the path, and those two metrics
+    exercise both.
     """
     from panelclv.data_preparation.pareto_simulation import list_pnbd_datasets
-    from panelclv.studies.pnbd_grid import DEFAULT_METRICS, collect_grid_results
+    from panelclv.studies.pnbd_grid import collect_grid_results
+
+    METRICS = ("rmse", "bias_percent")
 
     trained = [
         p for p in PNBD_GRID.iterdir() if p.is_dir() and (p / "results.csv").is_file()
@@ -874,10 +894,10 @@ def test_pnbd_grid_results_still_join_to_their_generation_study():
     rows_on_disk = sum(len(pd.read_csv(p / "results.csv")) for p in trained)
     assert rows_on_disk > 100, "grid archive is too small to be the pinned one"
 
-    grid = collect_grid_results(PNBD_GENERATION, PNBD_GRID)
+    grid = collect_grid_results(PNBD_GENERATION, PNBD_GRID, metrics=METRICS)
     assert list(grid.columns) == [
         "mean_transaction_rate", "churn_rate", "combo", "dataset", "model",
-        *DEFAULT_METRICS,
+        *METRICS,
     ]
     # Every (model, study) row of every trained sub-suite made it through the join.
     assert len(grid) == rows_on_disk
@@ -900,10 +920,9 @@ def _assert_suite_shape(root: Path) -> None:
         assert panel_config.to_dict() == stored["panel_config"], root
 
     results = pd.read_csv(root / "results.csv")
-    assert list(results.columns[: len(RESULTS_LEADING_COLS)]) == RESULTS_LEADING_COLS, root
-    assert all(
-        c.startswith("param_") for c in results.columns[len(RESULTS_LEADING_COLS):]
-    ), root
+    n_lead = len(ARCHIVE_RESULTS_LEADING_COLS)
+    assert list(results.columns[:n_lead]) == ARCHIVE_RESULTS_LEADING_COLS, root
+    assert all(c.startswith("param_") for c in results.columns[n_lead:]), root
 
     t_hold = int(stored["data_summary"]["T_HOLD"])
     n_customers = int(stored["data_summary"]["n_customers"])
@@ -939,18 +958,20 @@ def test_archived_suite_metrics_reproduce_its_stored_results_csv():
     for model, metrics in PINNED_SUITE_RESULTS.items():
         row = stored[stored["model"] == model]
         assert len(row) == 1, model
-        for metric, value in metrics.items():
-            # (a) the file still holds the pinned number ...
-            assert float(row.iloc[0][metric]) == value, f"{model}/{metric} in results.csv"
-            # ... and (b) the reader still recomputes it from the stored predictions.
-            assert table.loc[model, metric] == pytest.approx(value, rel=1e-12), (
+        for metric, stored_col in zip(RESULTS_METRIC_COLS, ARCHIVE_RESULTS_METRIC_COLS):
+            value = metrics[metric]
+            # (a) the file still holds the pinned number, under the column it was
+            # written with ...
+            assert float(row.iloc[0][stored_col]) == value, \
+                f"{model}/{stored_col} in results.csv"
+            # ... and (b) the reader still recomputes it, under the key used today.
+            assert table.loc[model, metric] == pytest.approx(value, rel=1e-12), \
                 f"{model}/{metric} recomputed from Prediction_*.csv"
-            )
 
 
 def _print_fixture_metrics(suite: Path, panel_csv: Path) -> None:
     """Print a paste-ready `FIXTURE_METRICS` block (see the module docstring)."""
-    from panelclv.models import mc_compute_metrics
+    from panelclv.models import compute_forecast_metrics
 
     data = analysis._actuals_from_panel(suite, panel_csv)
     actual = np.asarray(data["holdout"], dtype=np.float64)[:, :, int(data["target_idx"])]
@@ -962,7 +983,7 @@ def _print_fixture_metrics(suite: Path, panel_csv: Path) -> None:
         ):
             index = analysis._prediction_index(path)
             values, _ = analysis.load_model_predictions(model_dir, study=index)
-            metrics = mc_compute_metrics(actual, values)
+            metrics = compute_forecast_metrics(actual, values)
             print(f'    ("{name}", {index}): {{')
             for metric in RESULTS_METRIC_COLS:
                 print(f'        "{metric}": {metrics[metric]!r},')

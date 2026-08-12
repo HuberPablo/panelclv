@@ -97,17 +97,17 @@ GOLDEN_METRICS = {
     "lstm": {
         "rmse": 2.0019012702059444,
         "bias_percent": 247.03757225433526,
-        "mape_aggregate_style": 247.03757225433526,
+        "mape_aggregate": 247.03757225433526,
     },
     "transformer": {
         "rmse": 1.8498824874546234,
         "bias_percent": 211.56069364161849,
-        "mape_aggregate_style": 211.56069364161849,
+        "mape_aggregate": 211.56069364161849,
     },
     "valendin_lstm": {
         "rmse": 1.869680860932991,
         "bias_percent": 216.257225433526,
-        "mape_aggregate_style": 216.257225433526,
+        "mape_aggregate": 216.257225433526,
     },
 }
 # Cohort and window shapes. One synthetic customer never transacts in the calibration

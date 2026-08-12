@@ -202,7 +202,10 @@ def figure_2(corr):
 
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    results = collect_grid_results(GEN)
+    # Only `bias_percent` is plotted (figure 1a). Asking for just that keeps the
+    # script readable off grids archived before `mape_aggregate_style` was renamed —
+    # `collect_grid_results`' default metric set now names the current column.
+    results = collect_grid_results(GEN, metrics=("bias_percent",))
     corr = shape_correlation()
     dead = dead_customer_mass()
     # Source data for both figures, so every plotted number has a table view.

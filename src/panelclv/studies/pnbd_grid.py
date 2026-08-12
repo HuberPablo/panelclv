@@ -47,11 +47,15 @@ from panelclv.data_preparation.pareto_simulation import (
 )
 
 # Metric name (as we expose it) -> column name in each suite's results.csv. The
-# aggregate-style MAPE is stored under a longer key; we surface it as "mape".
+# aggregate MAPE is stored under the scoring authority's own key; we surface it as
+# "mape". Suites written before that key was renamed carry `mape_aggregate_style`
+# instead, and this reader no longer finds it: staying readable by older archives was
+# deliberately dropped as a requirement (ADR-0003 records the same trade). Pass
+# `metrics=` to ask only for the columns such a suite does carry.
 _METRIC_SOURCE = {
     "rmse": "rmse",
     "bias_percent": "bias_percent",
-    "mape": "mape_aggregate_style",
+    "mape": "mape_aggregate",
 }
 DEFAULT_METRICS = ("rmse", "bias_percent", "mape")
 

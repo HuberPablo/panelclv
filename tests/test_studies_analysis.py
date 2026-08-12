@@ -180,7 +180,7 @@ def test_plot_requires_exactly_one_source(suite):
 
 # --- study_metrics (whole-cohort metrics, with SD / CI / display) -------------
 
-METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate_style"]
+METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
 
 
 @pytest.fixture
@@ -201,13 +201,13 @@ def patched_actuals(suite, monkeypatch):
 
 def _expected_per_study(actual, preds_by_model):
     """{model: {metric: [per-study values]}} via the same metric fn study_metrics uses."""
-    from panelclv.models import mc_compute_metrics
+    from panelclv.models import compute_forecast_metrics
 
     out = {}
     for name, preds in preds_by_model.items():
         vals = {m: [] for m in METRIC_COLS}
         for p in preds:
-            r = mc_compute_metrics(actual, p)
+            r = compute_forecast_metrics(actual, p)
             for m in METRIC_COLS:
                 vals[m].append(r[m])
         out[name] = vals

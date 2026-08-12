@@ -6,7 +6,7 @@ authority" claim true for the first time rather than aspirational.
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
 Source: `.scratch/package-simplification/issues/06-target-architecture.md` (decision 1),
 `08-reconcile-adrs-and-vocabulary.md`, `09-module-naming.md` (decisions 5, 6)
@@ -56,10 +56,14 @@ Two notebooks' tuning cells are edited in the same commit.
 Full finished text for all three is in ticket 08 of the map. **Copy it; do not re-derive
 it.**
 
-- [ ] Composite selection and `selection_metric` gone; the two notebook tuning cells updated
-- [ ] Exactly one implementation of RMSE, bias and MAPE remains in the package
-- [ ] `mape_aggregate` rename applied, including its one notebook site
-- [ ] ADR-0003 retired in place with its Why-it-goes section
-- [ ] ADR-0001 Edit A and the evaluation docstring rewording applied verbatim from ticket 08
-- [ ] Retired names appended to the import test's pattern
-- [ ] Golden test green at rel=1e-6; notebook API test green
+- [x] Composite selection and `selection_metric` gone; the two notebook tuning cells updated
+- [x] Exactly one implementation of RMSE, bias and MAPE remains in the package
+- [x] `mape_aggregate` rename applied, including its one notebook site
+- [x] ADR-0003 retired in place with its Why-it-goes section
+      (its header said the code "still runs until those issues land"; that clause is
+      now false, so the tense was updated — the only re-derivation of ticket 08's text)
+- [x] ADR-0001 Edit A and the evaluation docstring rewording applied verbatim from ticket 08
+      (Edit C's quoted key spelled `mape_aggregate`, since the rename below lands in the
+      same commit)
+- [x] Retired names appended to the import test's pattern
+- [x] Golden test green at rel=1e-6; notebook API test green

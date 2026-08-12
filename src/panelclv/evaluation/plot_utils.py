@@ -12,7 +12,7 @@ Given Monte Carlo forecast arrays from `monte_carlo_forecasting.mc_forecast`
 # Metric convention
 # -----------------
 # The thesis pipeline reports three numbers everywhere — `rmse`, `bias_percent`,
-# `mape_aggregate_style` — all in **percent scale** and all computed on
+# `mape_aggregate` — all in **percent scale** and all computed on
 # per-customer per-week arrays of shape (N, T_HOLD). `metrics_table` below
 # delegates to `monte_carlo_forecasting.compute_forecast_metrics` so the
 # notebook printouts and the plot helper agree to the last decimal. That
@@ -425,7 +425,7 @@ def metrics_table(
     """Per-model evaluation table — same three numbers as the notebooks print.
 
     Returns one row per model with columns
-    `rmse`, `bias_percent`, `mape_aggregate_style` — exactly the keys
+    `rmse`, `bias_percent`, `mape_aggregate` — exactly the keys
     `monte_carlo_forecasting.compute_forecast_metrics` returns. This is the
     package's single metric convention; everything (this table, the LSTM
     notebook printout, the demo notebook printout) flows through the same
@@ -456,7 +456,7 @@ def metrics_table(
     Notes
     -----
     Why NOT pre-aggregate actuals/predictions to (T_HOLD,) and score those?
-    The aggregate vector would still give a correct `mape_aggregate_style`,
+    The aggregate vector would still give a correct `mape_aggregate`,
     but `rmse` on the aggregate is a different quantity (lower bound on the
     individual RMSE thanks to error cancellation across customers). The thesis
     reports individual RMSE, so we score on per-customer arrays.
@@ -490,7 +490,7 @@ def metrics_table(
         rows.append(m)
 
     df = pd.DataFrame(rows).set_index("model")
-    return df[["rmse", "bias_percent", "mape_aggregate_style"]]
+    return df[["rmse", "bias_percent", "mape_aggregate"]]
 
 
 # ---------------------------------------------------------------------------

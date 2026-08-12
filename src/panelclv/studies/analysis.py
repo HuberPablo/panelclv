@@ -704,9 +704,9 @@ def group_metrics_suite_table(
 # ---------------------------------------------------------------------------
 
 
-# The three whole-cohort metrics `compute_forecast_metrics` (a.k.a. mc_compute_metrics)
-# returns — the exact numbers the runner writes to results.csv, per study.
-_STUDY_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate_style"]
+# The three whole-cohort metrics `compute_forecast_metrics` returns — the exact
+# numbers the runner writes to results.csv, per study.
+_STUDY_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
 
 
 def study_metrics(
@@ -723,7 +723,7 @@ def study_metrics(
     Give it the suite folder and the dataset (panel) CSV it was built from; it rebuilds
     the exact dataset (via the persisted ``panel_config``), then scores **every** study's
     stored forecast with the same function the runner used (``compute_forecast_metrics``:
-    whole-cohort RMSE, aggregate %-bias, aggregate-style MAPE). Each neural model ran
+    whole-cohort RMSE, aggregate %-bias, aggregate MAPE). Each neural model ran
     ``n_studies_per_model`` independent studies (own seed), so the summary is the mean
     over those studies; a deterministic benchmark (Pareto/NBD) has a single study, which
     averages to itself.
@@ -764,7 +764,7 @@ def study_metrics(
         Decimal places for the ``display`` strings (default ``3``). Ignored otherwise.
 
     Returns a ``pandas.DataFrame`` indexed by model. With neither spread flag (and no
-    ``display``): flat columns ``[rmse, bias_percent, mape_aggregate_style, n_studies]``
+    ``display``): flat columns ``[rmse, bias_percent, mape_aggregate, n_studies]``
     (the means). With a spread flag and ``display=False``: a MultiIndex column
     ``(metric, stat)`` whose stats are ``mean`` plus whichever of ``std`` / ``ci_low`` /
     ``ci_high`` were requested, then ``n``. With ``display=True``: one string column per
@@ -796,10 +796,10 @@ def _study_metrics_from_data(
     holdout/cohort consistency check) without rebuilding them a second time. See
     :func:`study_metrics` for the parameter semantics and return shapes.
     """
-    # Lazy import: mc_compute_metrics pulls in torch via the models package, so we only
-    # pay that cost when actually scoring (keeps the module import cheap / torch-free).
+    # Lazy import: compute_forecast_metrics pulls in torch via the models package, so
+    # we only pay that cost when actually scoring (keeps the module import cheap).
     import pandas as pd
-    from panelclv.models import mc_compute_metrics  # = compute_forecast_metrics
+    from panelclv.models import compute_forecast_metrics
 
     # Holdout actuals as (N, T_HOLD): the target channel of the (N, T, F) holdout tensor,
     # in the cohort's own order — the same order the prediction CSVs are saved in.
@@ -823,7 +823,9 @@ def _study_metrics_from_data(
                     f"model {name!r} study {i}: forecast shape {values.shape} != actual "
                     f"{actual.shape}"
                 )
-            rows.append({"model": name, "study": i, **mc_compute_metrics(actual, values)})
+            rows.append(
+                {"model": name, "study": i, **compute_forecast_metrics(actual, values)}
+            )
 
     per_study = pd.DataFrame(rows)
     grouped = per_study.groupby("model", sort=False)[_STUDY_METRIC_COLS]

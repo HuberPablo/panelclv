@@ -43,10 +43,12 @@ from .monte_carlo_forecasting import (
     # Canonical names...
     run_monte_carlo_forecast,
     run_monte_carlo_forecast_transformer,
+    # The scoring authority keeps the name CLAUDE.md uses for it; it never had a
+    # per-path variant, so there is nothing for an ``mc_*`` alias to disambiguate.
+    compute_forecast_metrics,
     # ...and the short ``mc_*`` aliases the notebooks call.
     run_monte_carlo_forecast as mc_forecast,
     run_monte_carlo_forecast_transformer as mc_forecast_transformer,
-    compute_forecast_metrics as mc_compute_metrics,
 )
 
 # `__all__` is the curated *headline* surface for the model family. Everything
@@ -73,5 +75,5 @@ __all__ = [
     # Forecasting (autoregressive Monte Carlo simulator + its metrics)
     "mc_forecast",
     "mc_forecast_transformer",
-    "mc_compute_metrics",
+    "compute_forecast_metrics",
 ]

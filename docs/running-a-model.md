@@ -439,12 +439,12 @@ Golden metrics, reproduced exactly by this document's verification run:
 ```
 rmse                  = 2.0019012702059444
 bias_percent          = 247.03757225433526
-mape_aggregate_style  = 247.03757225433526
+mape_aggregate        = 247.03757225433526
 ```
 
 Two epochs on 23 customers massively over-predicts (1200.75 predicted against 346
 actual). The numbers pin *what the pipeline computes*, not how well it forecasts.
-`bias_percent` and `mape_aggregate_style` coincide here only because the model
+`bias_percent` and `mape_aggregate` coincide here only because the model
 over-predicts in every single period; they are not the same quantity.
 
 ---
@@ -542,7 +542,7 @@ Optuna's own `best_params` holds only what was *sampled*:
 
 Everything else rides on `best_trial.user_attrs`: `checkpoint_path`,
 `selected_features`, `dropped_features`, `target_col`, `best_epoch`, `best_val_f1`,
-`val_loss`, `selection_metric`. `run_optuna_study` also writes
+`val_loss`. `run_optuna_study` also writes
 `<run_name>_best.json` and `<run_name>_trials.csv` into `summary_dir`, and puts each
 trial's checkpoint under `checkpoint_dir/<run_name>/`.
 
@@ -646,17 +646,16 @@ the **single scoring authority** (`CLAUDE.md`). Both arrays are `(N, T_HOLD)`.
 |---|---|
 | `rmse` | `sqrt(mean((pred - act)**2))` over the whole array |
 | `bias_percent` | `100 * (pred.sum() - act.sum()) / act.sum()` — signed, total volume |
-| `mape_aggregate_style` | per-period sums across customers, then `100 * Σ|act_t - pred_t| / Σ act_t` |
+| `mape_aggregate` | per-period sums across customers, then `100 * Σ|act_t - pred_t| / Σ act_t` |
 
-`mape_aggregate_style` is deliberately not per-customer MAPE: at customer level most
+`mape_aggregate` is deliberately not per-customer MAPE: at customer level most
 holdout periods are zero and the denominator explodes.
 
 Everything delegates here — `studies/runner.py`, `studies/analysis.py` →
 `study_metrics`, `evaluation/plot_utils.py` → `metrics_table`,
 `evaluation/segment_analysis.py`. That is why tables, plots and archived results
-agree to the last decimal. The one exception is Optuna's rollout-selection scorer,
-`weekly_aggregate_rollout_metrics`, which is used for *selection only* and never for
-reported results.
+agree to the last decimal. There is no exception: these three numbers are computed in
+exactly one place in the package.
 
 ---
 
@@ -701,7 +700,7 @@ For each neural model, for `i` in `1..n_studies_per_model`:
 3. `run_optuna_study(..., sampler=TPESampler(seed=seed), append_timestamp=False)`.
 4. `_rebuild_winner` → `refit_best_trial` or `build_inference_from_trial`.
 5. `_FORECASTERS[model_type]` runs the rollout at `n_simulations`.
-6. Predictions to CSV, `mc_compute_metrics`, one row appended.
+6. Predictions to CSV, `compute_forecast_metrics`, one row appended.
 
 `_FORECASTERS` is the dispatch table that decides which simulator a model type gets:
 
@@ -758,7 +757,7 @@ rather than being told:
 |---|---|
 | `load_model_predictions` | one model's prediction CSVs → arrays |
 | `aggregate_suite_predictions` | mean across studies → `aggregated_<Model>.csv` |
-| `study_metrics` | **re-scores stored CSVs** through `mc_compute_metrics` |
+| `study_metrics` | **re-scores stored CSVs** through `compute_forecast_metrics` |
 | `compare_study_metrics` | models side by side |
 | `group_metrics_suite_table` | metrics by customer segment |
 | `plot_suite_forecast` | actual vs predicted, with an across-study band |
@@ -834,7 +833,7 @@ Differences worth knowing:
 - **Expectations, not samples.** It does not simulate paths.
 - **Same cohort, same actuals, same scorer.** Actuals come from
   `data["holdout"][:, :, target_idx]` in the same customer order, and metrics go
-  through `mc_compute_metrics`. That is what makes the comparison fair — and why
+  through `compute_forecast_metrics`. That is what makes the comparison fair — and why
   `require_calibration_activity` matters.
 
 `scripts/validate_pareto_benchmark.py` checks the pure-Python implementation against
@@ -960,12 +959,10 @@ looks unlike the val loss from tuning, check `prediction_source` first.
 **`max_trans` is a class count, not a maximum index.** Pass
 `data["embedded_cols"][target_col]`, which is already the count.
 
-**`selection_metric="rollout_composite"` is being removed.** Archived
-`Studies/*/config.json` files and cells 17/19 of
-`notebooks/Data_integration_LSTM_v2.ipynb` still reference it. It selected trials on
-a Monte Carlo rollout over a pseudo-holdout carved from the calibration tail instead
-of on validation cross-entropy (ADR-0003). Treat `val_loss` as the only selection
-metric in new work.
+**`selection_metric="rollout_composite"` is gone.** Trials are selected on validation
+cross-entropy, full stop; `run_optuna_study` no longer takes a `selection_metric` (or
+any `rollout_*`) argument. Archived `Studies/*/trials.csv` files still record the
+attribute — every one of them reads `val_loss`. ADR-0003 records why the option went.
 
 **A study folder will not be reused.** `create_suite_root` raises `FileExistsError`
 unless `overwrite=True`.

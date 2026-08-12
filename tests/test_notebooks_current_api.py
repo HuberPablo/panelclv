@@ -45,6 +45,15 @@ RETIRED = [
     (r"""variant\s*=\s*['"]paper['"]""",
      "pareto_forecast takes no variant; there is one estimator"),
     (r"penalizer_coef", "an MLE-only knob; the HB sampler has no penalizer"),
+    # Retired by the package cleanup, issue 04: rollout-composite trial selection.
+    (r"rollout_composite", "trials are selected on validation loss (ADR-0003 retired)"),
+    (r"selection_metric", "run_optuna_study has one selection metric, so it has no knob"),
+    (r"rollout_(data|horizon|n_simulations|seed|mape_clip|min_actual|weight_)",
+     "the rollout selection knobs went with rollout_composite"),
+    (r"weekly_aggregate_rollout_metrics",
+     "compute_forecast_metrics is the only implementation of rmse / bias / MAPE"),
+    (r"mc_compute_metrics", "the authority is compute_forecast_metrics"),
+    (r"mape_aggregate_style", "compute_forecast_metrics returns mape_aggregate"),
 ]
 
 

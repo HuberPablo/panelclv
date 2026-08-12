@@ -1,8 +1,8 @@
 # Optuna can select on rollout quality instead of validation cross-entropy
 
-**Retired 2026-08-12.** This decision is reversed. The feature it describes is removed by
-the package-simplification execution set; until those issues land, the code below still
-runs. Nothing supersedes it — see "Why it goes" at the foot of this file.
+**Retired 2026-08-12.** This decision is reversed, and the feature it describes has been
+removed from the package. Nothing supersedes it — see "Why it goes" at the foot of this
+file. What follows is the decision as it stood, kept for the record.
 
 Teacher-forced validation cross-entropy is cheap and is what training optimises, but
 it is blind to the rollout the real forecast uses: a model can score well next-step

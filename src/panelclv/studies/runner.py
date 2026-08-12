@@ -9,7 +9,7 @@ config and calls the existing pieces:
         -> refit_best_trial / build_inference_from_trial (panelclv.experiments)
         -> mc_forecast / mc_forecast_transformer         (panelclv.models)
         -> save_predictions_to_csv           (panelclv.evaluation)
-        -> mc_compute_metrics                (panelclv.models)
+        -> compute_forecast_metrics          (panelclv.models)
 
 and, for the baseline, ``compute_pareto_predictions`` (panelclv.benchmarks).
 
@@ -37,7 +37,7 @@ from panelclv.experiments import (
     make_data_builder,
     refit_best_trial,
 )
-from panelclv.models import mc_compute_metrics, mc_forecast, mc_forecast_transformer
+from panelclv.models import compute_forecast_metrics, mc_forecast, mc_forecast_transformer
 from panelclv.tuning import run_optuna_study
 
 from .config import StudySuiteConfig, ModelSpec
@@ -141,7 +141,7 @@ def _run_neural_model(
             customer_ids=config.data.get("ids"),
             id_col=config.data.get("id_col", "customer_id"),
         )
-        metrics = mc_compute_metrics(forecast["actual"], forecast["prediction_mean"])
+        metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
         rows.append(
             {
                 "model": spec.name,
@@ -213,7 +213,7 @@ def _run_pareto_model(
     # predictions are ordered by data["ids"], and data["holdout"] is in the same
     # customer order, so the actuals line up row-for-row with the predictions.
     actual = np.asarray(data["holdout"])[:, :, int(data["target_idx"])]
-    metrics = mc_compute_metrics(actual, predictions)
+    metrics = compute_forecast_metrics(actual, predictions)
     row = {
         "model": spec.name,
         "model_type": spec.model_type,

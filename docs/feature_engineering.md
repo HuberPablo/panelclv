@@ -334,12 +334,12 @@ winning feature set is recoverable after the fact with `select_features_for_tria
 matters because a checkpoint trained on a sliced layout will not load into a full-feature
 model.
 
-The selection metric interacts with feature engineering directly: `val_loss` scores
-teacher-forced next-step cross-entropy and is blind to the rollout, so it can happily keep
-an extrapolating trend feature and drop the seasonal/recency signals; `rollout_composite`
-scores a leak-free Monte Carlo rollout over the temporal validation window and penalises
-exactly that drift. If the feature set includes unbounded or out-of-range channels, prefer
-the latter.
+Selection interacts with feature engineering directly, and not in your favour: trials are
+scored on `val_loss` — teacher-forced next-step cross-entropy — which is blind to the
+rollout, so it can happily keep an extrapolating trend feature and drop the
+seasonal/recency signals. Nothing in tuning penalises drift over a long horizon
+(ADR-0003, retired). If the feature set includes unbounded or out-of-range channels,
+that is a judgement you have to make yourself.
 
 ---
 
@@ -398,8 +398,6 @@ study = run_optuna_study(
     data_info={...},
     removable_features=[("week_sin", "week_cos"), "year_idx",
                         "Gender", "Income", "transaction_rate"],
-    selection_metric="rollout_composite",
-    rollout_data=data_full,
     n_trials=40,
 )
 ```

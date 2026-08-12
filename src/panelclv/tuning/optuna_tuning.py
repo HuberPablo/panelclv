@@ -3,10 +3,10 @@
 One file, two search spaces (`suggest_lstm_params` / `suggest_transformer_params`),
 one shared `objective`. Each trial samples an architecture + training HPs (and,
 optionally, a covariate subset), trains via `training_utils.fit_model` — which
-always optimises classification cross-entropy and owns the loss curve, early
-stopping, and per-epoch pruning reports — then returns a score to Optuna. What
-that returned score IS depends on `selection_metric` (see below); the training
-objective is CE either way.
+optimises classification cross-entropy and owns the loss curve, early stopping,
+and per-epoch pruning reports — then returns that same cross-entropy, scored on
+the temporal validation window (ADR-0001), to Optuna. Selection and training
+therefore minimise one number.
 
 data_builder contract
 ---------------------
@@ -44,40 +44,6 @@ ar_features stay in lockstep: the autoregressive target-derived columns
 `select_features` filters that list to the surviving columns. So if a trial
 drops an AR covariate, it is removed from `ar_features` too — otherwise the
 Monte-Carlo rollout would try to look it up by `seq_cols.index(name)` and raise.
-
-Selection metric (what Optuna minimises)
-----------------------------------------
-- "val_loss" (default): teacher-forced next-step validation cross-entropy.
-  Cheap and on one scale across architectures, but blind to the autoregressive
-  sampling rollout the real forecast uses, so it can favour feature sets that
-  drift at forecast time.
-- "rollout_composite": after training, score the trial with a LEAK-FREE
-  validation Monte-Carlo rollout (`weekly_aggregate_rollout_metrics`). The
-  temporal validation window (the last `n_val_periods` weeks of CALIBRATION, i.e.
-  after `validation_start`) is carved off as a pseudo-holdout for ALL customers
-  (the real `data["holdout"]` is never read in tuning); the model warms up on the
-  prefix and autoregressively rolls the pseudo-holdout over `rollout_n_simulations`
-  paths. Metrics are computed on the
-  WEEKLY AGGREGATE (sum over customers per step) and combined into one
-  scale-normalised composite:
-
-      rmse_norm = aggregate_RMSE / mean_weekly_volume
-      mape_norm = masked_clipped_MAPE / 100   (weeks below a volume floor skipped)
-      bias_norm = |aggregate_bias_percent| / 100
-      score     = w_rmse*rmse_norm + w_mape*mape_norm + w_bias*bias_norm
-
-  Defaults w_rmse=1.0, w_mape=0.5, w_bias=0.3; lower is better, so the study
-  stays direction="minimize". The normalisation makes the score comparable
-  across datasets of very different volume. CE is still logged as `val_loss`,
-  and every sub-metric (`rollout_rmse/mape/bias_percent/score`) as a user-attr.
-
-  Two caveats: (a) the composite is on a DIFFERENT scale than CE, so a rollout
-  run needs its OWN fresh study/storage — never a val_loss study's DB; (b) the
-  pruner still acts on per-epoch CE, so it only prunes clearly bad-CE trials
-  early — surviving trials are always rolled out and scored. Requires
-  `rollout_data` (the full prepare_dataset dict; its `n_val_periods` sets the
-  default horizon); `rollout_horizon` is validated up front (0 < horizon < T_CAL,
-  with a short-warm-up warning).
 """
 
 from __future__ import annotations
@@ -88,7 +54,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-import numpy as np
 import optuna
 import torch
 
@@ -634,190 +599,6 @@ def _build_inference_model_for(
 
 
 # ---------------------------------------------------------------------------
-# Rollout-based selection (optional; default objective stays val cross-entropy)
-# ---------------------------------------------------------------------------
-
-
-# The one literal accepted as the rollout selection mode. Anything else (besides
-# "val_loss") is a typo and is rejected up front rather than silently ignored.
-ROLLOUT_METRIC = "rollout_composite"
-
-_EPS = 1e-8
-
-
-def weekly_aggregate_rollout_metrics(
-    actual: np.ndarray,
-    pred_mean: np.ndarray,
-    *,
-    weight_rmse: float = 1.0,
-    weight_mape: float = 0.5,
-    weight_bias: float = 0.3,
-    mape_clip: float = 300.0,
-    min_actual_for_mape: float = 5.0,
-) -> dict[str, float]:
-    """Weekly-aggregate forecast metrics + a normalized composite score.
-
-    Both inputs are ``(N, V)`` — per-customer counts over the V-step validation
-    horizon: ``actual`` are the true pseudo-holdout counts, ``pred_mean`` the
-    Monte-Carlo mean. Everything is computed on the WEEKLY AGGREGATE (sum over
-    customers per step), matching the thesis's aggregate RMSE / MAPE / bias and
-    the ``mape_aggregate_style`` reported elsewhere.
-
-    The composite is normalized by the mean weekly volume so its scale is
-    comparable across datasets (a raw RMSE of 30 means something very different
-    on a panel averaging 50/week vs 5000/week):
-
-        rmse_norm = rmse / mean_actual
-        mape_norm = clipped_masked_mape / 100
-        bias_norm = abs(bias_percent) / 100
-        score     = w_rmse*rmse_norm + w_mape*mape_norm + w_bias*bias_norm
-
-    Lower is better, so the study stays ``direction="minimize"``.
-    """
-    actual = np.asarray(actual, dtype=np.float64)
-    pred = np.asarray(pred_mean, dtype=np.float64)
-
-    actual_agg = actual.sum(axis=0)          # (V,) true weekly totals
-    pred_agg = pred.sum(axis=0)              # (V,) predicted weekly totals
-
-    diff = pred_agg - actual_agg
-    rmse = float(np.sqrt(np.mean(diff ** 2)))
-    mae = float(np.mean(np.abs(diff)))
-
-    # Aggregate bias over the whole horizon: signed total over/under-prediction.
-    actual_total = float(actual_agg.sum())
-    pred_total = float(pred_agg.sum())
-    bias_percent = 100.0 * (pred_total - actual_total) / max(actual_total, _EPS)
-
-    # MAPE only on weeks with enough real volume to be meaningful (a near-zero
-    # denominator otherwise explodes), then clip so one bad week can't dominate.
-    mask = actual_agg >= min_actual_for_mape
-    if mask.any():
-        wk_mape = 100.0 * np.abs(diff[mask]) / actual_agg[mask]
-        mape = float(min(np.mean(wk_mape), mape_clip))
-    else:
-        # No week clears the threshold — MAPE is undefined; fall back to the clip
-        # so the composite still has a finite, bounded MAPE term.
-        mape = float(mape_clip)
-
-    mean_actual = max(float(actual_agg.mean()), _EPS)
-    rmse_norm = rmse / mean_actual
-    mape_norm = mape / 100.0
-    bias_norm = abs(bias_percent) / 100.0
-    score = (
-        weight_rmse * rmse_norm
-        + weight_mape * mape_norm
-        + weight_bias * bias_norm
-    )
-
-    return {
-        "rollout_rmse": rmse,
-        "rollout_mae": mae,
-        "rollout_mape": mape,
-        "rollout_bias_percent": bias_percent,
-        "rollout_score": float(score),
-    }
-
-
-def _validation_rollout_score(
-    *,
-    model_type: str,
-    params: dict[str, Any],
-    drop_cols: Sequence[str],
-    checkpoint_path: str,
-    rollout_data: dict[str, Any],
-    horizon: int,
-    n_simulations: int,
-    seed: int,
-    device: str | torch.device | None,
-    metric_kwargs: dict[str, float],
-) -> dict[str, float]:
-    """Evaluate one trained trial with a validation-horizon MC rollout.
-
-    Leak-free pseudo-holdout: the real ``data["holdout"]`` is never touched.
-    Instead we carve the last ``horizon`` weeks off the CALIBRATION window — the
-    temporal validation window (after ``validation_start``) — for ALL customers and
-    treat them as a holdout the trial has not been selected on:
-
-        calib_prefix  = calibration[:, :-horizon]   # warm-up context
-        pseudo_holdout= calibration[:, -horizon:]    # scored target
-
-    The split is temporal, not customer-wise, so every customer contributes both a
-    warm-up prefix and a scored suffix (matching how the teacher-forced ``val_loss``
-    path scores the same window).
-
-    Because each trial may have dropped a different covariate subset, we re-slice
-    ``rollout_data`` with this trial's ``drop_cols`` first (so F and seq_cols
-    match the checkpoint), build the matching INFERENCE model in sampling mode,
-    load the trial's best weights, and reuse the existing MC forecaster.
-
-    This is a faithful proxy for the final autoregressive evaluation in the
-    things that drive selection — sampling-drift and seasonality under the
-    model's own fed-back samples — but it is deliberately NOT identical to it:
-    the pseudo-holdout sits INSIDE calibration, so any known-future covariate
-    keeps in-range values here, whereas the real holdout may extrapolate beyond
-    the training range (e.g. a trend index taking an unseen value). Capturing
-    that would require reading holdout-period covariates, which is exactly the
-    leak we refuse. So selection tracks rollout quality without peeking ahead.
-    """
-    d = select_features(rollout_data, list(drop_cols))
-    seq_cols = d["seq_cols"]
-    embedded_cols = d["embedded_cols"]
-    target_col = d.get("target_col", "Transactions")
-
-    calib = np.asarray(d["calibration"])                  # (N, T_CAL, F) — all customers
-    T_CAL = calib.shape[1]
-    if not 0 < horizon < T_CAL:
-        raise ValueError(
-            f"rollout_horizon={horizon} must be in (0, T_CAL={T_CAL}); the "
-            f"calibration window is too short to carve a pseudo-holdout."
-        )
-
-    calib_prefix = calib[:, :-horizon, :]                  # warm-up
-    pseudo_holdout = calib[:, -horizon:, :]                # scored target
-
-    # Minimal data dict shaped like prepare_dataset's output, just enough for the
-    # MC forecaster (it reads calibration / holdout / seq_cols / target_col /
-    # ar_features). actual targets are extracted by the forecaster from holdout.
-    # ar_features comes from the SLICED dict `d`, so a trial that dropped an AR
-    # column doesn't leave it dangling here (select_features filters it).
-    roll_data = {
-        "calibration": calib_prefix,
-        "holdout": pseudo_holdout,
-        "seq_cols": seq_cols,
-        "target_col": target_col,
-        "ar_features": list(d.get("ar_features", [])),
-        # Carried so this pseudo-holdout rollout standardizes its recomputed AR
-        # features exactly as the real forecast does. Both slices above come out
-        # of the already-standardized `calibration` tensor, so omitting this would
-        # feed raw AR values into a model warmed up on standardized ones — and the
-        # selection score would rank trials on a rollout the final forecast never
-        # reproduces.
-        "covariate_stats": d.get("covariate_stats"),
-    }
-
-    model, forecaster = _build_inference_model_for(
-        model_type,
-        params,
-        {"seq_cols": seq_cols, "embedded_cols": embedded_cols, "target_col": target_col},
-    )
-
-    state = torch.load(checkpoint_path, map_location="cpu")
-    # Transformer training caches a fixed-length mask buffer the inference model
-    # regenerates on the fly; drop it so strict load_state_dict succeeds.
-    state.pop("_cached_mask", None)
-    model.load_state_dict(state)
-    model.eval()
-
-    forecast = forecaster(
-        model, roll_data, n_simulations=n_simulations, device=device, seed=seed,
-    )
-    return weekly_aggregate_rollout_metrics(
-        forecast["actual"], forecast["prediction_mean"], **metric_kwargs,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Objective
 # ---------------------------------------------------------------------------
 
@@ -829,10 +610,8 @@ def objective(
     data_info: dict[str, Any],
     device: str | torch.device | None = None,
     removable_features: Sequence[str | Sequence[str]] = (),
-    selection_metric: str = "val_loss",
-    rollout_cfg: dict[str, Any] | None = None,
 ) -> float:
-    """Objective: validation cross-entropy, or an autoregressive rollout score.
+    """Objective: teacher-forced validation cross-entropy.
 
     `data_info` carries BOTH the search-space overrides (per-parameter specs in
     the `_suggest_param` mini-language — set=categorical, tuple=range, scalar=
@@ -842,17 +621,9 @@ def objective(
     lists covariates Optuna may drop this trial (see `suggest_covariate_selection`);
     the chosen drop-set is handed to `data_builder` as `feature_config`.
 
-    `selection_metric` decides what is RETURNED to Optuna (the training loop
-    always optimises cross-entropy regardless):
-
-        "val_loss"          — teacher-forced validation cross-entropy (default,
-                              unchanged historical behaviour).
-        "rollout_composite" — after training, run a validation-horizon Monte
-                              Carlo rollout (leak-free pseudo-holdout carved from
-                              the calibration tail) and return its normalized
-                              composite score. Cross-entropy is still logged as
-                              the `val_loss` user attribute. Requires
-                              `rollout_cfg` (assembled by `run_optuna_study`).
+    What is RETURNED to Optuna is the cross-entropy the training loop already
+    minimises, scored on the temporal validation window only (ADR-0001), so
+    selection and training agree on the number they are looking at.
     """
     params = _suggest_params_for(model_type, trial, data_info)
 
@@ -914,38 +685,11 @@ def objective(
     trial.set_user_attr("checkpoint_path", str(result.checkpoint_path))
     trial.set_user_attr("best_epoch", result.best_epoch)
     trial.set_user_attr("best_val_f1", result.best_val_f1)
-    # Always log cross-entropy, so it stays inspectable even when it is no longer
-    # the selection criterion.
+    # Logged as well as returned, so a trial's score is readable straight off
+    # the summary CSV without joining back to the Optuna value column.
     trial.set_user_attr("val_loss", float(result.best_val_loss))
-    trial.set_user_attr("selection_metric", selection_metric)
 
-    if selection_metric == "val_loss":
-        return result.best_val_loss
-
-    # selection_metric == ROLLOUT_METRIC: score this trained trial with a
-    # validation-horizon autoregressive rollout and return the composite.
-    # NOTE: the pruner (MedianPruner) still acts on the per-epoch CROSS-ENTROPY
-    # fit_model reports, not on this rollout score — so it only prunes clearly
-    # bad-CE trials early. A trial that survives training is always rolled out
-    # and scored here; the two metrics are intentionally kept on separate jobs
-    # (cheap per-epoch pruning vs one rollout at the end) to stay simple.
-    metrics = _validation_rollout_score(
-        model_type=model_type,
-        params=params,
-        drop_cols=drop_cols,
-        checkpoint_path=str(result.checkpoint_path),
-        rollout_data=rollout_cfg["rollout_data"],
-        horizon=rollout_cfg["horizon"],
-        n_simulations=rollout_cfg["n_simulations"],
-        seed=rollout_cfg["seed"],
-        device=device,
-        metric_kwargs=rollout_cfg["metric_kwargs"],
-    )
-    for key, val in metrics.items():
-        trial.set_user_attr(key, float(val))
-    trial.set_user_attr("rollout_horizon", rollout_cfg["horizon"])
-    trial.set_user_attr("rollout_n_simulations", rollout_cfg["n_simulations"])
-    return metrics["rollout_score"]
+    return result.best_val_loss
 
 
 # ---------------------------------------------------------------------------
@@ -967,49 +711,14 @@ def run_optuna_study(
     summary_dir: str | Path = "./optuna_summaries",
     append_timestamp: bool = True,
     removable_features: Sequence[str | Sequence[str]] = (),
-    selection_metric: str = "val_loss",
-    rollout_data: dict[str, Any] | None = None,
-    rollout_horizon: int | None = None,
-    rollout_n_simulations: int = 100,
-    rollout_seed: int = 42,
-    rollout_mape_clip: float = 300.0,
-    rollout_min_actual_for_mape: float = 5.0,
-    rollout_weight_rmse: float = 1.0,
-    rollout_weight_mape: float = 0.5,
-    rollout_weight_bias: float = 0.3,
     keep_only_best_checkpoint: bool = False,
 ) -> optuna.Study:
     """Runs an Optuna study and saves a JSON / CSV summary of all trials.
 
-    By default the objective is validation cross-entropy (lower is better).
-    Use the returned study to inspect `study.best_trial` and the saved
-    checkpoint path stored as a user attribute on each trial.
-
-    Rollout-based selection
-    -----------------------
-    The default `selection_metric="val_loss"` is teacher-forced next-step
-    cross-entropy — convenient and cheap, but blind to the autoregressive
-    sampling rollout the final forecast actually uses, so it can pick feature
-    sets / architectures that drift badly at forecast time. Pass
-    `selection_metric="rollout_composite"` to instead select on a validation
-    Monte-Carlo rollout that mirrors the real forecasting regime:
-
-        - The temporal validation window (the last `n_val_periods` weeks of the
-          CALIBRATION window, i.e. everything after `validation_start`) is carved
-          off as a leak-free pseudo-holdout for ALL customers (the real
-          `data["holdout"]` is never used in tuning). `rollout_horizon` defaults
-          to that window; pass an int to override it.
-        - Each trained trial is warmed up on the prefix and autoregressively
-          rolls the pseudo-holdout (`rollout_n_simulations` paths), then scored
-          by `weekly_aggregate_rollout_metrics` (normalized RMSE + MAPE + bias).
-        - Cross-entropy (over the same validation window) is still logged as the
-          `val_loss` user attr.
-
-    This mode requires `rollout_data` (the full `prepare_dataset` dict — the
-    objective re-slices it per trial's feature subset; its `n_val_periods` sets the
-    default horizon). Because the returned score is on a different scale than
-    cross-entropy, a rollout run must use its OWN fresh study (don't point it at a
-    `val_loss` study's storage).
+    The objective is validation cross-entropy (lower is better), scored on the
+    temporal validation window (ADR-0001). Use the returned study to inspect
+    `study.best_trial` and the saved checkpoint path stored as a user attribute
+    on each trial.
 
     When `append_timestamp` is True (default) the effective run name is
     `f"{study_name}_{YYYYMMDD_HHMM}"`; that name is used for the Optuna study,
@@ -1020,12 +729,9 @@ def run_optuna_study(
 
     `pruner` controls early stopping of unpromising trials. `True` (default) uses
     the standard `MedianPruner` on the per-epoch cross-entropy `fit_model` reports;
-    `False` disables pruning (`NopPruner`) so every trial trains fully. Prefer
-    `False` with `selection_metric="rollout_composite"`: the pruner acts on CE,
-    not the rollout score, so leaving it on can cut a trial before it is rolled
-    out and scored (and bias the sampler toward the low-CE region the rollout
-    metric is meant to look past). You may also pass a concrete `optuna` pruner
-    instance for full control; it is used as-is.
+    `False` disables pruning (`NopPruner`) so every trial trains fully. You may
+    also pass a concrete `optuna` pruner instance for full control; it is used
+    as-is.
 
     `removable_features` lists the covariates Optuna is allowed to drop. Each
     entry is a column name (its own toggle) or a group of names toggled together
@@ -1050,69 +756,6 @@ def run_optuna_study(
             f"Unknown model_type {model_type!r}; "
             f"registered types: {sorted(_BUILDERS)}"
         )
-
-    # Resolve the selection mode up front: a typo'd metric should fail loudly
-    # here, not silently fall back to cross-entropy after hours of tuning.
-    if selection_metric not in {"val_loss", ROLLOUT_METRIC}:
-        raise ValueError(
-            f"selection_metric must be 'val_loss' or {ROLLOUT_METRIC!r}, "
-            f"got {selection_metric!r}"
-        )
-    rollout_cfg: dict[str, Any] | None = None
-    if selection_metric == ROLLOUT_METRIC:
-        if rollout_data is None:
-            raise ValueError(
-                f"selection_metric={ROLLOUT_METRIC!r} requires rollout_data "
-                "(the prepare_dataset dict)."
-            )
-        # The rollout scores the SAME temporal validation window the teacher-forced
-        # path uses: the last `n_val_periods` weeks of calibration (= the window after
-        # validation_start), for ALL customers. By default the horizon IS that window,
-        # so the two selection metrics stay comparable; an explicit `rollout_horizon`
-        # overrides it (e.g. to probe a different carve), still leak-free since the
-        # real `data["holdout"]` is never read.
-        T_CAL = int(np.asarray(rollout_data["calibration"]).shape[1])
-        horizon = (
-            int(rollout_horizon)
-            if rollout_horizon is not None
-            else int(rollout_data["n_val_periods"])
-        )
-        # Validate the horizon UP FRONT (before any training) so a misconfigured
-        # rollout fails in seconds, not after the first trial finishes. The
-        # pseudo-holdout is the last `horizon` periods of calibration, so the horizon
-        # must leave a non-empty warm-up prefix: 0 < horizon < T_CAL.
-        if not 0 < horizon < T_CAL:
-            raise ValueError(
-                f"rollout horizon={horizon} must be in (0, T_CAL={T_CAL}): "
-                f"the validation rollout is carved from the calibration window, so "
-                f"it cannot be >= the full calibration length (no warm-up would "
-                f"remain). Pick a horizon well below {T_CAL} (e.g. <= {T_CAL // 2})."
-            )
-        # Even when valid, a horizon that consumes most of calibration leaves too
-        # little warm-up for the model to represent each customer's history, so the
-        # rollout score becomes unreliable. Warn (don't error) past the halfway mark.
-        warmup = T_CAL - horizon
-        if warmup < horizon:
-            warnings.warn(
-                f"rollout horizon={horizon} leaves only {warmup} warm-up "
-                f"period(s) of {T_CAL} (shorter than the scored horizon). The "
-                f"validation rollout metric may be unreliable; consider a horizon "
-                f"<= {T_CAL // 2} (move validation_start earlier).",
-                stacklevel=2,
-            )
-        rollout_cfg = {
-            "rollout_data": rollout_data,
-            "horizon": horizon,
-            "n_simulations": int(rollout_n_simulations),
-            "seed": int(rollout_seed),
-            "metric_kwargs": {
-                "weight_rmse": rollout_weight_rmse,
-                "weight_mape": rollout_weight_mape,
-                "weight_bias": rollout_weight_bias,
-                "mape_clip": rollout_mape_clip,
-                "min_actual_for_mape": rollout_min_actual_for_mape,
-            },
-        }
 
     # Validate data_info keys once, up front: the search space is now driven by
     # data_info, so a typo'd hyperparameter name must raise here rather than be
@@ -1150,10 +793,7 @@ def run_optuna_study(
     # Resolve the pruner. `True` (default) / `None` keep the historical
     # early-stopping behaviour (MedianPruner on the per-epoch CE fit_model
     # reports); `False` disables pruning entirely (NopPruner). A concrete
-    # BasePruner instance is honoured as-is. Disabling is recommended for
-    # selection_metric="rollout_composite": there the pruner acts on CE, not the
-    # rollout score, so it can cut a trial before it is ever rolled out and
-    # scored — see the module docstring.
+    # BasePruner instance is honoured as-is.
     if pruner is True or pruner is None:
         pruner = optuna.pruners.MedianPruner(n_warmup_steps=3)
     elif pruner is False:
@@ -1174,8 +814,6 @@ def run_optuna_study(
         lambda trial: objective(
             trial, model_type, data_builder, data_info, device,
             removable_features=removable_features,
-            selection_metric=selection_metric,
-            rollout_cfg=rollout_cfg,
         ),
         n_trials=n_trials,
         gc_after_trial=True,
@@ -1191,9 +829,7 @@ def run_optuna_study(
     summary = {
         "study_name": run_name,
         "model_type": model_type,
-        "selection_metric": selection_metric,
-        # best.value is whatever the objective returned: cross-entropy for
-        # "val_loss", the composite rollout score for "rollout_composite".
+        # best.value is what the objective returned: validation cross-entropy.
         "best_objective_value": best.value,
         "best_params": best.params,
         "best_user_attrs": dict(best.user_attrs),

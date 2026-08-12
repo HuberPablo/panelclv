@@ -43,7 +43,7 @@ from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation import dynamic_panel_dataset
 from panelclv.tuning import run_optuna_study
 from panelclv.experiments import make_data_builder, build_inference_from_trial, refit_best_trial
-from panelclv.models import mc_forecast, mc_compute_metrics
+from panelclv.models import mc_forecast, compute_forecast_metrics
 
 # 1. Panel -> model-ready tensors (calibration/holdout/samples/targets/seq_cols/...).
 #    validation_start carves the temporal validation window off the calibration tail.
@@ -57,7 +57,7 @@ data_full = dynamic_panel_dataset.prepare_dataset(panel, cfg)
 
 # 2. Tune. make_data_builder gives run_optuna_study the per-trial data closure (the
 #    temporal split is carried in data_full["val_start_idx"]); every other knob
-#    (selection_metric, removable_features, loss config, rollout_*) stays yours to set.
+#    (removable_features, loss config, pruning) stays yours to set.
 study = run_optuna_study(
     model_type="lstm",
     data_builder=make_data_builder(data_full),
@@ -74,7 +74,7 @@ inference_model, data_best = refit_best_trial(study, data_full, "lstm", batch_si
 
 # 4. Autoregressive Monte Carlo forecast + metrics (always forecast with data_best).
 forecast = mc_forecast(inference_model, data_best, n_simulations=600, seed=42)
-print(mc_compute_metrics(forecast["actual"], forecast["prediction_mean"]))
+print(compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"]))
 ```
 
 Swap `model_type="lstm"` / `"transformer"` (and `mc_forecast` /

@@ -10,5 +10,5 @@ applied uniformly to every model so comparisons stay fair.
 ## Consequences
 
 Class weights are computed on the training window only, so the validation window never
-leaks into the loss. Model selection scores the same window under both selection
-metrics, which is what makes them comparable.
+leaks into the loss. Model selection scores that same window, so trials are compared
+on periods none of them trained on.

@@ -7,10 +7,11 @@ These consume a forecast that the model + Monte Carlo simulator (in
 their own subpackage.
 
 ``models.monte_carlo_forecasting.compute_forecast_metrics`` is the single authority for
-``rmse`` / ``bias_percent`` / ``mape_aggregate_style``; everything here delegates to it
-rather than defining its own. The one number it does not return is ``aggregate_bias``
-(raw-count bias), which the per-group table needs because percentage bias is
-uninformative for a group whose actual total is near zero.
+``rmse`` / ``bias_percent`` / ``mape_aggregate`` — the only place in the package
+that computes them. Everything here delegates to it rather than defining its own.
+The one number it does not return is ``aggregate_bias`` (raw-count bias), which the
+per-group table needs because percentage bias is uninformative for a group whose
+actual total is near zero.
 """
 
 from .plot_utils import (

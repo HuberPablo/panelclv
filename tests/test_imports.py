@@ -57,8 +57,8 @@ def test_public_api_resolves_from_new_homes():
 
 
 def test_forecast_metrics_match_hand_computation():
-    """rmse, bias_percent and mape_aggregate_style on a worked (N, T_HOLD) example."""
-    from panelclv.models import mc_compute_metrics
+    """rmse, bias_percent and mape_aggregate on a worked (N, T_HOLD) example."""
+    from panelclv.models import compute_forecast_metrics
 
     # 2 customers x 3 holdout periods. Errors are +1 in one cell and -2 in another,
     # so mse = (1 + 4) / 6 and the totals differ by -1 out of 9.
@@ -67,25 +67,25 @@ def test_forecast_metrics_match_hand_computation():
     pred = np.array([[1.0, 3.0, 3.0],
                      [0.0, 1.0, 0.0]])
 
-    m = mc_compute_metrics(actual, pred)
+    m = compute_forecast_metrics(actual, pred)
     assert m["rmse"] == pytest.approx((5.0 / 6.0) ** 0.5)
     # bias is on the grand total: (8 - 9) / 9.
     assert m["bias_percent"] == pytest.approx(100.0 * -1.0 / 9.0)
-    # MAPE is aggregate-style: per-period totals, summed abs error over total actual.
+    # MAPE is aggregate: per-period totals, summed abs error over total actual.
     # actual_t = [1, 3, 5], pred_t = [1, 4, 3] -> abs diff [0, 1, 2] = 3 of 9.
-    assert m["mape_aggregate_style"] == pytest.approx(100.0 * 3.0 / 9.0)
+    assert m["mape_aggregate"] == pytest.approx(100.0 * 3.0 / 9.0)
 
 
 def test_forecast_metrics_perfect_prediction_is_zero():
     """A perfect forecast scores zero on all three numbers."""
-    from panelclv.models import mc_compute_metrics
+    from panelclv.models import compute_forecast_metrics
 
     actual = np.array([[0.0, 1.0, 2.0], [3.0, 0.0, 1.0]])
-    m = mc_compute_metrics(actual, actual.copy())
-    assert set(m) == {"rmse", "bias_percent", "mape_aggregate_style"}
+    m = compute_forecast_metrics(actual, actual.copy())
+    assert set(m) == {"rmse", "bias_percent", "mape_aggregate"}
     assert m["rmse"] == pytest.approx(0.0)
     assert m["bias_percent"] == pytest.approx(0.0)
-    assert m["mape_aggregate_style"] == pytest.approx(0.0)
+    assert m["mape_aggregate"] == pytest.approx(0.0)
 
 
 def test_retired_metric_helpers_are_gone():
@@ -130,3 +130,39 @@ def test_retired_dead_surface_is_gone():
     # The only `studies` export with zero importers.
     assert not hasattr(st, "group_metrics_suite_distribution"), \
         "group_metrics_suite_distribution should have been retired"
+
+
+def test_rollout_composite_selection_is_gone():
+    """Rollout-composite trial selection was deleted — issue 04 of the package cleanup.
+
+    ADR-0003 is retired: trials are selected on validation loss, full stop. Guarded
+    here because the deletion is what makes `compute_forecast_metrics` the package's
+    only implementation of rmse / bias / MAPE, and re-adding
+    `weekly_aggregate_rollout_metrics` would quietly make that claim false again
+    (its RMSE was 62x the authority's on the same arrays, its MAPE a different
+    estimator). `mc_compute_metrics` goes with it: the authority never had a
+    per-path variant, so it never needed an `mc_*` alias to disambiguate.
+    """
+    import inspect
+
+    import panelclv.models as models
+    import panelclv.tuning as tuning
+    from panelclv.tuning import optuna_tuning, run_optuna_study
+    from panelclv.tuning.optuna_tuning import objective
+
+    # Checked on the defining module, not only on the subpackage: `ROLLOUT_METRIC`
+    # was never exported, so a subpackage-only assertion would pass vacuously.
+    for name in ("weekly_aggregate_rollout_metrics", "_validation_rollout_score",
+                 "ROLLOUT_METRIC"):
+        assert not hasattr(optuna_tuning, name), f"{name} should have been retired"
+    assert not hasattr(tuning, "weekly_aggregate_rollout_metrics"), \
+        "weekly_aggregate_rollout_metrics should have been retired"
+    assert not hasattr(models, "mc_compute_metrics"), \
+        "mc_compute_metrics should have been retired"
+
+    # `selection_metric` was a parameter with one legal value, and every `rollout_*`
+    # knob existed only to configure the other one.
+    for fn in (run_optuna_study, objective):
+        params = inspect.signature(fn).parameters
+        assert "selection_metric" not in params, fn.__name__
+        assert not [p for p in params if p.startswith("rollout")], fn.__name__
