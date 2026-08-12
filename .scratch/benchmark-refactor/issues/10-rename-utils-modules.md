@@ -1,6 +1,6 @@
 # Rename the `*_utils` modules
 
-Status: ready-for-agent
+Status: wontfix
 
 `_utils` is a null suffix — every module is utilities, so the name says nothing about
 what is inside. Proposed: `evaluation_utils` to `metrics`, `plot_utils` to `plots`,
@@ -19,3 +19,14 @@ radius into seven notebooks, which are JSON and not covered by tests. It deserve
 own verification rather than riding on a change that needs to work today.
 
 Done when: `pytest -q` passes and every notebook still runs.
+
+## Comments
+
+**Superseded by the package-simplification map.** Renaming is the last step of a
+refactor, not the first: the map licences open redesign, so a module renamed now is a
+module that gets moved again once the target shape exists. This ticket's content —
+the `_utils` renames, the `pnbd_grid`/`pareto_simulation` abbreviation clash and
+`dynamic_panel_dataset`'s meaningless "dynamic" — is carried verbatim into
+`.scratch/package-simplification/issues/09-module-naming.md`, which decides it with
+the target architecture known, and adds the `experiments` vs `studies` naming problem
+this ticket did not cover.
