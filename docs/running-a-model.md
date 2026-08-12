@@ -761,7 +761,6 @@ rather than being told:
 | `study_metrics` | **re-scores stored CSVs** through `mc_compute_metrics` |
 | `compare_study_metrics` | models side by side |
 | `group_metrics_suite_table` | metrics by customer segment |
-| `group_metrics_suite_distribution` | mean / std / min / max **across studies** |
 | `plot_suite_forecast` | actual vs predicted, with an across-study band |
 | `describe_dataset`, `describe_suite_dataset` | panel summaries |
 
@@ -770,8 +769,12 @@ makes the archive self-checking: the reported number can always be regenerated f
 the stored predictions.
 
 Because the suite runs N studies per model, the honest summary of a model is a
-**distribution** — `group_metrics_suite_distribution` — not a single pooled number.
-One study's RMSE is one draw.
+**distribution**, not a single pooled number: one study's RMSE is one draw.
+`study_metrics` and `compare_study_metrics` carry that — they re-score every study
+separately, and `standard_deviation=True` / `confidence_interval=True` report the
+across-studies spread alongside the mean. There is no per-*segment* equivalent:
+`group_metrics_suite_table` scores the across-studies mean forecast, so it gives one
+value per (group, metric) and no spread.
 
 ---
 

@@ -43,20 +43,22 @@ from .monte_carlo_forecasting import (
     # Canonical names...
     run_monte_carlo_forecast,
     run_monte_carlo_forecast_transformer,
-    # ...and the short ``mc_*`` aliases used throughout the notebooks.
+    # ...and the short ``mc_*`` aliases the notebooks call.
     run_monte_carlo_forecast as mc_forecast,
     run_monte_carlo_forecast_transformer as mc_forecast_transformer,
-    simulate_one_path as mc_simulate_one_path,
-    simulate_transformer_path as mc_simulate_transformer_path,
     compute_forecast_metrics as mc_compute_metrics,
 )
 
 # `__all__` is the curated *headline* surface for the model family. Everything
 # imported above stays importable by explicit name; only the advertised set
 # (`from panelclv.models import *`, autocompletion, docs) is trimmed. Internals kept
-# OFF this list but still importable: train-time loss classes/helpers
-# (FocalLoss, SquaredEMDLoss, compute_class_weights, build_criterion) and the
-# per-path simulator entry points (mc_simulate_one_path, mc_simulate_transformer_path).
+# OFF this list but still importable: the train-time loss classes/helpers
+# (FocalLoss, SquaredEMDLoss, compute_class_weights, build_criterion).
+#
+# The per-path steppers `simulate_one_path` / `simulate_transformer_path` are NOT
+# re-exported here. They are internals of the two forecast entry points above; the
+# `mc_simulate_*` aliases that once advertised them had no importer anywhere and were
+# deleted (ledger `models/__init__` rows).
 __all__ = [
     # The embedder seam: how features become a vector (ADR-0005). A model is given
     # one; swapping it is how the published architecture and ours differ.

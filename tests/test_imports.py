@@ -101,3 +101,32 @@ def test_retired_metric_helpers_are_gone():
         assert not hasattr(ev, name), f"{name} should have been retired"
     with pytest.raises(ImportError):
         importlib.import_module("panelclv.evaluation.evaluation_utils")
+
+
+def test_retired_dead_surface_is_gone():
+    """The kill list stays killed — issue 03 of the package cleanup.
+
+    Each name below was deleted for having no caller anywhere in `src/`, the live
+    entry points, `tests/` or any notebook (the ledger at
+    `.scratch/package-simplification/ledger.csv` carries the per-row evidence). The
+    risk this guards is re-addition by habit: an `__init__` export is one line, and
+    nothing else in the suite would notice a symbol coming back with no caller.
+    """
+    import panelclv.models as models
+    import panelclv.evaluation as ev
+    import panelclv.studies as st
+
+    # The two `mc_*` per-path aliases. `models/__init__` advertised them as "used
+    # throughout the notebooks"; no notebook, live or archived, ever imported either.
+    for name in ("mc_simulate_one_path", "mc_simulate_transformer_path"):
+        assert not hasattr(models, name), f"{name} should have been retired"
+
+    # `ForecastRun` and its module: a fifth on-disk prediction layout
+    # (`<root>/<config>/<n>/manifest.json`) with no writer and no reader.
+    assert not hasattr(ev, "ForecastRun"), "ForecastRun should have been retired"
+    with pytest.raises(ImportError):
+        importlib.import_module("panelclv.evaluation.forecast_run")
+
+    # The only `studies` export with zero importers.
+    assert not hasattr(st, "group_metrics_suite_distribution"), \
+        "group_metrics_suite_distribution should have been retired"

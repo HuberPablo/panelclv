@@ -28,7 +28,6 @@ from .segment_analysis import (
     group_metrics_table,
     aggregate_bias,
 )
-from .forecast_run import ForecastRun
 
 __all__ = [
     "weekly_actuals",
@@ -42,5 +41,4 @@ __all__ = [
     "assign_customer_groups",
     "group_metrics_table",
     "aggregate_bias",
-    "ForecastRun",
 ]
