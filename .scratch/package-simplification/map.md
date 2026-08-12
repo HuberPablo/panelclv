@@ -1,0 +1,187 @@
+# Map: package simplification
+
+Label: wayfinder:map
+
+## Destination
+
+A decided kill/keep/refactor ruling for every module and public symbol in
+`src/panelclv/`, `tests/` and `scripts/`, plus a target architecture the package is
+refactored toward — handed off as an executable issue set under
+`.scratch/package-cleanup/issues/`, with `docs/adr/` and `CONTEXT.md` reconciled to
+match. The map is done when nothing is left to decide. It writes no production code.
+
+## Notes
+
+**Domain.** Read `CONTEXT.md` for the vocabulary, `docs/adr/` for prior decisions and
+`docs/feature_engineering.md` before touching anything read during a rollout. HITL
+tickets invoke `/grilling` and `/domain-modeling`; the synthesis ticket also invokes
+`/codebase-design`.
+
+**Redesign is open** — any subpackage may be re-architected. The floor, which no
+ticket may cross:
+
+1. **The forecasting contract** — categorical head over count classes, cross-entropy
+   on a class index, forecast by sampling-and-averaging rollouts.
+2. **Benchmark fidelity** — frozen means *the numbers*, not the surrounding code.
+   `benchmarks/` plumbing may be reshaped provided `scripts/validate_pareto_benchmark.py`
+   and `scripts/validate_valendin_lstm.py` still land in their bands afterwards. Those
+   two scripts are the executable definition of this floor and gate any benchmark-touching
+   ticket.
+3. ~~**On-disk study formats**~~ — **RESCINDED by Pablo, 2026-08-11.** This floor item is gone.
+   Archived studies do not have to stay re-readable by the refactored package. Clean code outranks
+   backward compatibility with the archive. The floor is now TWO items, not three.
+
+   Consequences, so no ticket re-imposes the constraint by habit:
+
+   - **No ticket owes the archive anything.** Renaming a `results.csv` column, changing the suite
+     tree, or dropping `study_metrics`' legacy path are all free moves. The format warts ticket 14
+     pinned — `aggregated_*.csv` keyed `customer_id` beside `Id`, `study_metrics` raising on the
+     four legacy suites — are now **fixable rather than preservable**.
+   - **The data is not at risk, only package-level readability.** The 444 `results.csv`,
+     1071 `Prediction_*.csv` and 1377 `config.json` under `Studies/` remain on disk and are plain
+     CSV/JSON. If a refactor stops `analysis.py` reading them, they are still readable with a few
+     lines of pandas. So this ruling costs convenience, not evidence.
+   - **Ticket 13's case for a `run_study_suite` writer test weakens**, because its main
+     justification was protecting the archive format. Re-weigh it there as ordinary coverage of
+     the production entry point instead.
+
+   Archived `.pth` checkpoints and Optuna storages were already ruled off the floor the same day,
+   and 2917 of them (5.27 GB) have since been deleted.
+
+**What counts as dead.** No caller in `src/` or a live entry point (`run_studies.py`,
+the two `validate_*.py`, the two `main_plot*.py`, the four live notebooks). Tests and
+one-shot scripts are not callers. **Carve-out:** anything that produced a figure or a
+number in the thesis is alive regardless of callers — deleting it makes a published
+result unreproducible.
+
+**Notebooks are a constraint, not a target.** Any ticket renaming a public name updates
+the four live notebooks in the same commit, so `tests/test_notebooks_current_api.py`
+never goes red. `notebooks/archive/` is deliberately frozen and out of scope.
+
+**Budget tripwire.** If ticket 06 proposes a target shape whose execution exceeds ~15
+issues, the destination was drawn too wide — cut it rather than start a rewrite.
+
+**Settled by Pablo, 2026-08-11 — archived checkpoints are expendable. Read this precisely.**
+Two different things share the word "checkpoint", and only one is expendable:
+
+- **Expendable: the archived FILES.** 2572 `.pth` under `Studies/` (4.7 GB) and 345 under
+  `checkpoints/` (542 MB). Nothing needs to reload them. The thesis numbers live in the stored
+  `Prediction_*.csv` and `results.csv`, which ticket 14's gate pins and which remain on the floor,
+  so deleting the weights does not make a published figure unreproducible.
+- **Load-bearing: the checkpoint MECHANISM.** It is the only path carrying weights from training
+  to forecasting — `training_utils.py:348,462` writes, `experiment_utils.py:43` reads, and
+  `refit_best_trial` (every production run) reads one twice: warm-start, then reload of the refit
+  it just wrote. `checkpoint_dir`, `checkpoint_path` and `keep_only_best_checkpoint` are live
+  public surface in all four notebooks. **No ticket may delete this.** A ticket that reads
+  "checkpoints are deletable" as licence to remove `torch.save` / `load_state_dict` breaks the
+  train-to-forecast handoff.
+
+What the ruling unlocks: ticket 06 may reshape model constructors freely, because the CLAUDE.md
+invariant "an inference model loads its `state_dict` from the trained model, so their constructor
+arguments must match" now only has to hold WITHIN a run, not across the archive. The three
+`_cached_mask` back-compat pops become plainly killable (they exist for a checkpoint format no
+archived file uses), and `scripts/migrations/rename_embedder_checkpoint_keys.py` loses its last
+purpose — input to ticket 10.
+
+Accepted cost, stated once: without archived weights you cannot re-run a rollout with more
+simulated paths, or forecast a different holdout window, without retraining first.
+
+**Settled by Pablo, 2026-08-11 — a notebook IMPORT is not a caller.** Only a call keeps a
+symbol alive. `from panelclv.x import f` with no `f(...)` anywhere in the notebook counts as no
+caller at all. This resolves the one rule ambiguity the ledger could not: the three lane audits
+had applied three different readings.
+
+Two consequences, both verified:
+
+- **Deleting an import-only symbol requires stripping the import line from the notebook in the
+  same commit.** `tests/test_notebooks_current_api.py::test_panelclv_imports_resolve` (`:115`)
+  resolves every `from panelclv... import X` in the four live notebooks and fails on a missing
+  name, so a forgotten import line turns the suite red rather than passing silently. (This
+  corrects ticket 05's claim that the test "binds calls, not imports" — it does both.)
+- **Rows the rule moves to `kill`**, each previously alive only through notebook imports:
+  `evaluation/plot_utils.weekly_aggregate_predictions`, `evaluation/plot_utils.alignment_check`,
+  `evaluation/plot_utils.weekly_actuals` (was `conditional-10`; its only other caller was the
+  broken `main_plot.py`), and `studies/analysis.describe_dataset`. Ticket 06 should re-apply the
+  rule against `ledger.csv`'s `callers_live` column to catch any row this list misses.
+  Note `models/losses.compute_class_weights` is NOT moved — two notebooks genuinely call it; that
+  its result is then discarded by the cross-entropy branch is a separate finding.
+  The thesis carve-out still overrides: a symbol that produced a published figure stays alive.
+
+**Correction to the entry-point list — BOTH `main_plot*.py` scripts are broken.** Verified
+independently, from audits 03 and 04:
+
+- `main_plot_covar.py` calls `evaluation.plot_utils.forecast_from_checkpoint` with six keyword
+  arguments it does not accept (`calibration`, `holdout_calendar`, `seq_cols`, `target_col`,
+  `model_type`, `batch_size`) and reads a `result["predictions"]` key nothing returns → `TypeError`.
+- `main_plot.py` is a two-phase library, and its intended entry path is broken. You call
+  `compute_and_save_lstm` / `_transformer` / `_pareto_nbd` to write prediction CSVs, then
+  `main(holdout=...)` reads them back and plots. `main()` breaks at `:244-251`: it feeds
+  `weekly_actuals`' 1-D `(T_HOLD,)` aggregate to `metrics_table`, which raises when
+  `actuals.ndim != 2`. (Its `__main__` block also raises, but that is a *deliberate* stub —
+  `_load_dataset` is documented as "replace with your own loader, or import `main(holdout=...)`
+  from a notebook" — so the stub is a seam, not the defect.) The two scripts are diverged
+  copies of one file and `main_plot_covar.py:171-188` is the *fixed* form of the very call
+  `main_plot.py` gets wrong, so each holds the other's fix.
+
+**Consequence for audit 03's stepper ruling:** verified that **nothing anywhere calls
+`compute_and_save_transformer`** (or `compute_and_save_lstm`) — not `main()`, not a notebook,
+not a test. So the silently-wrong Transformer + recurrent-stepper crossing that audit 03
+demonstrated has **no caller at all**, runnable or otherwise. Audit 03's structural argument
+stands; its claim that a live entry point "takes that branch today" does not, and its option (B)
+loses its bug-fix justification while keeping its make-it-unrepresentable one. Ticket 06 should
+weigh it as latent-risk-prevention, not as a fix.
+
+**So the live entry points are: `scripts/run_studies.py`, `scripts/validate_pareto_benchmark.py`,
+`scripts/validate_valendin_lstm.py`, and the four live notebooks.** Neither plot script keeps
+anything alive — that removes the only runnable caller of `forecast_from_checkpoint`,
+`holdout_actuals_NT` and `weekly_actuals`. The thesis carve-out still protects whatever produced
+a published figure, but note audit 04's finding that `holdout_actuals_NT`/`weekly_actuals` consume
+a `Sequence[pd.DataFrame]` shape nothing in `src/` produces any more, so those figures are already
+not reproducible either way. Ticket 10 rules on both scripts' fate.
+
+**Already fixed during charting, so audits need not re-report it:** `studies/analysis.py`
+carried a fourth model-type list (`_NEURAL_TYPES`) that had drifted out of sync with
+`studies/config.NEURAL_MODEL_TYPES`, silently collapsing the Valendin benchmark's
+across-study spread to a single study. Replaced with an import; regression test added
+to `tests/test_model_registration.py`.
+
+## Decisions so far
+
+<!-- one line per closed ticket: gist + link -->
+
+- [Golden end-to-end reproducibility test](issues/01-golden-end-to-end-test.md) — `tests/test_golden_end_to_end.py` pins one seeded run of the whole pipeline (determinism asserted exactly, regression at rel=1e-6, CPU-only, ~15s); `scripts/trace_golden_reachability.py` traces four model families and writes `reachability.md`/`.csv` — 79 of 206 symbols reached, to be read as proof of life, never proof of death.
+- [Audit: the data lane](issues/02-audit-data-lane.md) — nothing in `configs/` or `data_preparation/` is unreachable; the rot is 15 public symbols with no caller outside their own module (incl. the vestigial `PanelConfig.data_config`/`.schema` adapter), 3 return keys nobody reads (`"N  "` — trailing spaces, `"panel"`, `"holdout_panel"`), 5 concepts implemented twice (3 week-index conventions, 2 PNBD simulators, 2 cohort filters, 4 encodings of the time-flag set, 2 config→dict views), an inert `observed_past` role, an unexercised `daily` frequency, and 2068 of 2293 lines with no dedicated test.
+- [Audit: the model lane](issues/03-audit-model-lane.md) — nothing in `models/`, `benchmarks/` or `training/` is a dead module, but the model→stepper pairing is written 3 times and enforced 0 times, so a Transformer + recurrent stepper is *silently* wrong (a TypeError the other way) — `plot_utils.forecast_from_checkpoint` takes that branch today; 3 of 4 `build_criterion` branches (`focal`/`emd`/`weighted_ce`) have never been selected by any run ever and `compute_class_weights`' output is discarded on every live run; `models`→`evaluation` inverts ADR-0002; 3 unread forecast keys + `FitResult.best_val_f1` computed every epoch via sklearn and read nowhere; 18 of 27 hoisted `seq_cols`/`target_col` assignments unread, 21 byte-identical lines shared by the two rollouts, 3 dead `_cached_mask` pops (0/108 checkpoints carry it); and 2240 of 2746 lines with no dedicated test — including the whole Transformer rollout.
+- [Audit: the experiment lane](issues/04-audit-experiment-lane.md) — two genuinely dead units (`ForecastRun`, 111 lines, zero callers plus a 5th on-disk prediction format with no writer; `group_metrics_suite_distribution`); **`scripts/main_plot.py` is broken too** (1-D aggregate into `metrics_table` → `ValueError`), so with both plot scripts dead 5 `evaluation/` symbols have no runnable caller and 2 consume a shape `prepare_dataset` no longer produces; `run_study_suite` passes neither `selection_metric` nor `removable_features`, so ADR-0003's rollout selection and the whole covariate search are unreachable from the production path; **`compute_forecast_metrics` is NOT the single authority** — `tuning.weekly_aggregate_rollout_metrics` recomputes all three, rmse 62× apart (per-cell vs customer-summed) and mape by a different estimator, bias alone matching; 5 prediction layouts, 3 Student-t intervals, 2 period-day tables disagreeing on `monthly` (30.0 vs 30.4368) both feeding the Pareto fit, 5 encodings of the group set, 2 contradictory misalignment policies; 3389 of 4880 lines untested with `pnbd_grid`/`runner`/`segment_analysis`/`forecast_run` (1229 lines) untested entirely.
+- [Merge the audits into one kill/keep/refactor ledger](issues/05-reachability-ledger.md) — 163 rows in `ledger.csv`/`ledger.md` (32 modules, 131 public symbols, all 10,139 lines): 70 keep, 74 refactor, 13 kill (~282 lines, 2.8% — `forecast_run.py`, the two unused losses, two dead `mc_simulate_*` aliases, `group_metrics_suite_distribution`), 3 kill-candidates, 3 conditional on ticket 10; 26 deduped cross-lane duplications incl. one neither audit found (`DataBuilder` defined twice, in `experiment_utils.py:41` and `optuna_tuning.py:116`) and reconciled counts (5 prediction layouts, 7 model-type registries, 4 week conventions + 3 period tables); 5 audit conflicts and 4 places the dead-code rule was applied inconsistently — of which "is a notebook import a caller?" decides 6 rows and is a policy call, not an evidence question.
+- [Give the on-disk-format floor an executable definition](issues/14-archive-format-gate.md) — `tests/test_archive_formats.py` (24 tests, 3.5 s, CPU-only): a literal-text fixture suite always pins the tree, `results.csv`'s leading columns, `Id,week_0..week_{T-1}`, and the `config.json`→`from_dict`→`to_dict` identity; skip-if-absent tests add the real archive (`Studies/` AND `Datasets/` are both gitignored, so CI can never see it) — all nine stored `results.csv` values of `..._TestDimanche` recomputed from its predictions at rel=1e-12. 11 mutations (4 archive, 7 code, in scratch copies) each fail it; degrades to 19 passed / 4 skipped on a fresh clone. Pins both known warts as-is (`customer_id`/`Id` aggregates; `study_metrics` raising on the 4 legacy suites) and records that the archive read path is NOT torch-free — `load_predictions_from_csv` sits in `plot_utils`, which imports torch at module level. The **writer** (`run_study_suite`) remains ungated.
+
+- [Target architecture synthesis](issues/06-target-architecture.md) — **consolidate in place, do not re-partition:** all nine subpackages keep their boundaries (`experiments/` survives), ~10-11 execution issues. Twelve decisions: `rollout_composite` deleted outright and **ADR-0003 retired** (~175 lines + `selection_metric`); the loss cluster **kept whole**, shrinking the kill list from 13 rows/282 lines to **11 rows/~187 lines**; refit-only, so `prediction_source` and `REFIT_ON_FULL_CALIBRATION` both go; **one registry entry per model** (search space, builder, inference builder, forecaster, rollout function) which **retires CLAUDE.md's "three places"**; the model→rollout pairing *declared* through that registry, not sealed (settles ticket 03/C1); the ADR-0002 breach fixed but the five prediction layouts left unified-never; `test_archive_formats.py` cut to its 19 fixture tests and relabelled read-path coverage; timestamps out of 3 output folder names (not all 6 D19 sites); `validate_*.py`'s copies frozen as deliberate insulation (C5 resolved for audit 03, against 02); and a cut list of 3 correctness duplications (D7 week/period, D16 target column, D13 time flags) with D1/D17/D22 folded in and D9/D24 left alone. **Four new findings:** the paper's RMSE is *individual-level* so `compute_forecast_metrics` is correct and D8/C2 resolve against the tuning code (deleting it makes the "single scoring authority" claim true rather than needing a carve-out); `rollout_composite` *was* live in two notebooks; **all 1256 archived `selection_metric` values are `val_loss`**, zero composite, which is what makes its deletion free; and **`configs` ↔ `data_preparation` import each other** at module level (subpackage cycle, acyclic module graph — not in the ledger). **Closed 2026-08-12** — registry lands in a **tenth subpackage** `registry/model_registry.py` (both `models/` and `studies/` blocked by real top-level cycles; a root module refused as clutter), entries holding *lazy* references so `studies/config.py` need not import torch to validate a `model_type`; `evaluation/`'s internal split handed to ticket 12; the `configs` ↔ `data_preparation` cycle folded into decision 10. **Two closing findings:** a *second* subpackage cycle `evaluation ⇄ models`, which decision 6 already closes (so it fixes a cycle, not just an ADR-0002 breach); and the torch-free guarantee measured at ~1.2 s / ~540 MB with torch a *hard* dependency — worth restating as a layering rule plus a one-line test (tickets 08/13), or dropping.
+
+## Not yet specified
+
+- **How much of `evaluation/` survives.** `plot_utils.py` (609 lines) overlaps with the
+  plotting buried in `studies/analysis.py`, and `segment_analysis.py` holds the group
+  vocabulary that `analysis.py` hardcodes. Whether these merge, split or shrink is
+  unsharp until tickets 04 and 12 have read them together.
+- **Execution ordering and issue sizing.** Which cleanups are safe to land first, and
+  how they carve into issues, depends on the target shape from ticket 06.
+
+## Out of scope
+
+- **Making the frequency-agnostic `PanelConfig` promise real.** Audits still record
+  every hardcoded dataset or frequency assumption as evidence, but acting on it is a
+  later effort. Ruled out by Pablo during charting: not needed yet.
+- **Running the package on a genuinely new, unfamiliar panel.** The natural successor
+  once the cleanup lands; premature while the code is still moving.
+- **PyPI / shipping-grade hardening.** The bar is thesis defence — the audience is an
+  examiner and future-you, not a third-party installer. This is what licences deletion:
+  with no external consumer, an unreferenced export is dead rather than public API.
+- **`notebooks/` as a cleanup target**, and `notebooks/archive/` entirely.
+- **The three floor items above** (forecasting contract, benchmark arithmetic, on-disk
+  formats).
+- **Checkpoints and Optuna storages as a fourth floor item.** Ticket 14 proposed it after finding
+  that nothing gates checkpoint reload and a constructor-signature change could silently orphan
+  2572 archived files. Ruled out by Pablo on 2026-08-11: the files are expendable, so there is
+  nothing to protect. Do not re-open as a gate; see the Notes for the mechanism-vs-files
+  distinction that survives it.
