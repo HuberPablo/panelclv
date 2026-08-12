@@ -10,10 +10,16 @@ Four scenarios are traced, one per model family the package supports, because tr
 only one would mark the other three's code unreached and make a correct implementation
 look like dead code:
 
-    lstm           the golden pipeline from tests/test_golden_end_to_end.py, verbatim
+    lstm           the golden recurrent pipeline
     transformer    the same panel through the Transformer family
     valendin_lstm  the frozen benchmark (ADR-0004)
     pareto_nbd     the frozen Pareto/NBD benchmark, on short MCMC chains
+
+All four are imported verbatim from `tests/test_golden_end_to_end.py`, which pins their
+outcomes — so what this script traces is exactly what the suite asserts. That import also
+pulls in the package before tracing starts, so anything that runs at *import* time is
+outside the trace: `benchmarks.__getattr__`, the lazy-torch hook, is the one symbol this
+costs, and it is private.
 
 **Reached is proof of life. Unreached is not proof of death.** These scenarios are a
 single small synthetic panel with no covariates, no Optuna search, no study suite and no
@@ -122,134 +128,13 @@ class Tracer:
 
 
 # --------------------------------------------------------------------------------------
-# 3. The scenarios.
+# 3. The scenarios — owned by the test, not by this script.
 # --------------------------------------------------------------------------------------
 
-def scenario_lstm(tmp: Path):
-    """The golden pipeline, imported from the test so the two can never drift apart."""
-    from test_golden_end_to_end import run_golden_pipeline
-
-    return run_golden_pipeline(tmp)
-
-
-def _prepared_panel(config=None):
-    """The golden test's panel, prepared under `config` (its own by default)."""
-    from test_golden_end_to_end import _golden_config, _golden_panel
-    from panelclv.data_preparation import dynamic_panel_dataset
-
-    return dynamic_panel_dataset.prepare_dataset(
-        _golden_panel(), config or _golden_config(), verbose=False
-    )
-
-
-def _valendin_config():
-    """The golden config stripped to what the published architecture can read.
-
-    `ValendinEmbedder` has no covariate path — the paper's model consumes embedded
-    features only — so the derived time features and autoregressive columns the other
-    scenarios carry have to go. Constructing this config is itself the ADR-0004
-    constraint made concrete.
-    """
-    from test_golden_end_to_end import _golden_config
-    from dataclasses import replace
-
-    return replace(_golden_config(), time_features=None, ar_features=())
-
-
-def _train_and_roll(model, inference_model, data, tmp: Path, forecaster, n_classes: int):
-    """Shared tail: fit two epochs, load the checkpoint, roll out, score."""
-    import torch
-
-    from panelclv.experiments import make_loaders
-    from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
-    from panelclv.training import fit_model
-
-    train_loader, val_loader, metadata = make_loaders(data, batch_size=8)
-    fit = fit_model(
-        model, train_loader, val_loader, max_trans=n_classes, n_epochs=2, patience=2,
-        device="cpu", checkpoint_dir=str(tmp), model_name="trace", verbose=False,
-        val_score_start=metadata["val_score_start"],
-    )
-    inference_model.load_state_dict(torch.load(fit.checkpoint_path, map_location="cpu"))
-    forecast = forecaster(inference_model, data, n_simulations=4, seed=7, device="cpu",
-                          return_simulations=False)
-    return compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
-
-
-def scenario_transformer(tmp: Path):
-    import torch
-
-    from panelclv.experiments import make_loaders
-    from panelclv.models.embedders import ProjectedEmbedder
-    from panelclv.models.monte_carlo_forecasting import run_monte_carlo_forecast_transformer
-    from panelclv.models.multinomial_transformer import (
-        InferenceMultinomialTransformerModel, MultinomialTransformerModel,
-    )
-
-    data = _prepared_panel()
-    _, _, metadata = make_loaders(data, batch_size=8)
-    n_classes = int(data["embedded_cols"]["Transactions"])
-
-    def build(cls):
-        torch.manual_seed(1234)
-        embedder = ProjectedEmbedder(
-            seq_cols=metadata["seq_cols"], embedded_cols=metadata["embedded_cols"],
-            target_col=metadata["target_col"], embedding_dim=8,
-        )
-        return cls(embedder=embedder, seq_len=metadata["seq_len"], d_model=8, nhead=2,
-                   num_encoder_layers=1, dropout=0.0)
-
-    return _train_and_roll(build(MultinomialTransformerModel),
-                           build(InferenceMultinomialTransformerModel),
-                           data, tmp, run_monte_carlo_forecast_transformer, n_classes)
-
-
-def scenario_valendin_lstm(tmp: Path):
-    import torch
-
-    from panelclv.benchmarks import InferenceValendinLSTMModel, ValendinLSTMModel
-    from panelclv.experiments import make_loaders
-    from panelclv.models.monte_carlo_forecasting import run_monte_carlo_forecast
-
-    data = _prepared_panel(_valendin_config())
-    _, _, metadata = make_loaders(data, batch_size=8)
-    n_classes = int(data["embedded_cols"]["Transactions"])
-
-    def build(cls):
-        torch.manual_seed(1234)
-        return cls(seq_cols=metadata["seq_cols"], embedded_cols=metadata["embedded_cols"],
-                   target_col=metadata["target_col"])
-
-    return _train_and_roll(build(ValendinLSTMModel), build(InferenceValendinLSTMModel),
-                           data, tmp, run_monte_carlo_forecast, n_classes)
-
-
-def scenario_pareto_nbd(tmp: Path):
-    """Short chains: the trace records which code runs, not whether it has converged."""
-    from panelclv.benchmarks import compute_pareto_predictions
-    from test_golden_end_to_end import _golden_config, _golden_panel
-    import pandas as pd
-
-    config = _golden_config()
-    panel = _golden_panel()
-    # `period_start` is the calendar column the benchmark slices on; rebuild it the way
-    # prepare_dataset does, from the ISO year/week pair.
-    panel["period_start"] = pd.to_datetime(
-        panel["year"].astype(str) + "-" + panel["week"].astype(str) + "-1", format="%G-%V-%u"
-    )
-    train = panel[panel["period_start"] <= pd.Timestamp(config.training_end)]
-    return compute_pareto_predictions(
-        train, holdout_length=25, id_col="Id", target_col="Transactions",
-        period_in_days=7.0, mcmc=200, burnin=50, thin=10, chains=1, seed=42,
-    )
-
-
-SCENARIOS = {
-    "lstm": scenario_lstm,
-    "transformer": scenario_transformer,
-    "valendin_lstm": scenario_valendin_lstm,
-    "pareto_nbd": scenario_pareto_nbd,
-}
+# `tests/test_golden_end_to_end.py` defines all four and asserts on all four. Importing
+# them here rather than re-implementing them is what makes the evidence worth anything:
+# the trace records the same code path the test pins, and the two cannot drift apart.
+from test_golden_end_to_end import SCENARIOS  # noqa: E402
 
 
 # --------------------------------------------------------------------------------------

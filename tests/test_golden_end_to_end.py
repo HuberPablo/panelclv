@@ -1,11 +1,23 @@
-"""One pinned run of the whole pipeline: panel -> tensors -> training -> rollout -> metrics.
+"""One pinned run of the whole pipeline, for every model family the package ships.
 
 Every other test in this suite checks a part in isolation. Nothing checks that the parts
 still compose, which is the failure this file exists for: a change to the embedder seam,
 the feature contract or the simulator does not raise — it quietly returns a slightly
 different forecast, and no unit test notices.
 
-Two distinct properties are asserted, and they fail for different reasons:
+**Four arms**, one per model family, because the families share a pipeline but not a
+stepper, and a net that covers one covers the others only by assumption:
+
+    lstm           the developed recurrent model, `run_monte_carlo_forecast`
+    transformer    the developed attention model, `run_monte_carlo_forecast_transformer`
+    valendin_lstm  the frozen published benchmark (ADR-0004), recurrent rollout
+    pareto_nbd     the frozen Pareto/NBD benchmark — an MCMC fit, no training, no rollout
+
+The first three are one shape: panel -> tensors -> two epochs -> rollout -> metrics, so
+they are a fixture parameter rather than three pipelines. `pareto_nbd` is not, and is
+asserted differently — see `test_pareto_fit_is_shaped_and_finite`.
+
+Three distinct properties are asserted, and they fail for different reasons:
 
 - **Determinism** — the same config and seed produce bit-identical predictions. This is
   priority #2 in ``CLAUDE.md`` ("same config and seed gives the same result"), and
@@ -17,17 +29,23 @@ Two distinct properties are asserted, and they fail for different reasons:
   guaranteed identical across BLAS builds, and this repo runs on ROCm locally, on Colab
   and on VastAI. A tolerance of 1e-6 is far tighter than any real behaviour change and
   loose enough not to cry wolf on a different host.
+- **Shape and finiteness** — what the Pareto arm gets *instead* of pinned numbers. Its
+  200-draw, single-chain fit records which code runs, not whether it has converged, so
+  pinning its values would pin sampler noise and no later reader could tell a real
+  regression from MCMC drift.
 
-The model here is deliberately tiny and undertrained — two epochs on 23 customers. The
+The models here are deliberately tiny and undertrained — two epochs on 23 customers. The
 numbers are not good and are not meant to be. This test pins *what the pipeline
 computes*, not how well it forecasts.
 
 **When these numbers change**, that is the test doing its job. Do not re-baseline
 without knowing which change moved them and why. To regenerate after a deliberate
-change, run with ``PANELCLV_PRINT_GOLDEN=1`` and paste the printed block below.
+change, run with ``PANELCLV_PRINT_GOLDEN=1`` (and ``-s``, so pytest does not swallow the
+print) and paste the printed per-arm block into ``GOLDEN_METRICS`` below.
 """
 
 import os
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -35,6 +53,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from panelclv.benchmarks import (  # noqa: E402
+    InferenceValendinLSTMModel,
+    ValendinLSTMModel,
+    compute_pareto_predictions,
+)
 from panelclv.configs.panel_config import PanelConfig  # noqa: E402
 from panelclv.data_preparation import dynamic_panel_dataset  # noqa: E402
 from panelclv.experiments import make_loaders  # noqa: E402
@@ -42,10 +65,15 @@ from panelclv.models.embedders import ProjectedEmbedder  # noqa: E402
 from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
     compute_forecast_metrics,
     run_monte_carlo_forecast,
+    run_monte_carlo_forecast_transformer,
 )
 from panelclv.models.multinomial_lstm import (  # noqa: E402
     InferenceMultinomialLSTMModel,
     MultinomialLSTMModel,
+)
+from panelclv.models.multinomial_transformer import (  # noqa: E402
+    InferenceMultinomialTransformerModel,
+    MultinomialTransformerModel,
 )
 from panelclv.training import fit_model  # noqa: E402
 
@@ -63,11 +91,24 @@ TORCH_SEED = 1234
 FORECAST_SEED = 7
 N_SIMULATIONS = 8
 
-# Pinned outcomes. See the module docstring before touching these.
+# Pinned outcomes, one block per rollout arm. See the module docstring before touching
+# these. The Pareto arm is absent on purpose — it pins no values.
 GOLDEN_METRICS = {
-    "rmse": 2.0019012702059444,
-    "bias_percent": 247.03757225433526,
-    "mape_aggregate_style": 247.03757225433526,
+    "lstm": {
+        "rmse": 2.0019012702059444,
+        "bias_percent": 247.03757225433526,
+        "mape_aggregate_style": 247.03757225433526,
+    },
+    "transformer": {
+        "rmse": 1.8498824874546234,
+        "bias_percent": 211.56069364161849,
+        "mape_aggregate_style": 211.56069364161849,
+    },
+    "valendin_lstm": {
+        "rmse": 1.869680860932991,
+        "bias_percent": 216.257225433526,
+        "mape_aggregate_style": 216.257225433526,
+    },
 }
 # Cohort and window shapes. One synthetic customer never transacts in the calibration
 # window and is dropped by `require_calibration_activity`, so N is 23 and not 24 — that
@@ -127,32 +168,52 @@ def _golden_config() -> PanelConfig:
     )
 
 
-def run_golden_pipeline(tmp_path) -> dict:
-    """Panel -> tensors -> train -> rollout -> metrics, seeded end to end.
+def _valendin_config() -> PanelConfig:
+    """The golden config stripped to what the published architecture can read.
 
-    Exported (not underscore-private) because `scripts/trace_golden_reachability.py`
-    runs this exact function under a tracer: the reachability evidence is only worth
-    anything if it traces the same code path this test pins.
+    `ValendinEmbedder` has no covariate path — the paper's model consumes embedded
+    features only — so the derived time features and autoregressive columns the other
+    arms carry have to go. Constructing this config is the ADR-0004 constraint made
+    concrete.
     """
-    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    return replace(_golden_config(), time_features=None, ar_features=())
+
+
+# --------------------------------------------------------------------------------------
+# The four scenarios. `scripts/trace_golden_reachability.py` imports `SCENARIOS` and runs
+# every one of them under a tracer: the reachability evidence is only worth anything if
+# it traces the same code paths this test pins, so the two cannot be allowed to drift.
+# Every scenario therefore takes a temporary directory and returns a dict.
+# --------------------------------------------------------------------------------------
+
+
+def _projected_embedder(metadata) -> ProjectedEmbedder:
+    """The default embedding strategy (ADR-0005), as both developed arms build it."""
+    return ProjectedEmbedder(
+        seq_cols=metadata["seq_cols"],
+        embedded_cols=metadata["embedded_cols"],
+        target_col=metadata["target_col"],
+        embedding_dim=8,
+    )
+
+
+def _fit_and_roll(data, train_cls, rollout_cls, build, forecaster, tmp_path) -> dict:
+    """The tail every rollout arm shares: fit two epochs, reload, roll out, score.
+
+    `build(cls, metadata)` constructs one model of class `cls` from the loader metadata;
+    it is called twice, each time immediately after the torch seed is set, so the trained
+    model and the rollout model start from identical weights — the
+    constructor-arguments-must-match invariant, made concrete.
+    """
     train_loader, val_loader, metadata = make_loaders(data, batch_size=8)
     n_classes = int(data["embedded_cols"]["Transactions"])
 
-    def _build(cls):
-        # Seeded immediately before construction so the training model and the inference
-        # model start from identical weights — the constructor-arguments-must-match
-        # invariant, made concrete.
+    def _seeded(cls):
         torch.manual_seed(TORCH_SEED)
-        embedder = ProjectedEmbedder(
-            seq_cols=metadata["seq_cols"],
-            embedded_cols=metadata["embedded_cols"],
-            target_col=metadata["target_col"],
-            embedding_dim=8,
-        )
-        return cls(embedder=embedder, lstm_hidden_size=8, dense_units=8, dropout=0.0)
+        return build(cls, metadata)
 
     fit = fit_model(
-        _build(MultinomialLSTMModel),
+        _seeded(train_cls),
         train_loader,
         val_loader,
         max_trans=n_classes,          # class COUNT, not the maximum class index
@@ -165,11 +226,11 @@ def run_golden_pipeline(tmp_path) -> dict:
         val_score_start=metadata["val_score_start"],
     )
 
-    inference_model = _build(InferenceMultinomialLSTMModel)
-    inference_model.load_state_dict(torch.load(fit.checkpoint_path, map_location="cpu"))
+    rollout_model = _seeded(rollout_cls)
+    rollout_model.load_state_dict(torch.load(fit.checkpoint_path, map_location="cpu"))
 
-    forecast = run_monte_carlo_forecast(
-        inference_model,
+    forecast = forecaster(
+        rollout_model,
         data,
         n_simulations=N_SIMULATIONS,
         seed=FORECAST_SEED,
@@ -180,9 +241,153 @@ def run_golden_pipeline(tmp_path) -> dict:
     return {"data": data, "fit": fit, "forecast": forecast, "metrics": metrics}
 
 
+def run_lstm_pipeline(tmp_path) -> dict:
+    """The recurrent arm: panel -> tensors -> train -> rollout -> metrics, seeded end to end."""
+    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+
+    def build(cls, metadata):
+        return cls(
+            embedder=_projected_embedder(metadata),
+            lstm_hidden_size=8,
+            dense_units=8,
+            dropout=0.0,
+        )
+
+    return _fit_and_roll(
+        data,
+        MultinomialLSTMModel,
+        InferenceMultinomialLSTMModel,
+        build,
+        run_monte_carlo_forecast,
+        tmp_path,
+    )
+
+
+def run_transformer_pipeline(tmp_path) -> dict:
+    """The attention arm: same panel and same contract, growing-window stepper.
+
+    `run_monte_carlo_forecast_transformer` is what every Transformer study runs through
+    in production, and the recurrent/attention crossing fails silently rather than
+    raising — which is why this arm exists.
+    """
+    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+
+    def build(cls, metadata):
+        return cls(
+            embedder=_projected_embedder(metadata),
+            seq_len=metadata["seq_len"],   # caches the causal mask for the training length
+            d_model=8,
+            nhead=2,
+            num_encoder_layers=1,
+            dropout=0.0,
+        )
+
+    return _fit_and_roll(
+        data,
+        MultinomialTransformerModel,
+        InferenceMultinomialTransformerModel,
+        build,
+        run_monte_carlo_forecast_transformer,
+        tmp_path,
+    )
+
+
+def run_valendin_pipeline(tmp_path) -> dict:
+    """The published benchmark, end to end on the stripped config.
+
+    `scripts/validate_valendin_lstm.py` needs the gitignored `Datasets/`, so this arm is
+    the only coverage of a full Valendin rollout that runs on a fresh clone.
+    """
+    data = dynamic_panel_dataset.prepare_dataset(
+        _golden_panel(), _valendin_config(), verbose=False
+    )
+
+    def build(cls, metadata):
+        # No embedder argument: the benchmark owns its own published embedding strategy.
+        return cls(
+            seq_cols=metadata["seq_cols"],
+            embedded_cols=metadata["embedded_cols"],
+            target_col=metadata["target_col"],
+        )
+
+    return _fit_and_roll(
+        data,
+        ValendinLSTMModel,
+        InferenceValendinLSTMModel,
+        build,
+        run_monte_carlo_forecast,
+        tmp_path,
+    )
+
+
+def run_pareto_fit(tmp_path) -> dict:
+    """The Pareto/NBD benchmark: an MCMC fit on the calibration panel, no model to train.
+
+    Fed exactly as `studies/runner.py` feeds it in production — `prepare_dataset`'s own
+    `train_panel` and cohort, rather than a panel this test slices itself, so the
+    benchmark sees the same calibration window and the same customers as the three
+    neural arms.
+
+    Short chains on purpose (200 draws, 50 burn-in, one chain): this records which code
+    runs and that it runs reproducibly, not that the sampler has converged. `tmp_path` is
+    accepted and ignored, so every scenario has the same signature.
+    """
+    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    predictions, ids = compute_pareto_predictions(
+        data["train_panel"],
+        holdout_length=int(data["T_HOLD"]),
+        id_col=data["id_col"],
+        target_col=data["target_col"],
+        customer_ids=data["ids"],   # same row order as the neural arms' forecasts
+        period_in_days=7.0,
+        mcmc=200,
+        burnin=50,
+        thin=10,
+        chains=1,
+        seed=42,
+    )
+    return {"predictions": predictions, "ids": ids}
+
+
+SCENARIOS = {
+    "lstm": run_lstm_pipeline,
+    "transformer": run_transformer_pipeline,
+    "valendin_lstm": run_valendin_pipeline,
+    "pareto_nbd": run_pareto_fit,
+}
+
+# The three arms that train a model and roll it forward. `pareto_nbd` does neither, so it
+# shares no assertion with them.
+ROLLOUT_ARMS = ("lstm", "transformer", "valendin_lstm")
+
+
 @pytest.fixture(scope="module")
-def golden(tmp_path_factory):
-    return run_golden_pipeline(tmp_path_factory.mktemp("golden"))
+def scenario(tmp_path_factory):
+    """`scenario(name)` -> that arm's result, run at most once per module.
+
+    Memoised rather than eagerly built so that selecting a subset with `-k` pays only for
+    the arms that subset actually asks for.
+    """
+    results: dict[str, dict] = {}
+
+    def get(name: str) -> dict:
+        if name not in results:
+            results[name] = SCENARIOS[name](tmp_path_factory.mktemp(name))
+        return results[name]
+
+    return get
+
+
+@pytest.fixture(scope="module", params=ROLLOUT_ARMS)
+def rollout(request, scenario):
+    """One trained-and-rolled-out arm, as `(arm name, result)`."""
+    return request.param, scenario(request.param)
+
+
+@pytest.fixture(scope="module")
+def golden(scenario):
+    """The recurrent arm, for the assertions that are about data preparation only."""
+    return scenario("lstm")
 
 
 def test_golden_shapes_are_pinned(golden):
@@ -217,25 +422,27 @@ def test_golden_feature_axis_is_pinned(golden):
     ]
 
 
-def test_golden_metrics_are_pinned(golden):
+def test_rollout_metrics_are_pinned(rollout):
     """The three scores `compute_forecast_metrics` is the single authority for."""
+    arm, result = rollout
     if os.environ.get("PANELCLV_PRINT_GOLDEN"):
-        print("\nGOLDEN_METRICS = {")
-        for key, value in golden["metrics"].items():
-            print(f'    "{key}": {value!r},')
-        print("}")
-    assert golden["metrics"] == pytest.approx(GOLDEN_METRICS, rel=1e-6)
+        print(f'\n    "{arm}": {{')
+        for key, value in result["metrics"].items():
+            print(f'        "{key}": {value!r},')
+        print("    },")
+    assert result["metrics"] == pytest.approx(GOLDEN_METRICS[arm], rel=1e-6)
 
 
-def test_pipeline_is_deterministic(tmp_path):
+def test_rollout_is_deterministic(rollout, tmp_path):
     """Same config, same seed, bit-identical forecast — asserted, not assumed.
 
-    Run twice in one process rather than compared against a stored array: this isolates
-    *reproducibility* from *regression*, so a failure here means an unseeded RNG or an
-    order-dependent step, never a deliberate behaviour change.
+    Run a second time in this process and compared against the fixture's run, rather than
+    against a stored array: this isolates *reproducibility* from *regression*, so a
+    failure here means an unseeded RNG or an order-dependent step, never a deliberate
+    behaviour change.
     """
-    first = run_golden_pipeline(tmp_path / "a")
-    second = run_golden_pipeline(tmp_path / "b")
+    arm, first = rollout
+    second = SCENARIOS[arm](tmp_path)
 
     np.testing.assert_array_equal(
         first["forecast"]["prediction_mean"], second["forecast"]["prediction_mean"]
@@ -244,13 +451,45 @@ def test_pipeline_is_deterministic(tmp_path):
     assert first["fit"].best_val_loss == second["fit"].best_val_loss
 
 
-def test_forecast_never_reads_the_holdout(golden):
+def test_rollout_never_reads_the_holdout(rollout):
     """The rollout's own output, not the truth, is what it feeds back.
 
     `actual` is returned for scoring only. If the simulator ever fed it in, a 2-epoch
     model would score implausibly well — so a forecast that matches the truth exactly is
     evidence of leakage, not of skill.
     """
-    forecast = golden["forecast"]
+    _, result = rollout
+    forecast = result["forecast"]
     assert forecast["prediction_mean"].shape == forecast["actual"].shape
     assert not np.array_equal(forecast["prediction_mean"], forecast["actual"])
+
+
+def test_pareto_fit_is_shaped_and_finite(scenario):
+    """The Pareto arm's whole assertion set, and deliberately weaker than the others.
+
+    One expected count per customer per holdout period, all finite and non-negative. No
+    value is pinned: the fit is one short chain, so its numbers are sampler noise at this
+    length and pinning them would leave the next reader unable to tell a real regression
+    from MCMC drift.
+    """
+    result = scenario("pareto_nbd")
+    predictions = result["predictions"]
+
+    # Same cohort as the neural arms, because the benchmark is handed prepare_dataset's
+    # own train_panel and customer order rather than a panel this test slices itself.
+    assert len(result["ids"]) == GOLDEN_SHAPES["n_customers"]
+    assert predictions.shape == (GOLDEN_SHAPES["n_customers"], GOLDEN_SHAPES["t_holdout"])
+    assert np.all(np.isfinite(predictions))
+
+
+def test_pareto_fit_is_deterministic(scenario, tmp_path):
+    """One seed, one sampler path: the MCMC fit is reproducible even though it is random.
+
+    This is the property worth asserting on an unconverged chain — that the chain is the
+    *same* chain — and it is why the arm can be useful without pinning any value.
+    """
+    first = scenario("pareto_nbd")
+    second = run_pareto_fit(tmp_path)
+
+    np.testing.assert_array_equal(first["predictions"], second["predictions"])
+    assert first["ids"] == second["ids"]

@@ -39,7 +39,7 @@ below it.
 
 | Altitude | Where | Adds |
 |---|---|---|
-| 1 | `tests/test_golden_end_to_end.py` → `run_golden_pipeline()` | nothing — eight calls, no tuning |
+| 1 | `tests/test_golden_end_to_end.py` → `run_lstm_pipeline()` | nothing — eight calls, no tuning |
 | 2 | `notebooks/Data_integration_LSTM_v2.ipynb` | Optuna search + covariate-subset search |
 | 3 | `scripts/run_studies.py`, `notebooks/Study.ipynb` | replication, archiving, analysis |
 
@@ -202,9 +202,10 @@ read `docs/feature_engineering.md`. It is not repeated in this document.
 
 ## 4. Altitude 1 — the eight-call pipeline
 
-`tests/test_golden_end_to_end.py` → `run_golden_pipeline()`. The whole thing, no
-tuning. `scripts/trace_golden_reachability.py` runs this exact function under a
-tracer, so the reachability evidence and the pinned test describe one code path.
+`tests/test_golden_end_to_end.py` → `run_lstm_pipeline()`. The whole thing, no
+tuning. It is one of four arms that file pins, one per model family;
+`scripts/trace_golden_reachability.py` imports all four and runs them under a tracer,
+so the reachability evidence and the pinned test describe one code path.
 
 ### 4.1 `make_loaders`
 

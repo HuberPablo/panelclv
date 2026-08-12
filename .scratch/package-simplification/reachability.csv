@@ -1,5 +1,5 @@
 module,symbol,line,public,reached,scenarios
-src/panelclv/benchmarks/__init__.py,__getattr__,34,False,True,valendin_lstm
+src/panelclv/benchmarks/__init__.py,__getattr__,34,False,False,
 src/panelclv/benchmarks/__init__.py,__dir__,47,False,False,
 src/panelclv/benchmarks/pareto_benchmark.py,_build_cbs,70,False,True,pareto_nbd
 src/panelclv/benchmarks/pareto_benchmark.py,_post_gamma,122,False,True,pareto_nbd
@@ -19,30 +19,30 @@ src/panelclv/configs/panel_config.py,normalize_embedded_cols,161,True,True,lstm 
 src/panelclv/configs/panel_config.py,PanelConfig.__post_init__,256,False,True,lstm pareto_nbd transformer valendin_lstm
 src/panelclv/configs/panel_config.py,PanelConfig._resolve_time_features,351,False,True,lstm pareto_nbd transformer valendin_lstm
 src/panelclv/configs/panel_config.py,PanelConfig._validate_embedded_cols,373,False,True,lstm pareto_nbd transformer valendin_lstm
-src/panelclv/configs/panel_config.py,PanelConfig.data_config,392,True,True,lstm transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig.data_config,392,True,True,lstm pareto_nbd transformer valendin_lstm
 src/panelclv/configs/panel_config.py,PanelConfig.to_dict,414,True,False,
 src/panelclv/configs/panel_config.py,PanelConfig.from_dict,449,True,False,
-src/panelclv/configs/panel_config.py,PanelConfig.schema,464,True,True,lstm transformer valendin_lstm
+src/panelclv/configs/panel_config.py,PanelConfig.schema,464,True,True,lstm pareto_nbd transformer valendin_lstm
 src/panelclv/data_preparation/ar_features.py,parse_ar_feature,75,True,True,lstm pareto_nbd transformer valendin_lstm
 src/panelclv/data_preparation/ar_features.py,validate_ar_features,106,True,True,lstm pareto_nbd transformer valendin_lstm
-src/panelclv/data_preparation/ar_features.py,_base_states,112,False,True,lstm transformer
-src/panelclv/data_preparation/ar_features.py,_render,151,False,True,lstm transformer
-src/panelclv/data_preparation/ar_features.py,compute_ar_feature_columns,176,True,True,lstm transformer
+src/panelclv/data_preparation/ar_features.py,_base_states,112,False,True,lstm pareto_nbd transformer
+src/panelclv/data_preparation/ar_features.py,_render,151,False,True,lstm pareto_nbd transformer
+src/panelclv/data_preparation/ar_features.py,compute_ar_feature_columns,176,True,True,lstm pareto_nbd transformer
 src/panelclv/data_preparation/ar_features.py,ARFeatureState.__init__,194,False,True,lstm transformer
 src/panelclv/data_preparation/ar_features.py,ARFeatureState.update,206,True,True,lstm transformer
-src/panelclv/data_preparation/dynamic_panel_dataset.py,get_seq_cols,99,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,_known_future_cols,107,False,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,resolve_embedded_cols,119,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,resolve_embedded_cols._observed_max,164,False,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,_resolve_time_index,209,False,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,add_time_features,242,True,True,lstm transformer
-src/panelclv/data_preparation/dynamic_panel_dataset.py,add_period_start,312,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,validate_columns,342,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,warn_known_future_drift,370,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,standardize_covariates,430,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,make_block,506,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,select_active_cohort,530,True,True,lstm transformer valendin_lstm
-src/panelclv/data_preparation/dynamic_panel_dataset.py,prepare_dataset,560,True,True,lstm transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,get_seq_cols,99,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,_known_future_cols,107,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,resolve_embedded_cols,119,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,resolve_embedded_cols._observed_max,164,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,_resolve_time_index,209,False,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,add_time_features,242,True,True,lstm pareto_nbd transformer
+src/panelclv/data_preparation/dynamic_panel_dataset.py,add_period_start,312,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,validate_columns,342,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,warn_known_future_drift,370,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,standardize_covariates,430,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,make_block,506,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,select_active_cohort,530,True,True,lstm pareto_nbd transformer valendin_lstm
+src/panelclv/data_preparation/dynamic_panel_dataset.py,prepare_dataset,560,True,True,lstm pareto_nbd transformer valendin_lstm
 src/panelclv/data_preparation/pareto_simulation.py,_seasonal_weekly_multiplier,108,False,False,
 src/panelclv/data_preparation/pareto_simulation.py,simulate_pareto_nbd_panel,134,True,False,
 src/panelclv/data_preparation/pareto_simulation.py,_pct,271,False,False,

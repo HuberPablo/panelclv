@@ -10,11 +10,11 @@ want of a caller, not for want of a purpose. Unreached means *investigate*.
 
 Scenarios traced: lstm, transformer, valendin_lstm, pareto_nbd.
 
-Reached 79 of 206 defined symbols (37 of 110 public).
+Reached 78 of 206 defined symbols (37 of 110 public).
 
 | module | symbols | reached | public unreached |
 | --- | --- | --- | --- |
-| `src/panelclv/benchmarks/__init__.py` | 2 | 1 | 0 |
+| `src/panelclv/benchmarks/__init__.py` | 2 | 0 | 0 |
 | `src/panelclv/benchmarks/pareto_benchmark.py` | 7 | 7 | 0 |
 | `src/panelclv/benchmarks/valendin_lstm.py` | 6 | 6 | 0 |
 | `src/panelclv/configs/panel_config.py` | 9 | 7 | 2 |
