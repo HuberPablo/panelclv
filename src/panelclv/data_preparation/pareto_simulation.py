@@ -105,7 +105,7 @@ _PANEL_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 
-def _seasonal_weekly_multiplier(
+def seasonal_weekly_multiplier(
     peaks: Sequence[int], amplitude: float, width: float,
     period: int = WEEKS_PER_YEAR,
 ) -> np.ndarray:
@@ -117,6 +117,11 @@ def _seasonal_weekly_multiplier(
     *redistributes* purchases within the year). Distances are measured on the
     ``period``-week ring, so a peak near week 51 correctly bleeds into week 0.
     Returns all-ones when there is no seasonality (no peaks or zero amplitude).
+
+    Public because reconstructing the pattern a stored study was generated with is a
+    supported operation, not an internal detail: ``studies.synthetic_grid`` scores a
+    forecast against this exact curve, and it must be the *same* function that made
+    the data rather than a second copy that can drift from it.
     """
     peaks = list(peaks)
     if not peaks or amplitude == 0.0:
@@ -233,7 +238,7 @@ def simulate_pareto_nbd_panel(
     # --- 3. Exact per-week counts (+ optional seasonality + cohort entry) -----
     # Recurring within-year multiplier (all-ones when seasonality is off), applied
     # by week-of-year so the pattern repeats each year over the whole panel.
-    season = _seasonal_weekly_multiplier(seasonal_peaks, seasonal_amplitude, seasonal_width)
+    season = seasonal_weekly_multiplier(seasonal_peaks, seasonal_amplitude, seasonal_width)
     woy = np.arange(W) % WEEKS_PER_YEAR                   # (W,) week-of-year 0..51
     counts = rng.poisson(lam[:, None] * alive_frac * season[woy][None, :])  # (N, W)
     if birth_purchase:

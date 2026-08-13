@@ -5,6 +5,10 @@ Figure 1 — the neural models have no death state: aggregate bias grows with th
 Figure 2 — the compensating strength: they track within-year seasonal shape,
            which Pareto/NBD structurally cannot.
 
+Both measurements live in `panelclv.studies.synthetic_grid`, not here: the arithmetic
+below the figures is what the thesis reports, so it is exposed for the notebooks rather
+than kept as a second copy that could drift from them. This script only plots it.
+
 Run from the repo root:
     PYTHONPATH=src python scripts/make_grid_figures.py
 """
@@ -13,16 +17,13 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
-from panelclv.data_preparation import pareto_simulation as ps
-from panelclv.studies.pnbd_grid import collect_grid_results
+from panelclv.studies.pareto_nbd_grid import collect_grid_results
+from panelclv.studies.synthetic_grid import dead_customer_mass, shape_correlation
 
 GEN = Path("Datasets/Synthetic/pnbd_study_4x4x10_20260716-154143")
 TRAIN = Path("Studies/pnbd_study_4x4x10_20260716-154143")
 OUT = Path("figures")
-HOLDOUT_YEAR = 2001
-REPLICATES = [f"Dataset_{i}" for i in range(1, 11)]
 
 # Categorical identity is fixed per model and never cycled or re-assigned when a
 # panel shows a subset. Slots 1-3 of the reference palette (blue / green / magenta).
@@ -69,61 +70,6 @@ def end_label(ax, x, y, text, color):
 
 
 # ---------------------------------------------------------------------------
-# Data
-# ---------------------------------------------------------------------------
-
-def dead_customer_mass():
-    """Share of each model's predicted holdout volume assigned to customers who
-    made no holdout purchase — the direct signature of a missing death mechanism.
-
-    Note this is a *relative* diagnostic, not an error rate: a customer who is
-    still alive but has a low transaction rate can legitimately record zero
-    purchases in 52 weeks, so the correct share is well above zero and is not
-    observable. Pareto/NBD — near-unbiased in aggregate across this grid — is
-    therefore the reference level the neural models are read against.
-    """
-    rows = []
-    for combo in sorted(p.name for p in GEN.iterdir() if p.name.startswith("Dataset_")):
-        rate, churn = (int(v) for v in combo.split("_")[1:3])
-        for ds in REPLICATES:
-            panel, _, _ = ps.load_pnbd_dataset(GEN, combo, ds)
-            actual_per_customer = (panel[panel["year"] == HOLDOUT_YEAR]
-                                   .groupby("Id")["Transactions"].sum())
-            silent = set(actual_per_customer.index[actual_per_customer.values == 0])
-            rec = {"rate": rate, "churn": churn}
-            for m in MODELS:
-                pred = pd.read_csv(TRAIN / f"{combo}__{ds}" / m / "Predictions" / "Prediction_1.csv")
-                total = pred.set_index("Id").sum(axis=1)
-                rec[m] = total[total.index.isin(silent)].sum() / total.sum()
-            rows.append(rec)
-    return pd.DataFrame(rows)
-
-
-def shape_correlation():
-    """Per-dataset correlation between predicted and actual weekly holdout totals.
-
-    This isolates *shape* from *level*: correlation is invariant to a multiplicative
-    over-prediction, so a model can score 1.0 here while being 300% biased. That is
-    exactly the separation Figure 2 needs to make.
-    """
-    rows = []
-    for combo in sorted({p.name for p in GEN.iterdir() if p.name.startswith("Dataset_")}):
-        rate, churn = (int(x) for x in combo.split("_")[1:3])
-        for ds in REPLICATES:
-            panel, _, _ = ps.load_pnbd_dataset(GEN, combo, ds)
-            act = (panel[panel["year"] == HOLDOUT_YEAR]
-                   .groupby("week")["Transactions"].sum().sort_index().values)
-            rec = {"rate": rate, "churn": churn}
-            for m in MODELS:
-                pred = pd.read_csv(TRAIN / f"{combo}__{ds}" / m / "Predictions" / "Prediction_1.csv")
-                v = pred.drop(columns=["Id"]).sum(axis=0).values[: len(act)]
-                a = act[: len(v)]
-                rec[m] = np.corrcoef(a, v)[0, 1] if v.std() > 0 and a.std() > 0 else np.nan
-            rows.append(rec)
-    return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
 # Figure 1 — no death state
 # ---------------------------------------------------------------------------
 
@@ -146,9 +92,12 @@ def figure_1(results, dead):
     style(ax1, "Aggregate bias", "a. Over-prediction grows with churn")
 
     # (b) The mechanism, over the same axis as (a) so the two panels read together:
-    # the extra volume is spent on customers who never purchase again.
-    by_churn_dead = dead.groupby("churn")[MODELS].mean()
-    xs = by_churn_dead.index / 100
+    # the extra volume is spent on customers who never purchase again. Both panels
+    # average the same long tables the package returns, so both read churn off the
+    # generator's own coordinate rather than parsing it back out of a folder name.
+    by_churn_dead = dead.pivot_table(index="churn_rate", columns="model",
+                                     values="dead_customer_mass", aggfunc="mean")
+    xs = by_churn_dead.index
     for m in MODELS:
         ax2.plot(xs, by_churn_dead[m], color=COLOR[m], lw=2, marker="o", ms=5.5,
                  mec="white", mew=1.2, zorder=3, label=LABEL[m])
@@ -176,17 +125,19 @@ def figure_2(corr):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.6, 3.9), sharey=True)
 
     for ax, key, xlabel, title in (
-        (ax1, "churn", "Churn rate", "a. Shape tracking degrades with churn"),
-        (ax2, "rate", "Mean transaction rate", "b. Shape tracking improves with volume"),
+        (ax1, "churn_rate", "Churn rate", "a. Shape tracking degrades with churn"),
+        (ax2, "mean_transaction_rate", "Mean transaction rate",
+         "b. Shape tracking improves with volume"),
     ):
-        agg = corr.groupby(key)[MODELS].mean()
+        agg = corr.pivot_table(index=key, columns="model",
+                               values="shape_correlation", aggfunc="mean")
         xs = np.arange(len(agg.index))                 # evenly spaced ordinal levels
         ax.axhline(0, color=INK_MUTED, lw=0.9, zorder=1)
         for m in MODELS:
             ax.plot(xs, agg[m], color=COLOR[m], lw=2, marker="o", ms=5.5,
                     mec="white", mew=1.2, zorder=3, label=LABEL[m])
         ax.set_xticks(xs)
-        ax.set_xticklabels([f"{v/100:g}" for v in agg.index])
+        ax.set_xticklabels([f"{v:g}" for v in agg.index])
         ax.set_xlabel(xlabel, color=INK_2)
         ax.set_ylim(-0.15, 1.0)
         style(ax, None, title)
@@ -205,10 +156,12 @@ if __name__ == "__main__":
     # Only `bias_percent` is plotted (figure 1a). Asking for just that keeps the
     # script readable off grids archived before `mape_aggregate_style` was renamed —
     # `collect_grid_results`' default metric set now names the current column.
-    results = collect_grid_results(GEN, metrics=("bias_percent",))
-    corr = shape_correlation()
-    dead = dead_customer_mass()
-    # Source data for both figures, so every plotted number has a table view.
+    results = collect_grid_results(GEN, TRAIN, metrics=("bias_percent",))
+    corr = shape_correlation(GEN, TRAIN)
+    dead = dead_customer_mass(GEN, TRAIN)
+    # Source data for both figures, so every plotted number has a table view. Both are
+    # the package's long tables — one row per (dataset, model), which carries the
+    # replicate labels the earlier wide layout dropped.
     corr.to_csv(OUT / "shape_correlation.csv", index=False)
     dead.to_csv(OUT / "dead_customer_mass.csv", index=False)
 

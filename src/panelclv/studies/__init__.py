@@ -35,7 +35,14 @@ module:
 - ``suite_plots`` — the headline forecast figure, whose across-studies band is that
   same interval.
 
-``pnbd_grid`` is the Pareto/NBD grid study's own reader, over a directory of suites.
+The Pareto/NBD grid study — a directory of suites, one per generated dataset — has
+its own two readers, split on whether the analysis could ever run on a real panel:
+
+- ``pareto_nbd_grid`` reads only what the suites stored, so it runs on any grid.
+- ``synthetic_grid`` scores forecasts against the generation study itself — the panels
+  it wrote and the latent truth the models never see (the true death week, the true
+  seasonal curve) — so it runs on a generated grid and nothing else. Importing from it
+  is the declaration that the analysis is synthetic-only.
 """
 
 from .config import ModelSpec, StudySuiteConfig
@@ -52,15 +59,19 @@ from .suite_metrics import (
     study_metrics,
     compare_study_metrics,
 )
-from .pnbd_grid import (
+from .pareto_nbd_grid import (
     collect_grid_results,
-    seasonality_grid,
-    alive_volume_ratio_grid,
-    dead_volume_leakage_grid,
     group_summary,
     compare_models_table,
     plot_pattern,
     plot_diff_grid,
+)
+from .synthetic_grid import (
+    seasonality_grid,
+    alive_volume_ratio_grid,
+    dead_volume_leakage_grid,
+    dead_customer_mass,
+    shape_correlation,
 )
 
 __all__ = [
@@ -76,11 +87,13 @@ __all__ = [
     "describe_dataset",
     "describe_suite_dataset",
     "collect_grid_results",
-    "seasonality_grid",
-    "alive_volume_ratio_grid",
-    "dead_volume_leakage_grid",
     "group_summary",
     "compare_models_table",
     "plot_pattern",
     "plot_diff_grid",
+    "seasonality_grid",
+    "alive_volume_ratio_grid",
+    "dead_volume_leakage_grid",
+    "dead_customer_mass",
+    "shape_correlation",
 ]

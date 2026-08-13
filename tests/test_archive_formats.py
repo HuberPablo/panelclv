@@ -82,7 +82,7 @@ PINNED_PANEL = REPO_ROOT / "Datasets" / "Dataset_clean" / "electronics_customer_
 
 # A Pareto/NBD generation study's *trained* tree: one standard suite per generated dataset,
 # nested one level deeper. Its shape is pinned separately (see the pnbd tests). The grid's
-# reader, `pnbd_grid.collect_grid_results`, joins it against the *generation* study that
+# reader, `pareto_nbd_grid.collect_grid_results`, joins it against the *generation* study that
 # produced the panels — two directories that have to stay in step, so both are named here.
 PNBD_GRID = ARCHIVE_ROOT / "pnbd_study_4x4x10_20260802-160937__ar"
 PNBD_GENERATION = REPO_ROOT / "Datasets" / "Synthetic" / "pnbd_study_4x4x10_20260802-160937"
@@ -118,7 +118,7 @@ RESULTS_LEADING_COLS = [
     "mape_aggregate",
 ]
 # The three metric names the package writes today — `compute_forecast_metrics`' own
-# keys, which `suite_metrics._STUDY_METRIC_COLS` and `pnbd_grid._METRIC_SOURCE` both name.
+# keys, which `suite_metrics._STUDY_METRIC_COLS` and `pareto_nbd_grid._METRIC_SOURCE` both name.
 RESULTS_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
 
 # The one column the archive spells differently: every archived suite was written
@@ -542,10 +542,10 @@ def test_results_csv_column_contract(suite):
     assert list(df.columns) == RESULTS_LEADING_COLS + FIXTURE_RESULTS_PARAM_UNION
     assert all(c.startswith("param_") for c in df.columns[len(RESULTS_LEADING_COLS):])
     # The three metric names `suite_metrics._STUDY_METRIC_COLS` and
-    # `pnbd_grid._METRIC_SOURCE`
+    # `pareto_nbd_grid._METRIC_SOURCE`
     # read out of a suite this package wrote.
     assert suite_metrics._STUDY_METRIC_COLS == RESULTS_METRIC_COLS
-    from panelclv.studies.pnbd_grid import _METRIC_SOURCE
+    from panelclv.studies.pareto_nbd_grid import _METRIC_SOURCE
     assert set(_METRIC_SOURCE.values()) <= set(RESULTS_METRIC_COLS)
     # One row per (model, study): two LSTM studies, one benchmark fit.
     assert list(df["model"]) == ["LSTM", "LSTM", "ParetoNBD_MLE"]
@@ -846,7 +846,7 @@ def test_every_archived_neural_suite_still_parses():
 def test_pnbd_grid_archive_is_a_directory_of_standard_suites():
     """The grid tree is one level deeper: `<grid>/<combo>__<dataset>/` is a normal suite.
 
-    `pnbd_grid.collect_grid_results` reads each sub-suite's `results.csv` by that path.
+    `pareto_nbd_grid.collect_grid_results` reads each sub-suite's `results.csv` by that path.
     The archived grid predates the `mape_aggregate` rename, so what is asserted is that
     it still carries the metric columns it was written with (`ARCHIVE_MAPE_COL`). Only
     the first three
@@ -889,7 +889,7 @@ def test_pnbd_grid_results_still_join_to_their_generation_study():
     exercise both.
     """
     from panelclv.data_preparation.pareto_simulation import list_pnbd_datasets
-    from panelclv.studies.pnbd_grid import collect_grid_results
+    from panelclv.studies.pareto_nbd_grid import collect_grid_results
 
     METRICS = ("rmse", "bias_percent")
 
