@@ -44,7 +44,9 @@ panel (one row per customer × period)
    ├─ 6. cohort filter + target clipping
    ├─ 7. FILL AR features from calibration only
    ├─ 8. resolve embedding cardinalities
-   └─ 9. reshape → (N, T, F) + build (samples, targets)
+   ├─ 9. reshape → (N, T, F)
+   ├─ 10. standardise the numeric channels  (calibration-fitted; §5)
+   └─ 11. build (samples, targets)
 ```
 
 The output is a plain dict; the feature-relevant keys are:
@@ -59,6 +61,7 @@ The output is a plain dict; the feature-relevant keys are:
 | `target_idx` | `int` | position of the target channel |
 | `embedded_cols` | `{col: cardinality}` | resolved categorical embedding map |
 | `ar_features` | `list[str]` | which channels must be recomputed during the rollout |
+| `covariate_stats` | `{col: (mean, std)}` | calibration-fitted scaling of the numeric channels — the rollout must re-apply it |
 
 `seq_cols` is the contract. The model addresses channels **by name**, never by a
 hardcoded position, which is what makes the package dataset-agnostic: a new panel with
@@ -210,10 +213,16 @@ Notes on the conventions, which matter for reproducibility:
 `period_since_first_transaction` grow without bound and, over a long holdout, drift past
 the range the model ever saw in calibration — the same extrapolation hazard as `year_idx`.
 `transaction_rate`, `has_transacted_before` and `active_in_last_<K>_periods` are bounded
-and stationary, and carry much of the same information. This matters because the package
-applies **no per-feature standardisation**: numeric channels are fed to a single
-`Linear(n_covariates → embedding_dim)` followed by `LayerNorm` (§5), so a channel with a
-large, growing scale dominates that projection's conditioning.
+and stationary, and carry much of the same information.
+
+Standardisation (§5) does **not** rescue an unbounded counter. The mean and standard
+deviation are fitted on the calibration window, so a counter still climbing through the
+holdout still climbs after the transform — from a recentred origin, at a rescaled rate,
+but out of the range the weights were trained on all the same. What standardisation does
+neutralise is *scale*: an unbounded channel no longer dominates the shared covariate
+projection merely for being measured in larger units. So the case for preferring a
+bounded feature is extrapolation alone, which is a judgement about the length of your
+holdout rather than about the architecture.
 
 **Adding a new AR feature.** Extend the running state in `_base_states` (the vectorised
 `(N, T)` precompute), mirror the increment in `ARFeatureState.update` (the per-step
@@ -223,7 +232,7 @@ produce identical columns, which is the test to extend alongside.
 
 ---
 
-## 5. Categorical encoding and embeddings
+## 5. Encoding: categorical embeddings and numeric standardisation
 
 `embedded_cols` declares **which columns are categorical**; everything else in `seq_cols`
 is treated as continuous. The spec is either a mapping `{col: int | "auto"}` or a plain
@@ -241,6 +250,46 @@ The LSTM/Transformer input is `[context, target_embedding]` when any context exi
 the target embedding alone otherwise (so the minimum legal model is target-only,
 `F = 1`). The Transformer mirrors this encoder exactly; the two families differ in how
 history is carried, not in what a feature means.
+
+### Numeric channels are standardised, fitted on calibration
+
+Every channel that is **not** embedded is put on a common scale — mean 0, std 1 — by
+`standardize_covariates`, which runs after the reshape to `(N, T, F)` and before
+`samples` / `targets` are sliced. Two things are excluded, for different reasons:
+
+- everything in `embedded_cols`, because those are integer class indices cast with
+  `.long()` and used as embedding-table lookups; rescaling them would corrupt the lookup
+  outright;
+- `target_col`, excluded explicitly. A valid config always embeds it, so the first rule
+  would already cover it, but the explicit exclusion also protects the autoregressive
+  contract: `targets` are sliced straight out of `calibration` and have to stay integer
+  class indices for the cross-entropy head.
+
+**Why it is needed.** The models push every non-embedded column through *one* shared
+`Linear(n_covariates → embedding_dim)`, which computes `sum_k W_k · x_k` with all `W_k`
+drawn from the same initial distribution. Each column's contribution to that sum — and
+the gradient reaching its weights — therefore scales with its **raw magnitude**. Mixing
+`week_sin` (std ≈ 0.7) with `period_since_last_transaction` (std ≈ 27) hands the recency
+channel almost all of the pre-activation variance purely because it is measured in weeks
+rather than in a sine wave. The `LayerNorm` that follows cannot repair this: it
+normalises the *sum*, after the columns have already been mixed, so it fixes the output
+scale while leaving the drowned-out columns drowned out. Before the sum is the only place
+the imbalance can be corrected.
+
+**Fitted on calibration, applied to both windows.** The `{col: (mean, std)}` map is
+computed on the calibration window and returned as `covariate_stats`; the holdout is
+transformed with those same statistics, never with its own. Fitting on the holdout would
+leak its distribution into the forecast — the quiet kind of leakage this chapter exists
+for.
+
+**The rollout has to re-apply it.** The holdout tensor's declared covariates were
+standardised once, by `prepare_dataset`, along with the calibration window. The *derived*
+ones are the problem: `ARFeatureState` regenerates them in raw units at each step, so the
+simulator puts every recomputed AR value back through its `(mean, std)` before writing it
+into the step input. Skipping that would feed the model raw recency after warming it up on
+standardised recency — a silent unit mismatch no shape check can catch. A column missing
+from the map (an AR feature the caller chose to embed, or a dict from an older run) passes
+through with the identity `(0.0, 1.0)` rather than raising — see §6.
 
 ### Cardinality resolution is role-aware
 

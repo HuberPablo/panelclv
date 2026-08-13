@@ -43,7 +43,8 @@ from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation import panel_dataset
 from panelclv.tuning import run_optuna_study
 from panelclv.trials import make_data_builder, refit_best_trial
-from panelclv.models import forecast_recurrent, compute_forecast_metrics
+from panelclv.registry import rollout_for
+from panelclv.models import compute_forecast_metrics
 
 # 1. Panel -> model-ready tensors (calibration/holdout/samples/targets/seq_cols/...).
 #    validation_start carves the temporal validation window off the calibration tail.
@@ -52,7 +53,8 @@ cfg = PanelConfig(id_col="Id", target_col="Transactions", frequency="weekly",
                   training_start="1999-01-01", training_end="2000-12-31",
                   validation_start="2000-07-01",
                   holdout_start="2001-01-01", holdout_end="2001-12-31",
-                  time_cols=("year", "week"), clip_target_upper=6)
+                  time_cols=("year", "week"), clip_target_upper=6,
+                  embedded_cols={"Transactions": "auto"})
 data_full = panel_dataset.prepare_dataset(panel, cfg)
 
 # 2. Tune. make_data_builder gives run_optuna_study the per-trial data closure (the
@@ -73,12 +75,15 @@ study = run_optuna_study(
 rollout_model, data_best = refit_best_trial(study, data_full, "lstm", batch_size=512)
 
 # 4. Autoregressive Monte Carlo forecast + metrics (always forecast with data_best).
-forecast = forecast_recurrent(rollout_model, data_best, n_simulations=600, seed=42)
+#    The registry declares which simulator a model type rolls out through (ADR-0006);
+#    the two step different architectures, and the wrong pairing yields a wrong
+#    forecast rather than an error, so it is read rather than chosen.
+forecast = rollout_for("lstm")(rollout_model, data_best, n_simulations=600, seed=42)
 print(compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"]))
 ```
 
-Swap `model_type="lstm"` / `"transformer"` (and `forecast_recurrent` /
-`forecast_attention`) to run the other family on the same contract.
+Swap `model_type="lstm"` for `"transformer"` to run the other family on the same
+contract — `rollout_for` follows it to the matching simulator on its own.
 
 ## Notebooks
 

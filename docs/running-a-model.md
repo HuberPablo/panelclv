@@ -118,8 +118,10 @@ PanelConfig(
 ```
 
 Everything else takes a default: `date_col=None`, `periods_per_year=52`,
-`require_calibration_activity=True`, and the four covariate-role tuples `time`,
-`known_future`, `observed_past`, `static` all empty.
+`require_calibration_activity=True`, and the four **declared-covariate** roles `time`,
+`known_future`, `observed_past`, `static` all empty. Those four name columns that are
+already in the panel; `ar_features` above declares the *derived* covariates, computed
+from the target rather than read (`CONTEXT.md`).
 
 Two derived views the rest of the pipeline reads:
 
@@ -654,7 +656,7 @@ Three things this diagram is drawn to make unmissable:
 
 `forecast_recurrent` wraps this: seed once, upload the tensors once, run
 `n_simulations` paths, stack and average. `actual` is pulled from the holdout for
-scoring only — the test `test_forecast_never_reads_the_holdout` asserts a forecast
+scoring only — the test `test_rollout_never_reads_the_holdout` asserts a forecast
 that matched the truth exactly would be evidence of leakage, not skill.
 
 ---
@@ -687,8 +689,8 @@ exactly one place in the package.
 a noisy process; the suite runs many and keeps everything.
 
 `scripts/run_studies.py` is the headless entry point. There is no CLI and no config
-file to edit — you edit `load_panel()`, the `PanelConfig` and `build_models()` in the
-file itself, then run it. (`Studies/*/config.json` files are *written by* runs as
+file to edit — you edit `load_panel()`, `build_panel_config()` and `build_models()` in
+the file itself, then run it. (`Studies/*/config.json` files are *written by* runs as
 provenance; nothing reads them to drive one.)
 
 ```python
@@ -804,7 +806,7 @@ Same pipeline. Four divergences.
 
 **1 — Search space.** Its registry entry declares `d_model {32,64,128}`,
 `nhead {2,4,8}`, `num_encoder_layers (1,3,"int")`, `dropout (0.0,0.4)`, plus the
-shared `learning_rate` / `weight_decay` / `batch_size`. `suggest_transformer_params`
+shared `learning_rate` / `weight_decay` / `batch_size`. `registry._suggest_transformer_params`
 resolves `d_model` and `nhead` first and raises `optuna.TrialPruned` when
 `d_model % nhead != 0`, rather than narrowing the categorical domain per trial.
 

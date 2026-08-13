@@ -27,6 +27,22 @@ The number of transactions a customer made in one period. This is the target, an
 is treated as a category, never as a quantity.
 _Avoid_: frequency, volume, y
 
+**Covariate**:
+Any model input that is not the transaction count being predicted. A covariate is
+either **declared** — a panel column named in one of a `PanelConfig`'s roles — or
+**derived** — computed from the target's own past. The distinction is about where the
+value comes from, not how the model reads it: both occupy a channel of the same tensor,
+both are standardised the same way, and the covariate-subset search drops either.
+_Avoid_: predictor, regressor, explanatory variable
+
+**AR feature**:
+A derived covariate: a causal function of the target's own past — recency, cumulative
+counts, tenure, rate. The one kind of covariate that cannot be read from the panel
+during a rollout, because the panel's future does not exist yet; it is recomputed at
+each step from the counts the model itself sampled. That recomputation is what makes a
+rollout leak-free.
+_Avoid_: lagged feature, history feature, target encoding
+
 ### The time windows
 
 **Calibration window**:
@@ -120,8 +136,9 @@ One search over trials, yielding a single winning trial.
 _Avoid_: run, experiment, sweep
 
 There is deliberately **no term for "experiment"**. Every unit of work here is a trial, a
-study or a study suite; a fourth word for the same thing would only blur which of the three
-is meant.
+study, a study suite or a grid; a further word for the same thing would only blur which of
+the four is meant. The four are levels of containment, not synonyms — that is why each
+earns a name and "experiment" does not.
 
 **Refit**:
 Warm-start fine-tuning of a study's winning trial over the full calibration window — the
@@ -134,3 +151,10 @@ _Avoid_: retrain, fine-tune, final training
 Several studies per model over one shared dataset, so each model's result is reported
 as a distribution across replications rather than a single number.
 _Avoid_: batch, campaign
+
+**Grid**:
+A set of study suites, one per dataset, run to see how a model's error moves as some
+property of the data is varied. The Pareto/NBD grid varies the generating parameters of
+synthetic panels. A grid holds suites, which hold studies, which hold trials — it is a
+level above the suite, not another word for one.
+_Avoid_: sweep, matrix, experiment set
