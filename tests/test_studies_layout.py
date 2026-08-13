@@ -132,16 +132,6 @@ def test_validate_rejects_duplicate_names(tmp_path):
         cfg.validate()
 
 
-def test_validate_rejects_bad_prediction_source(tmp_path):
-    cfg = StudySuiteConfig(
-        studies_base_path=tmp_path, study_name="s", data=_data_stub(),
-        models=[ModelSpec(name="m", model_type="lstm")],
-        prediction_source="warmstart",
-    )
-    with pytest.raises(ValueError):
-        cfg.validate()
-
-
 def test_validate_rejects_missing_data_keys(tmp_path):
     cfg = StudySuiteConfig(
         studies_base_path=tmp_path, study_name="s", data={"ids": [1]},

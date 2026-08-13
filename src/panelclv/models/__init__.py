@@ -17,7 +17,7 @@ The surrounding concerns each have their own sibling subpackage under ``panelclv
 - ``panelclv.tuning``      — Optuna architecture / covariate-subset search.
 - ``panelclv.evaluation``  — metrics, plotting, forecast diagnostics, prediction CSV I/O.
 - ``panelclv.benchmarks``  — the non-neural Pareto/NBD comparator.
-- ``panelclv.experiments`` — thin prepare -> tune -> forecast orchestration glue.
+- ``panelclv.trials``      — assembling and refitting one trial.
 """
 
 from .embedders import (

@@ -122,7 +122,6 @@ def main() -> None:
         studies_base_path=str(STUDIES_BASE),
         study_name=f"{LOSS_TYPE}_{CONFIG_NAME}",     # new folder created under it
         n_studies_per_model=5,                       # X independent studies per model
-        prediction_source="refit",                  # "refit" | "checkpoint"
         n_simulations=600,
         device=device,
         data=data_full,                              # shared by all models

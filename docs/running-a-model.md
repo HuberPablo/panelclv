@@ -57,7 +57,7 @@ flowchart TD
                 P["raw panel<br/>DataFrame (rows, cols)"]
                 C["PanelConfig<br/>configs/panel_config.py"]
                 D["prepare_dataset<br/>data_preparation/dynamic_panel_dataset.py"]
-                L["make_loaders<br/>experiments/experiment_utils.py"]
+                L["split_calibration<br/>trials/loaders.py"]
                 M["MultinomialLSTMModel<br/>models/multinomial_lstm.py"]
                 F["fit_model<br/>training/training_utils.py"]
                 I["InferenceMultinomialLSTMModel<br/>+ load_state_dict"]
@@ -68,7 +68,7 @@ flowchart TD
                 D --> L --> M --> F --> I --> R --> S
             end
             O["run_optuna_study → objective<br/>n_trials × (suggest params,<br/>drop covariates, fit, score)"]
-            W["refit_best_trial<br/>or build_inference_from_trial"]
+            W["refit_best_trial<br/>trials/refit.py"]
             O -.->|"drives"| A1
             O --> W
         end
@@ -207,29 +207,31 @@ tuning. It is one of four arms that file pins, one per model family;
 `scripts/trace_golden_reachability.py` imports all four and runs them under a tracer,
 so the reachability evidence and the pinned test describe one code path.
 
-### 4.1 `make_loaders`
+### 4.1 `split_calibration`
 
-`experiments/experiment_utils.py` → `make_loaders(data, batch_size)`. Where numpy
-becomes tensors, and where the temporal split (ADR-0001) is enforced.
+`trials/loaders.py` → `split_calibration(data, batch_size)`. Where numpy becomes
+tensors, and the **sole enforcement point** of the temporal split (ADR-0001).
 
 ```python
-train_loader, val_loader, metadata = make_loaders(data, batch_size=8)
+split = split_calibration(data, batch_size=8)   # .train_loader / .val_loader / .recipe
 ```
 
 | | X | y | note |
 |---|---|---|---|
 | train | `(8, 38, 5)` float32 | `(8, 38)` int64 | truncated at `val_start_idx - 1` |
 | val | `(8, 51, 5)` float32 | `(8, 51)` int64 | **full** sequence |
-| refit | `(8, 51, 5)` | `(8, 51)` | all transitions, via `make_refit_loader` |
+| refit | `(8, 51, 5)` | `(8, 51)` | all transitions, via `refit_loader` |
 
 The split is temporal, not customer-wise: **all 23 customers appear in both
 loaders**, cut by date. The validation loader gets the *full* sequence because the
-model needs the earlier periods as warm-up; `metadata["val_score_start"] = 38` tells
+model needs the earlier periods as warm-up; `recipe["val_score_start"] = 38` tells
 `fit_model` to score only from that position on. Passing the truncated sequence
 instead would score a cold model.
 
-`metadata` also carries `seq_cols`, `embedded_cols`, `target_col` and `seq_len=38` —
-this is what the embedder is built from, so the model never learns a column name.
+The `recipe` also carries `seq_cols`, `embedded_cols`, `target_col` and `seq_len=38` —
+this is what the embedder is built from, so the model never learns a column name. It
+is a named field of `CalibrationSplit` rather than a trailing dict because every model
+constructor downstream is rebuilt from it.
 
 ### 4.2 The embedder and the model
 
@@ -518,7 +520,7 @@ flowchart TD
     START["run_optuna_study<br/>n_trials"] --> T["objective(trial)"]
     T --> SP["suggest_lstm_params<br/>merge data_info over LSTM_SEARCH_DEFAULTS"]
     SP --> CS["suggest_covariate_selection<br/>one boolean per removable entry"]
-    CS --> DB["data_builder(drop_cols, batch_size)<br/>= select_features + make_loaders"]
+    CS --> DB["data_builder(drop_cols, batch_size)<br/>= select_features + split_calibration"]
     DB --> BM["_build_lstm<br/>ProjectedEmbedder + MultinomialLSTMModel"]
     BM --> FIT["fit_model<br/>reports per-epoch loss to the trial"]
     FIT --> PRUNE{"MedianPruner<br/>says stop?"}
@@ -554,36 +556,35 @@ finishes. Long studies otherwise accumulate one checkpoint per trial.
 ## 6. From winning trial to inference model
 
 The winner is a set of hyperparameters and a feature subset — not yet a model that
-can forecast. Two routes turn it into one, selected by `prediction_source`.
+can forecast. One route turns it into one: the refit (ADR-0008).
 
-**`"checkpoint"` — `build_inference_from_trial(study, data_full, model_type)`.**
-Slice `data_full` to the winning feature set, rebuild the inference model from
-`best_trial.params`, load that trial's own checkpoint. The weights are exactly the
-ones early stopping chose, trained on calibration-minus-validation.
+**`refit_best_trial(study, data_full, model_type, ...)`.** Slice `data_full` to the
+winning feature set and rebuild the training model from `best_trial.params`, then
+`refit_full_calibration` warm-starts from the trial's checkpoint and trains
+`DEFAULT_REFIT_EPOCHS = 5` more epochs over the **full** calibration window
+(`refit_loader`) — no validation, no early stopping — and saves the *final* weights.
+`build_inference_from_trial`, pointed at that new checkpoint, rebuilds the inference
+model and loads them.
 
-**`"refit"` — `refit_best_trial(study, data_full, model_type, ...)`.** The same
-rebuild, then `refit_full_calibration` warm-starts from the trial's checkpoint and
-trains `DEFAULT_REFIT_EPOCHS = 5` more epochs over the **full** calibration window
-(`make_refit_loader`) — no validation, no early stopping — and saves the *final*
-weights. Then it re-enters `build_inference_from_trial` pointed at the new
-checkpoint.
+The reasoning is paper fidelity: Valendin et al. perform several fine-tuning epochs
+using the entire calibration set after selection. The validation window is real data
+the tuning run deliberately held back, and once hyperparameters are chosen, spending
+it on training is free information. The cost is that the returned weights were never
+validated — and that the published `rfm2lstm` behaviour (forecast the tuning
+checkpoint as-is) is no longer expressible from this package.
 
-The reasoning: the validation window is real data the tuning run deliberately held
-back. Once hyperparameters are chosen, spending it on training is free information.
-The cost is that the returned weights were never validated.
-
-**They produce different forecasts.** Same study, same seed, same simulator:
+**The two differ.** Same study, same seed, same simulator, measured before the
+checkpoint route was removed:
 
 ```
 checkpoint : rmse 1.726055127841468  bias_percent 182.33381502890174
 refit      : rmse 1.691715748556194  bias_percent 173.121387283237
 ```
 
-`prediction_mean` arrays are not equal. If a forecast does not match the val loss
-you remember from tuning, this is usually why. `run_studies.py` and the archived
-suites default to `"refit"`.
+If a forecast does not match the val loss you remember from tuning, this is usually
+why.
 
-Both return `(inference_model, data_best)`, and **the forecaster must be fed
+It returns `(inference_model, data_best)`, and **the forecaster must be fed
 `data_best`**, never `data_full` — its `seq_cols` and `target_idx` match the trained
 weights. Returning both together is what removes that footgun.
 
@@ -675,7 +676,6 @@ config = StudySuiteConfig(
     study_name="electronics_2026_06",
     data=data_full,                  # ONE prepare_dataset dict, shared by all models
     n_studies_per_model=5,
-    prediction_source="refit",       # or "checkpoint" — see section 6
     n_simulations=600,
     base_seed=42,
     models=[
@@ -698,7 +698,7 @@ For each neural model, for `i` in `1..n_studies_per_model`:
 2. `data_info` is augmented with that seed and a per-study `checkpoint_dir` — **the
    runner owns the seed**, so a `ModelSpec` cannot accidentally pin one.
 3. `run_optuna_study(..., sampler=TPESampler(seed=seed), append_timestamp=False)`.
-4. `_rebuild_winner` → `refit_best_trial` or `build_inference_from_trial`.
+4. `refit_best_trial` — the only route to a forecast-ready model (ADR-0008).
 5. `_FORECASTERS[model_type]` runs the rollout at `n_simulations`.
 6. Predictions to CSV, `compute_forecast_metrics`, one row appended.
 
@@ -738,7 +738,7 @@ Studies/<study_name>/
                 study_01_best.json      winner: params, user_attrs
                 study_01_trials.csv     every trial
                 checkpoints/study_01/   per-trial .pth
-                refit_checkpoints/      only when prediction_source="refit"
+                refit_checkpoints/      the refit's weights (ADR-0008)
             study_02/ ...
         Predictions/
             Prediction_1.csv     (N × T_HOLD) wide: id_col + week_0..week_{T-1}
@@ -810,8 +810,8 @@ feed would reset the position to 0 and drop all history. The model is called wit
 `build_inference_from_trial` drops a stale `_cached_mask` key before
 `load_state_dict` (older checkpoints persisted the causal mask; a no-op for the LSTM).
 
-Everything else — `PanelConfig`, `prepare_dataset`, `make_loaders`, `fit_model`,
-refit-vs-checkpoint, `compute_forecast_metrics`, the archive — is unchanged.
+Everything else — `PanelConfig`, `prepare_dataset`, `split_calibration`, `fit_model`,
+the refit, `compute_forecast_metrics`, the archive — is unchanged.
 
 ---
 
@@ -953,8 +953,9 @@ positional. A reordered `seq_cols` loads cleanly and reads the wrong channel —
 winning trial's model has a different `F`. Both `build_inference_from_trial` and
 `refit_best_trial` return the sliced dict alongside the model for this reason.
 
-**`refit` and `checkpoint` give different weights.** See section 6. If a forecast
-looks unlike the val loss from tuning, check `prediction_source` first.
+**The refit's weights are not the tuning checkpoint's.** See section 6. If a forecast
+looks unlike the val loss from tuning, that is usually why — the refit trains on the
+validation window too, and nothing validates the weights it ends on.
 
 **`max_trans` is a class count, not a maximum index.** Pass
 `data["embedded_cols"][target_col]`, which is already the count.

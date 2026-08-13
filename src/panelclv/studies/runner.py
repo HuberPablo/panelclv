@@ -4,9 +4,9 @@ This is pure orchestration — it adds no modeling logic, it only loops over the
 config and calls the existing pieces:
 
     prepare_dataset (already done by the user, shared as config.data)
-        -> make_data_builder                 (panelclv.experiments)
+        -> make_data_builder                 (panelclv.trials)
         -> run_optuna_study                  (panelclv.tuning)
-        -> refit_best_trial / build_inference_from_trial (panelclv.experiments)
+        -> refit_best_trial                  (panelclv.trials)
         -> mc_forecast / mc_forecast_transformer         (panelclv.models)
         -> save_predictions_to_csv           (panelclv.evaluation)
         -> compute_forecast_metrics          (panelclv.models)
@@ -32,12 +32,8 @@ import pandas as pd
 
 from panelclv.benchmarks import compute_pareto_predictions
 from panelclv.evaluation.plot_utils import save_predictions_to_csv
-from panelclv.experiments import (
-    build_inference_from_trial,
-    make_data_builder,
-    refit_best_trial,
-)
 from panelclv.models import compute_forecast_metrics, mc_forecast, mc_forecast_transformer
+from panelclv.trials import make_data_builder, refit_best_trial
 from panelclv.tuning import run_optuna_study
 
 from .config import StudySuiteConfig, ModelSpec
@@ -121,11 +117,20 @@ def _run_neural_model(
             sampler=optuna.samplers.TPESampler(seed=seed),
             # Suite-wide disk policy: when True, drop every non-best trial's
             # checkpoint once this study finishes (the winning checkpoint, which
-            # the refit/checkpoint rebuild below reloads, is preserved).
+            # the refit below warm-starts from, is preserved).
             keep_only_best_checkpoint=config.keep_only_best_checkpoint,
         )
 
-        inference_model, data_best = _rebuild_winner(study, spec, config, sdir)
+        # Every forecast comes from a refit on the full calibration window (ADR-0008).
+        # Explicit device/checkpoint_dir first, then user refit_kwargs (may override).
+        refit_args = {
+            "device": config.device,
+            "checkpoint_dir": str(sdir / "refit_checkpoints"),
+            **config.refit_kwargs,
+        }
+        inference_model, data_best = refit_best_trial(
+            study, config.data, spec.model_type, **refit_args
+        )
 
         forecast = forecaster(
             inference_model,
@@ -156,21 +161,6 @@ def _run_neural_model(
 
     pd.DataFrame(rows).to_csv(model_dir / "metrics.csv", index=False)
     return rows
-
-
-def _rebuild_winner(
-    study: "optuna.Study", spec: ModelSpec, config: StudySuiteConfig, sdir: Path
-):
-    """Rebuild the best trial's forecast-ready model per ``prediction_source``."""
-    if config.prediction_source == "refit":
-        # Explicit device/checkpoint_dir, then user refit_kwargs (which may override).
-        refit_args = {
-            "device": config.device,
-            "checkpoint_dir": str(sdir / "refit_checkpoints"),
-            **config.refit_kwargs,
-        }
-        return refit_best_trial(study, config.data, spec.model_type, **refit_args)
-    return build_inference_from_trial(study, config.data, spec.model_type)
 
 
 def _run_pareto_model(
@@ -242,7 +232,6 @@ def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
         "created": datetime.now().isoformat(timespec="seconds"),
         "studies_base_path": str(config.studies_base_path),
         "n_studies_per_model": config.n_studies_per_model,
-        "prediction_source": config.prediction_source,
         "n_simulations": config.n_simulations,
         "base_seed": config.base_seed,
         "device": config.device,
@@ -278,7 +267,6 @@ def _model_record(spec: ModelSpec, config: StudySuiteConfig) -> dict[str, Any]:
     record: dict[str, Any] = {
         "name": spec.name,
         "model_type": spec.model_type,
-        "prediction_source": config.prediction_source,
         "n_simulations": config.n_simulations,
         "base_seed": config.base_seed,
         "device": config.device,

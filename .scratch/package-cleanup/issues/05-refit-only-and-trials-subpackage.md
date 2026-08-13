@@ -8,7 +8,7 @@ Two changes in one issue because they rewrite the same module, and neither moves
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
 Source: `.scratch/package-simplification/issues/06-target-architecture.md` (decision 3),
 `08-reconcile-adrs-and-vocabulary.md`, `09-module-naming.md` (decisions 2, 8, 11)
@@ -60,10 +60,23 @@ modeling logic". It holds one.
 mention `make_loaders` in code comments only — update them for accuracy, but nothing breaks
 if missed. Notebook cost is measured per symbol, never assumed.
 
-- [ ] `prediction_source` gone; the three notebook toggles removed
-- [ ] ADR-0008 present, copied verbatim from ticket 08
-- [ ] Subpackage renamed, split into loaders and refit halves, four notebook imports updated
-- [ ] `split_calibration` returns a named `CalibrationSplit`; `refit_loader` renamed
-- [ ] Subpackage docstring no longer claims to hold no modeling logic
-- [ ] `CLAUDE.md`'s "Where things live" updated for the new subpackage name
-- [ ] Golden test green at rel=1e-6; notebook API test green
+- [x] `prediction_source` gone; the three notebook toggles removed
+      (with `VALID_PREDICTION_SOURCES`, its `validate()` branch, `runner._rebuild_winner`,
+      and the key both `_suite_record` and `_model_record` wrote — archived suites keep
+      theirs, so `test_archive_formats.py` still asserts it as a read-path fact)
+      **One deletion beyond the checklist, and it is the point of the ticket:** each
+      notebook's cell 8 called `build_inference_from_trial` and cell 8b then rebound it.
+      Removing only the toggle would have made *cell run order* the toggle — run 8, skip
+      8b, and you get the deleted `prediction_source="checkpoint"` forecast, against
+      `CLAUDE.md` priority 2. The three cells and the now-unused import go; the function
+      stays, since ticket 07 owns its removal.
+- [x] ADR-0008 present, copied verbatim from ticket 08
+- [x] Subpackage renamed, split into loaders and refit halves, four notebook imports updated
+      (`build_inference_from_trial` went to the refit half: `refit_best_trial` is its only
+      caller in `src/` now that the checkpoint branch is gone)
+- [x] `split_calibration` returns a named `CalibrationSplit`; `refit_loader` renamed
+      (`make_data_builder` flattens the split back to the `(train, val, metadata)` tuple
+      `run_optuna_study`'s contract asks for — that contract is the tuner's, untouched here)
+- [x] Subpackage docstring no longer claims to hold no modeling logic
+- [x] `CLAUDE.md`'s "Where things live" updated for the new subpackage name
+- [x] Golden test green at rel=1e-6; notebook API test green (full suite: 193 passed)

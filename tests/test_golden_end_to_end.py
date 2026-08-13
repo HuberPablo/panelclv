@@ -60,7 +60,7 @@ from panelclv.benchmarks import (  # noqa: E402
 )
 from panelclv.configs.panel_config import PanelConfig  # noqa: E402
 from panelclv.data_preparation import dynamic_panel_dataset  # noqa: E402
-from panelclv.experiments import make_loaders  # noqa: E402
+from panelclv.trials import split_calibration  # noqa: E402
 from panelclv.models.embedders import ProjectedEmbedder  # noqa: E402
 from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
     compute_forecast_metrics,
@@ -200,22 +200,22 @@ def _projected_embedder(metadata) -> ProjectedEmbedder:
 def _fit_and_roll(data, train_cls, rollout_cls, build, forecaster, tmp_path) -> dict:
     """The tail every rollout arm shares: fit two epochs, reload, roll out, score.
 
-    `build(cls, metadata)` constructs one model of class `cls` from the loader metadata;
+    `build(cls, metadata)` constructs one model of class `cls` from the split's recipe;
     it is called twice, each time immediately after the torch seed is set, so the trained
     model and the rollout model start from identical weights — the
     constructor-arguments-must-match invariant, made concrete.
     """
-    train_loader, val_loader, metadata = make_loaders(data, batch_size=8)
+    split = split_calibration(data, batch_size=8)
     n_classes = int(data["embedded_cols"]["Transactions"])
 
     def _seeded(cls):
         torch.manual_seed(TORCH_SEED)
-        return build(cls, metadata)
+        return build(cls, split.recipe)
 
     fit = fit_model(
         _seeded(train_cls),
-        train_loader,
-        val_loader,
+        split.train_loader,
+        split.val_loader,
         max_trans=n_classes,          # class COUNT, not the maximum class index
         n_epochs=2,
         patience=2,
@@ -223,7 +223,7 @@ def _fit_and_roll(data, train_cls, rollout_cls, build, forecaster, tmp_path) -> 
         checkpoint_dir=str(tmp_path),
         model_name="golden",
         verbose=False,
-        val_score_start=metadata["val_score_start"],
+        val_score_start=split.recipe["val_score_start"],
     )
 
     rollout_model = _seeded(rollout_cls)

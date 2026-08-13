@@ -161,6 +161,9 @@ SUITE_CONFIG_KEYS_CURRENT = {"overwrite", "keep_only_best_checkpoint", "panel_co
 DATA_SUMMARY_KEYS = {
     "n_customers", "T_CAL", "T_HOLD", "F", "seq_cols", "target_col", "validation_start",
 }
+# Keys every archived per-model `config.json` carries. `prediction_source` is among
+# them: the writer stopped emitting it when the refit became the only forecast source
+# (ADR-0008), but every suite on disk predates that, and this list describes the disk.
 MODEL_CONFIG_KEYS = {
     "name", "model_type", "prediction_source", "n_simulations", "base_seed", "device",
 }
@@ -297,7 +300,8 @@ FIXTURE_SUITE_CONFIG = {
     },
 }
 
-# Per-model `config.json`, exactly the two shapes `runner._model_record` produces.
+# Per-model `config.json`, the two shapes `runner._model_record` produced when these
+# suites were written.
 FIXTURE_MODEL_CONFIGS = {
     "LSTM": {
         "name": "LSTM",

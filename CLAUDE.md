@@ -51,7 +51,8 @@ them and there is no umbrella re-export — import from the subpackage that owns
 - `training` — the training loop.
 - `tuning` — Optuna architecture and covariate-subset search.
 - `evaluation` — metrics, plots, forecast diagnostics, prediction I/O.
-- `experiments` — glue tying prepare, tune and forecast together.
+- `trials` — assembling and refitting one trial: the temporal calibration split
+  (ADR-0001) and the full-calibration refit every forecast comes from (ADR-0008).
 - `studies` — running many studies across many models and archiving the results.
 
 Each subpackage's `__init__.py` documents its own contents. Read those rather than

@@ -54,6 +54,15 @@ RETIRED = [
      "compute_forecast_metrics is the only implementation of rmse / bias / MAPE"),
     (r"mc_compute_metrics", "the authority is compute_forecast_metrics"),
     (r"mape_aggregate_style", "compute_forecast_metrics returns mape_aggregate"),
+    # Retired by the package cleanup, issue 05: refit-only forecasting, and the
+    # `experiments` -> `trials` rename.
+    (r"REFIT_ON_FULL_CALIBRATION",
+     "every forecast comes from a refit (ADR-0008), so there is no toggle"),
+    (r"prediction_source",
+     "StudySuiteConfig has no prediction source; the refit is the only one"),
+    (r"panelclv\.experiments", "the subpackage is `panelclv.trials`"),
+    (r"make_loaders", "the temporal split is `trials.split_calibration`"),
+    (r"make_refit_loader", "it is `trials.refit_loader`"),
 ]
 
 

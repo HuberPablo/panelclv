@@ -4,7 +4,7 @@ Specify a set of models and a single shared dataset, run ``n_studies_per_model``
 independent Optuna studies per model, keep the best trial of each study, forecast
 it, and archive everything under ``Studies/<study_name>/`` in a uniform,
 analysis-ready layout. This subpackage holds only orchestration — it reuses
-``panelclv.experiments`` / ``tuning`` / ``models`` / ``benchmarks`` and adds no
+``panelclv.trials`` / ``tuning`` / ``models`` / ``benchmarks`` and adds no
 modeling logic.
 
 Typical use (see ``scripts/run_studies.py`` for a full example)::

@@ -944,8 +944,8 @@ def prepare_dataset(
         "target_idx":    target_idx,
         # Temporal validation split (see step 6b): the calibration PERIOD index
         # where the validation window begins, its length, and the source date.
-        # Consumed by make_loaders (train = prefix transitions, val = full
-        # sequence scored on the suffix) and the Optuna rollout horizon.
+        # Consumed by trials.split_calibration (train = prefix transitions, val =
+        # full sequence scored on the suffix).
         "val_start_idx":   val_start_idx,
         "n_val_periods":   n_val_periods,
         "validation_start": config["validation_start"],

@@ -238,7 +238,7 @@ def fit_model(
     `val_score_start` is the temporal-validation hook: the val_loader feeds the full
     calibration sequence (warm-up), but only steps >= `val_score_start` are scored, so
     early stopping tracks cross-entropy on the validation window alone. Build the loaders
-    with `experiments.make_loaders` (which sets `metadata["val_score_start"] = s-1`) and
+    with `trials.split_calibration` (whose recipe sets `val_score_start` = s-1) and
     pass that value through here. 0 (default) scores every step.
     """
     device = _select_device(device)
@@ -410,7 +410,7 @@ def refit_full_calibration(
 
     `train_loader` must yield the full-calibration AR pairs (all T-1 transitions), unlike
     the temporally-truncated training loader used during tuning — build it with
-    `experiments.make_refit_loader`.
+    `trials.refit_loader`.
     """
     device = _select_device(device)
     model = model.to(device)

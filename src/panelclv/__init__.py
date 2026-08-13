@@ -13,7 +13,8 @@ a single concern:
 - ``panelclv.tuning`` — Optuna architecture / covariate-subset search.
 - ``panelclv.evaluation`` — metrics, plotting, forecast diagnostics, prediction CSV I/O.
 - ``panelclv.benchmarks`` — the non-neural Pareto/NBD comparator (hierarchical Bayes).
-- ``panelclv.experiments`` — thin prepare -> tune -> forecast orchestration glue.
+- ``panelclv.trials`` — assembling and refitting one trial (the ADR-0001 split,
+  the ADR-0008 refit).
 - ``panelclv.data_preparation`` — panel/dataset construction and the leak-free
   autoregressive feature engineering used by the simulator.
 - ``panelclv.configs`` — schema-driven input/transformation specs and the

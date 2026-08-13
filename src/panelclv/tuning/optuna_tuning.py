@@ -23,9 +23,9 @@ axis), `embedded_cols` ({col: cardinality}), and `target_col`
 (the AR target, default "Transactions"); optionally `seq_len` (Transformer
 fixed-length mask cache; the LSTM ignores it) and `val_score_start` (the temporal
 validation boundary — the objective forwards it to `fit_model` so `val_loss` is the
-cross-entropy on the validation window only). `experiments.make_loaders` /
-`make_data_builder` produce a contract-compliant builder from a `prepare_dataset`
-dict; the train/val split is temporal (a time window over all customers).
+cross-entropy on the validation window only). `trials.split_calibration` /
+`trials.make_data_builder` produce a contract-compliant builder from a
+`prepare_dataset` dict; the train/val split is temporal (a time window over all customers).
 
 Feature-group selection
 -----------------------
@@ -679,7 +679,7 @@ def objective(
         class_weights=data_info.get("class_weights"),
         focal_gamma=focal_gamma,
         # Temporal split: score CE only on the validation suffix (periods after
-        # validation_start). make_loaders puts this in metadata; 0 ⇒ score all steps.
+        # validation_start). split_calibration puts this in its recipe; 0 ⇒ score all steps.
         val_score_start=metadata.get("val_score_start", 0),
     )
     trial.set_user_attr("checkpoint_path", str(result.checkpoint_path))

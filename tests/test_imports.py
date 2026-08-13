@@ -21,7 +21,7 @@ SUBPACKAGES = [
     "panelclv.tuning",
     "panelclv.evaluation",
     "panelclv.benchmarks",
-    "panelclv.experiments",
+    "panelclv.trials",
     "panelclv.data_preparation",
     "panelclv.configs",
 ]
@@ -45,7 +45,7 @@ def test_public_api_resolves_from_new_homes():
     from panelclv.tuning import run_optuna_study, select_features
     from panelclv.evaluation import metrics_table, plot_weekly_aggregated
     from panelclv.benchmarks import compute_pareto_predictions
-    from panelclv.experiments import make_data_builder, build_inference_from_trial
+    from panelclv.trials import make_data_builder, build_inference_from_trial
 
     # `mc_forecast` is documented as an alias for `run_monte_carlo_forecast`.
     assert mc_forecast is run_monte_carlo_forecast
@@ -166,3 +166,29 @@ def test_rollout_composite_selection_is_gone():
         params = inspect.signature(fn).parameters
         assert "selection_metric" not in params, fn.__name__
         assert not [p for p in params if p.startswith("rollout")], fn.__name__
+
+
+def test_refit_is_the_only_forecast_source():
+    """`prediction_source` and the `experiments` subpackage are gone — issue 05.
+
+    ADR-0008 makes the refit on the full calibration window the one way a forecast is
+    produced, so `StudySuiteConfig` has no knob choosing between it and the tuning
+    checkpoint; a re-added field would be a knob with one legal value again. The
+    subpackage rename is guarded in the same place because the old name had no referent
+    in `CONTEXT.md`'s vocabulary, and an `experiments` module re-appearing by habit is
+    exactly what the rename was for.
+    """
+    import dataclasses
+
+    from panelclv.studies import StudySuiteConfig
+    import panelclv.studies.config as studies_config
+
+    fields = {f.name for f in dataclasses.fields(StudySuiteConfig)}
+    assert "prediction_source" not in fields
+    assert not hasattr(studies_config, "VALID_PREDICTION_SOURCES")
+
+    with pytest.raises(ImportError):
+        importlib.import_module("panelclv.experiments")
+
+    # The two halves the old catch-all split into, under their current names.
+    from panelclv.trials import CalibrationSplit, refit_loader, split_calibration  # noqa: F401

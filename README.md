@@ -17,18 +17,17 @@ pip install -e .
 The project uses a **src-layout** (the package lives in `src/panelclv/`), so installing
 it is what puts `panelclv` on the path — there are no `sys.path` hacks. It is split by
 concern into subpackages: `panelclv.models`, `panelclv.training`, `panelclv.tuning`,
-`panelclv.evaluation`, `panelclv.benchmarks`, `panelclv.experiments`,
+`panelclv.evaluation`, `panelclv.benchmarks`, `panelclv.trials`,
 `panelclv.data_preparation`, `panelclv.configs`. Import from the relevant one, e.g.
 `from panelclv.tuning import run_optuna_study`. For the test runner, use
 `pip install -e ".[dev]"` and run `pytest`.
 
 ## Quickstart
 
-The whole flow is: build/load a panel → prepare tensors → tune (Optuna) → rebuild the
-winning model (optionally retrain on full calibration) → Monte Carlo forecast → report.
-The `panelclv.experiments` helpers (`make_data_builder`, `make_loaders`,
-`build_inference_from_trial`, `refit_best_trial`) absorb the mechanical glue so the
-notebook stays in control of every modeling choice.
+The whole flow is: build/load a panel → prepare tensors → tune (Optuna) → refit the
+winning trial on the full calibration window → Monte Carlo forecast → report. The
+`panelclv.trials` helpers (`make_data_builder`, `split_calibration`, `refit_best_trial`)
+absorb the mechanical glue so the notebook stays in control of every modeling choice.
 
 The train/validation split is **temporal**: set `validation_start` in `PanelConfig` and
 the calibration window is cut at that date. Weights train only on
@@ -42,7 +41,7 @@ import pandas as pd
 from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation import dynamic_panel_dataset
 from panelclv.tuning import run_optuna_study
-from panelclv.experiments import make_data_builder, build_inference_from_trial, refit_best_trial
+from panelclv.trials import make_data_builder, refit_best_trial
 from panelclv.models import mc_forecast, compute_forecast_metrics
 
 # 1. Panel -> model-ready tensors (calibration/holdout/samples/targets/seq_cols/...).
@@ -66,10 +65,9 @@ study = run_optuna_study(
     n_trials=30,
 )
 
-# 3. Final model. Either load the tuning checkpoint as-is...
-inference_model, data_best = build_inference_from_trial(study, data_full, "lstm")
-# ...or warm-start retrain the winner on the FULL calibration (validation tail
-#    included) for a few big-batch epochs, the Valendin et al. paper's final step:
+# 3. Final model: warm-start retrain the winner on the FULL calibration window
+#    (validation tail included) for several big-batch epochs — the Valendin et al.
+#    paper's final step, and the only route to a forecast here (ADR-0008).
 inference_model, data_best = refit_best_trial(study, data_full, "lstm", batch_size=512)
 
 # 4. Autoregressive Monte Carlo forecast + metrics (always forecast with data_best).

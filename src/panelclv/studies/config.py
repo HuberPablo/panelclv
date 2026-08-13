@@ -12,8 +12,8 @@ tree). The user only writes two dataclasses:
   The hyperparameter/feature search space lives inside ``run_optuna_study`` /
   ``make_data_builder``, so it is intentionally NOT restated here.
 - ``StudySuiteConfig`` — the suite-wide settings: where to write, how many studies
-  per model, the prediction source, and the single shared ``prepare_dataset``
-  dict (``data``) used by every model.
+  per model, and the single shared ``prepare_dataset`` dict (``data``) used by
+  every model.
 
 Both are plain dataclasses with a ``validate()`` that fails loudly and early — a
 typo'd ``model_type`` or a missing base path should raise before any training.
@@ -29,7 +29,6 @@ from typing import Any
 # Pareto/NBD baseline is a single deterministic fit (no tuning, one prediction).
 NEURAL_MODEL_TYPES = ("lstm", "transformer", "valendin_lstm")
 VALID_MODEL_TYPES = NEURAL_MODEL_TYPES + ("pareto_nbd",)
-VALID_PREDICTION_SOURCES = ("refit", "checkpoint")
 
 # Keys the runner reads off the shared ``prepare_dataset`` dict. Checked up front
 # so a dict that did not come from ``prepare_dataset`` fails clearly rather than
@@ -95,10 +94,6 @@ class StudySuiteConfig:
     n_studies_per_model
         How many independent Optuna studies to run per neural model (each gets its
         own seed). Coerced to 1 for the deterministic Pareto/NBD baseline.
-    prediction_source
-        ``"refit"`` (warm-start retrain on the full calibration window — the
-        paper's final step, the default) or ``"checkpoint"`` (the best trial's own
-        tuning weights).
     n_simulations
         Monte Carlo paths per forecast.
     base_seed
@@ -112,9 +107,9 @@ class StudySuiteConfig:
         trial's ``.pth``; these accumulate fast (``n_trials`` per study × every
         study). ``True`` forwards to ``run_optuna_study`` so that, once each study
         completes, all non-best trial checkpoints are deleted — only the study's
-        winning checkpoint survives. That winner is exactly what ``prediction_source``
-        (``"refit"`` warm-start or ``"checkpoint"``) rebuilds from, so the forecast
-        is unaffected; you only lose the ability to inspect losing trials' weights.
+        winning checkpoint survives. That winner is exactly what the refit warm-starts
+        from (ADR-0008), so the forecast is unaffected; you only lose the ability to
+        inspect losing trials' weights.
     """
 
     studies_base_path: str | Path
@@ -122,7 +117,6 @@ class StudySuiteConfig:
     data: dict[str, Any]
     models: list[ModelSpec]
     n_studies_per_model: int = 5
-    prediction_source: str = "refit"
     n_simulations: int = 600
     base_seed: int = 42
     device: str | None = None
@@ -156,11 +150,6 @@ class StudySuiteConfig:
                     f"got {m.model_type!r}"
                 )
 
-        if self.prediction_source not in VALID_PREDICTION_SOURCES:
-            raise ValueError(
-                f"prediction_source must be one of {VALID_PREDICTION_SOURCES}, "
-                f"got {self.prediction_source!r}"
-            )
         if self.n_studies_per_model < 1:
             raise ValueError(
                 f"n_studies_per_model must be >= 1, got {self.n_studies_per_model}"
