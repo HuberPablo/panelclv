@@ -988,7 +988,7 @@ def prepare_dataset(
         # in raw units and must standardize them before feeding them back.
         "covariate_stats": covariate_stats,
         "ar_features":   ar_features,
-        "N  ":             N,
+        "N":             N,
         "T_CAL":         T_CAL,
         "T_HOLD":        T_HOLD,
         "F":             len(seq_cols),
