@@ -39,8 +39,8 @@ import optuna
 from panelclv.benchmarks.valendin_lstm import ValendinLSTMModel
 from panelclv.models.embedders import ProjectedEmbedder
 from panelclv.models.monte_carlo_forecasting import (
-    run_monte_carlo_forecast,
-    run_monte_carlo_forecast_transformer,
+    forecast_recurrent,
+    forecast_attention,
 )
 from panelclv.models.multinomial_lstm import MultinomialLSTMModel
 from panelclv.models.multinomial_transformer import MultinomialTransformerModel
@@ -284,7 +284,7 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
         },
         suggest=_suggest_every_param,
         build=_build_lstm,
-        rollout=run_monte_carlo_forecast,
+        rollout=forecast_recurrent,
     ),
     "transformer": ModelEntry(
         search_space={
@@ -300,7 +300,7 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
         },
         suggest=_suggest_transformer_params,
         build=_build_transformer,
-        rollout=run_monte_carlo_forecast_transformer,
+        rollout=forecast_attention,
     ),
     # The Valendin benchmark's architecture is FROZEN (ADR-0004): its widths are the
     # published `memory_units = 128` / `dense_units = 128` and its embeddings are raw
@@ -317,7 +317,7 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
         },
         suggest=_suggest_every_param,
         build=_build_valendin,
-        rollout=run_monte_carlo_forecast,
+        rollout=forecast_recurrent,
     ),
     # Declarative only. The Pareto/NBD benchmark is a single hierarchical-Bayes MCMC
     # fit: no Optuna study, no training, one prediction. Its entry exists so every

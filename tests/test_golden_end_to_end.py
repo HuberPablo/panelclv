@@ -8,8 +8,8 @@ different forecast, and no unit test notices.
 **Four arms**, one per model family, because the families share a pipeline but not a
 stepper, and a net that covers one covers the others only by assumption:
 
-    lstm           the developed recurrent model, `run_monte_carlo_forecast`
-    transformer    the developed attention model, `run_monte_carlo_forecast_transformer`
+    lstm           the developed recurrent model, `forecast_recurrent`
+    transformer    the developed attention model, `forecast_attention`
     valendin_lstm  the frozen published benchmark (ADR-0004), recurrent rollout
     pareto_nbd     the frozen Pareto/NBD benchmark — an MCMC fit, no training, no rollout
 
@@ -63,8 +63,8 @@ from panelclv.trials import split_calibration  # noqa: E402
 from panelclv.models.embedders import ProjectedEmbedder  # noqa: E402
 from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
     compute_forecast_metrics,
-    run_monte_carlo_forecast,
-    run_monte_carlo_forecast_transformer,
+    forecast_recurrent,
+    forecast_attention,
 )
 from panelclv.models.multinomial_lstm import MultinomialLSTMModel  # noqa: E402
 from panelclv.models.multinomial_transformer import (  # noqa: E402
@@ -250,7 +250,7 @@ def run_lstm_pipeline(tmp_path) -> dict:
         data,
         MultinomialLSTMModel,
         build,
-        run_monte_carlo_forecast,
+        forecast_recurrent,
         tmp_path,
     )
 
@@ -258,9 +258,9 @@ def run_lstm_pipeline(tmp_path) -> dict:
 def run_transformer_pipeline(tmp_path) -> dict:
     """The attention arm: same panel and same contract, growing-window stepper.
 
-    `run_monte_carlo_forecast_transformer` is what every Transformer study runs through
-    in production, and the recurrent/attention crossing fails silently rather than
-    raising — which is why this arm exists.
+    `forecast_attention` is what every Transformer study runs through in production,
+    and the recurrent/attention crossing fails silently rather than raising — which
+    is why this arm exists.
     """
     data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
 
@@ -278,7 +278,7 @@ def run_transformer_pipeline(tmp_path) -> dict:
         data,
         MultinomialTransformerModel,
         build,
-        run_monte_carlo_forecast_transformer,
+        forecast_attention,
         tmp_path,
     )
 
@@ -305,7 +305,7 @@ def run_valendin_pipeline(tmp_path) -> dict:
         data,
         ValendinLSTMModel,
         build,
-        run_monte_carlo_forecast,
+        forecast_recurrent,
         tmp_path,
     )
 

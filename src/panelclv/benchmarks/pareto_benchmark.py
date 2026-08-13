@@ -50,16 +50,26 @@ Public API
 ----------
 `compute_pareto_predictions` takes a `prepare_dataset` training panel and returns
 `(predictions (N, H), ids)` — the contract the plots, metrics tables and the study
-runner all consume.
+runner all consume. Two wrappers sit on top of it for callers holding the whole
+`prepare_dataset` dict rather than a panel: `pareto_from_data` (the fit, as an
+(N, H) array) and `pareto_forecast` (the same fit in the dict shape the neural
+rollouts return, with the optional prediction dump).
 """
 
 from __future__ import annotations
 
-from typing import Sequence
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 from scipy.special import gammaln
+
+# The one on-disk prediction layout, shared with the neural rollouts so a saved
+# Pareto/NBD forecast reads back through exactly the same reader (ADR-0002: the
+# prediction-I/O leaf names nothing above it, so this arrow points down).
+from panelclv.predictions import save_predictions_to_csv
 
 
 # ---------------------------------------------------------------------------
@@ -349,3 +359,129 @@ def compute_pareto_predictions(
         ids = list(customer_ids)
 
     return predictions, ids
+
+
+
+# ---------------------------------------------------------------------------
+# 4. Forecasting from a `prepare_dataset` output
+# ---------------------------------------------------------------------------
+#
+# The estimator above takes a panel and MCMC knobs; the two functions below take
+# the dict the rest of the pipeline passes around, so the benchmark is called the
+# same way the neural models are. They moved here from `evaluation/` because they
+# build a Pareto/NBD forecast, which is what this file is for.
+
+
+# Calendar days per period, used to fit Pareto/NBD on the right time scale.
+_PERIOD_IN_DAYS: dict[str, float] = {"weekly": 7.0, "monthly": 30.4368, "daily": 1.0}
+
+
+def pareto_from_data(data: dict[str, Any] | None, **fit_kwargs: Any) -> np.ndarray:
+    """Fit the Pareto/NBD benchmark on a `prepare_dataset` output.
+
+    Shared by `pareto_forecast` and by the plot / metrics-table helpers in
+    `panelclv.evaluation`, so the benchmark is fit ONE way. Everything is read
+    from `data` (train_panel, T_HOLD, cohort ids, target_col, id_col, frequency)
+    — the dict is self-describing, so no Pareto-specific arguments are needed and
+    it is fit + aligned on exactly the cohort `data` describes. Returns an
+    (N, T_HOLD) per-customer prediction.
+
+    `fit_kwargs` are forwarded to the fitter for its MCMC knobs (`mcmc`, `burnin`,
+    `thin`, `chains`, `seed`, `param_init`). The data-derived arguments are always
+    supplied from `data`.
+    """
+    if data is None:
+        raise ValueError("a Pareto/NBD benchmark requires data=<prepare_dataset output>.")
+    missing = [k for k in ("train_panel", "T_HOLD", "ids", "target_col",
+                           "id_col", "frequency") if k not in data]
+    if missing:
+        raise ValueError(
+            f"data is missing keys {missing} needed for the Pareto/NBD benchmark; "
+            f"re-run prepare_dataset (older runs predate id_col/frequency)."
+        )
+    period_in_days = _PERIOD_IN_DAYS.get(data["frequency"])
+    if period_in_days is None:
+        raise ValueError(
+            f"cannot map frequency {data['frequency']!r} to a period length; "
+            f"known frequencies: {sorted(_PERIOD_IN_DAYS)}."
+        )
+    pareto_pred, _ = compute_pareto_predictions(
+        data["train_panel"],
+        holdout_length=data["T_HOLD"],
+        id_col=data["id_col"],
+        target_col=data["target_col"],
+        period_in_days=period_in_days,
+        customer_ids=data["ids"],
+        **fit_kwargs,
+    )
+    return pareto_pred
+
+
+def pareto_forecast(
+    data: dict[str, Any],
+    *,
+    save_predictions: bool = False,
+    output_dir: str | Path | None = None,
+    file_name: str = "predictions.csv",
+    run_name: str | None = None,
+    **fit_kwargs: Any,
+) -> dict[str, Any]:
+    """Pareto/NBD holdout forecast, mirroring the neural rollouts' contract.
+
+    Gives the Pareto/NBD benchmark the same call shape as `forecast_recurrent` /
+    `forecast_attention`, so the three models (LSTM, Transformer, Pareto/NBD) are
+    produced — and saved — the same way. Fits the benchmark on the
+    `prepare_dataset` output `data` and returns a dict of per-customer
+    `(N, T_HOLD)` arrays:
+
+        prediction_mean : ndarray (N, T_HOLD) — expected holdout counts.
+        actual          : ndarray (N, T_HOLD) — true holdout counts, pulled from
+                          `data["holdout"]` for evaluation only (never fed in).
+        predictions_path: Path to the written CSV, only if save_predictions.
+
+    Per-customer prediction dump (opt-in, off by default) — same arguments as the
+    neural rollouts:
+        save_predictions : when True, write the per-customer predictions to a CSV
+                           inside an auto-named subfolder of `output_dir`.
+        output_dir       : BASE directory the run subfolder is created in
+                           (required when save_predictions=True).
+        file_name        : name of the CSV inside that subfolder.
+        run_name         : tag for the subfolder (defaults to "pareto").
+                           The subfolder is `{tag}_{YYYYMMDD_HHMMSS}` (seconds
+                           resolution avoids same-minute collisions).
+
+    `fit_kwargs` are forwarded to the estimator (`mcmc`, `burnin`, `thin`,
+    `chains`, `seed`, `param_init`).
+    """
+    prediction_mean = pareto_from_data(data, **fit_kwargs)              # (N, T_HOLD)
+
+    # True holdout counts for scoring; read straight from the data dict so the
+    # actual lines up with the NN forecasts' actual on the same cohort/order.
+    target_idx = list(data["seq_cols"]).index(data["target_col"])
+    actual = np.asarray(data["holdout"])[:, :, target_idx]             # (N, T_HOLD)
+
+    result: dict[str, Any] = {
+        "prediction_mean": prediction_mean,
+        "actual": actual,
+    }
+
+    if save_predictions:
+        if output_dir is None:
+            raise ValueError(
+                "save_predictions=True requires output_dir (the base directory the "
+                "auto-named run subfolder is created in)"
+            )
+        # IDs map each prediction row back to a customer; save_predictions_to_csv
+        # falls back to a plain row index when they are absent.
+        tag = run_name if run_name else "pareto"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = Path(output_dir) / f"{tag}_{timestamp}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        result["predictions_path"] = save_predictions_to_csv(
+            prediction_mean,
+            run_dir / file_name,
+            customer_ids=data.get("ids"),
+            id_col=data.get("id_col", "customer_id"),
+        )
+
+    return result

@@ -12,13 +12,13 @@ holdout window autoregressively:
 There are **two rollouts**, one per model family, because the two architectures
 carry history in fundamentally different ways:
 
-    simulate_one_path          (recurrent / LSTM)
+    simulate_recurrent_path    (recurrent / LSTM)
         The LSTM compresses the whole prefix into a fixed-size hidden state.
         We warm that state up on the full calibration window, then step through
         the holdout ONE period at a time, threading the state from each call
         into the next (O(1) work per step).
 
-    simulate_transformer_path  (attention / Transformer)
+    simulate_attention_path    (attention / Transformer)
         The Transformer keeps no recurrent summary: to predict a period it must
         attend over the ACTUAL tokens seen so far. So we keep an explicit
         context window that starts as the calibration window and GROWS by one
@@ -30,9 +30,11 @@ Both rollouts treat the AR target-derived features identically (recomputed from
 the SAMPLED target history via `ARFeatureState`, never read from the holdout) and
 both are driven by the shared `_run_monte_carlo` aggregator, so seeding,
 averaging and the return contract never drift between models. The public entry
-points are `run_monte_carlo_forecast` (LSTM) and
-`run_monte_carlo_forecast_transformer` (Transformer); each averages
-`n_simulations` paths into a per-customer-per-step expected count.
+points are `forecast_recurrent` (recurrent models) and `forecast_attention`
+(attention models); each averages `n_simulations` paths into a
+per-customer-per-step expected count. They are named for the rollout mechanism,
+not the model family: `forecast_recurrent` is shared by our LSTM and the frozen
+Valendin one, and the registry declares which function each model uses.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ import numpy as np
 import torch
 
 from panelclv.data_preparation.ar_features import ARFeatureState
+from panelclv.predictions import save_predictions_to_csv
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +88,7 @@ def _device_of(model: torch.nn.Module) -> torch.device:
 # ---------------------------------------------------------------------------
 
 
-def simulate_one_path(
+def simulate_recurrent_path(
     model: torch.nn.Module,
     calibration,
     holdout,
@@ -186,7 +189,7 @@ def simulate_one_path(
 # ---------------------------------------------------------------------------
 
 
-def simulate_transformer_path(
+def simulate_attention_path(
     model: torch.nn.Module,
     calibration,
     holdout,
@@ -246,7 +249,7 @@ def simulate_transformer_path(
         ARFeatureState(calib_tensor[:, :, target_idx].detach().cpu().numpy(), ar_features)
         if ar_features else None
     )
-    # Same standardization the LSTM rollout applies (see `simulate_one_path`):
+    # Same standardization the LSTM rollout applies (see `simulate_recurrent_path`):
     # AR features come back from ARFeatureState in raw units and must be put on
     # the tensors' scale before they are appended to the context.
     ar_norm = {n: (covariate_stats or {}).get(n, (0.0, 1.0)) for n in ar_features}
@@ -318,10 +321,6 @@ def _save_predictions_run(
             "save_predictions=True requires output_dir (the base directory the "
             "auto-named run subfolder is created in)"
         )
-
-    # Lazy import: `evaluation.plot_utils` already imports from this module, so a
-    # top-level import here would create a circular import at load time.
-    from panelclv.evaluation.plot_utils import save_predictions_to_csv
 
     tag = run_name if run_name else model_type
     seed_label = "None" if seed is None else seed
@@ -439,7 +438,7 @@ def _run_monte_carlo(
 # ---------------------------------------------------------------------------
 
 
-def run_monte_carlo_forecast(
+def forecast_recurrent(
     model: torch.nn.Module,
     data: dict[str, Any],
     n_simulations: int = 30,
@@ -454,7 +453,7 @@ def run_monte_carlo_forecast(
 ) -> dict[str, Any]:
     """Monte Carlo holdout forecast for a recurrent (LSTM) rollout model.
 
-    Uses the stateful `simulate_one_path` rollout. `data` is the dict returned
+    Uses the stateful `simulate_recurrent_path` rollout. `data` is the dict returned
     by `dynamic_panel_dataset.prepare_dataset`, so calibration / holdout /
     seq_cols / target_col are all read from it.
 
@@ -485,7 +484,7 @@ def run_monte_carlo_forecast(
     return _run_monte_carlo(
         model,
         data,
-        simulate_one_path,
+        simulate_recurrent_path,
         n_simulations=n_simulations,
         target_col=target_col,
         device=device,
@@ -499,7 +498,7 @@ def run_monte_carlo_forecast(
     )
 
 
-def run_monte_carlo_forecast_transformer(
+def forecast_attention(
     model: torch.nn.Module,
     data: dict[str, Any],
     n_simulations: int = 30,
@@ -514,18 +513,18 @@ def run_monte_carlo_forecast_transformer(
 ) -> dict[str, Any]:
     """Monte Carlo holdout forecast for an attention (Transformer) rollout model.
 
-    Identical contract to `run_monte_carlo_forecast`, but uses the growing-window
-    `simulate_transformer_path` rollout because the Transformer is stateless. The
+    Identical contract to `forecast_recurrent`, but uses the growing-window
+    `simulate_attention_path` rollout because the Transformer is stateless. The
     rollout model must be a `RolloutMultinomialTransformerModel` (its `forward`
     accepts `only_last=` and ignores `state`). Returns the same dict
-    described in `run_monte_carlo_forecast`, and accepts the same opt-in
+    described in `forecast_recurrent`, and accepts the same opt-in
     per-customer prediction-dump arguments (`save_predictions`, `output_dir`,
     `file_name`, `run_name`); the subfolder tag defaults to "transformer".
     """
     return _run_monte_carlo(
         model,
         data,
-        simulate_transformer_path,
+        simulate_attention_path,
         n_simulations=n_simulations,
         target_col=target_col,
         device=device,
@@ -587,19 +586,19 @@ def compute_forecast_metrics(
 
 # LSTM:
 # from panelclv.models.monte_carlo_forecasting import (
-#     run_monte_carlo_forecast, compute_forecast_metrics,
+#     forecast_recurrent, compute_forecast_metrics,
 # )
 #
 # The rollout model is never constructed here: the trained model hands over its own,
 # sharing the backbone it already holds (ADR-0007).
 # rollout_model = trained_model.to_rollout()
-# forecast = run_monte_carlo_forecast(rollout_model, data, n_simulations=30)
+# forecast = forecast_recurrent(rollout_model, data, n_simulations=30)
 #
 # Transformer — same handover, different stepper:
-# from panelclv.models.monte_carlo_forecasting import run_monte_carlo_forecast_transformer
+# from panelclv.models.monte_carlo_forecasting import forecast_attention
 #
 # rollout_model = trained_transformer.to_rollout()
-# forecast = run_monte_carlo_forecast_transformer(rollout_model, data, n_simulations=30)
+# forecast = forecast_attention(rollout_model, data, n_simulations=30)
 #
 # metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
 # print(metrics)

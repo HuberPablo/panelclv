@@ -6,7 +6,7 @@ surviving plot module earns its name because by then it only plots.
 
 **Blocked by:** 02, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
 Source: `.scratch/package-simplification/issues/06-target-architecture.md` (decision 6, Q14,
 closing findings), `12-thesis-figure-code-home.md` (decisions 5, 6),
@@ -65,11 +65,77 @@ Cost: four notebooks for the recurrent forecast alias, three for the attention o
   this issue and issue 12 fix both, and nothing today would notice either being re-added.
   This asserts the import graph itself — it is not the torch-cost proxy that was dropped.
 
-- [ ] Prediction I/O in its own module; no deferred import remains in the model layer
-- [ ] Plot-utilities module no longer exists; the `_utils` suffix is gone from the package
-- [ ] Pareto forecast and its helper live in the benchmark module, public
-- [ ] Import-only symbols deleted, with their notebook import lines
-- [ ] Rollout functions renamed by mechanism; every `mc_*` alias gone; notebooks updated
-- [ ] ADR-0002 Edit B applied verbatim from ticket 08
-- [ ] Acyclicity test present and passing
-- [ ] Golden test green at rel=1e-6; notebook API test green
+- [x] Prediction I/O in its own module; no deferred import remains in the model layer
+- [x] Plot-utilities module no longer exists; the `_utils` suffix is gone from the package
+- [x] Pareto forecast and its helper live in the benchmark module, public
+- [x] Import-only symbols deleted, with their notebook import lines
+- [x] Rollout functions renamed by mechanism; every `mc_*` alias gone; notebooks updated
+- [x] ADR-0002 Edit B applied verbatim from ticket 08
+- [x] Acyclicity test present and passing
+- [x] Golden test green at rel=1e-6; notebook API test green
+
+## Comments
+
+Landed 2026-08-13. Full suite green (207 passed), including the golden end-to-end test at
+`rel=1e-6` and the notebook API test. Both ADR-0004 gate scripts re-run because
+`benchmarks/` was touched.
+
+### The prediction-I/O module is `panelclv/predictions/`, not `evaluation/predictions.py`
+
+The issue's placement cannot be built. `evaluation/plots.py` and
+`evaluation/segment_analysis.py` import `models` at top level — the direction ADR-0002
+mandates — so a top-level import of `evaluation.predictions` from `models/` re-creates the
+subpackage cycle this issue exists to close, and fails at load time as well: `import
+panelclv.models` runs `evaluation/__init__`, which reaches back into a
+half-initialised `monte_carlo_forecasting` for `compute_forecast_metrics`. Making the
+import non-deferred is what the issue asks for, and it is what breaks.
+
+Three things were therefore true at once and only two could stay: the module in
+`evaluation/`, no deferred import in the model layer, and a subpackage-granularity
+acyclicity test. **Pablo chose a new leaf subpackage**, `panelclv/predictions/`, which
+imports nothing from `panelclv` — so every arrow into it points down and all three
+constraints hold. `benchmarks.pareto_forecast` writes through the same leaf, which is what
+keeps `benchmarks -> evaluation` from replacing the cycle that was removed. The map's
+`evaluation/predictions.py` (ticket 12 decision 5) is superseded on this point only;
+`evaluation/plots.py` and the Pareto move are exactly as ruled.
+
+### A third private cross-boundary import was promoted, and respelled
+
+The issue names two (the Pareto fitter here, the seasonal multiplier in issue 10). The
+customer-period reducer is a third: `evaluation/plots.metrics_table` needs it across a
+subpackage boundary, which is the same finding — a private name another subpackage depends
+on. It is public as **`reduce_to_customer_period`**, not `..._week`: `CONTEXT.md` lists
+*week* under _Avoid_ for **Period**, and the argument that the `week_` CSV columns are an
+on-disk floor covers the header, not a new identifier.
+
+### `weekly_aggregate_predictions` survives as a private helper
+
+The public name is gone, as ruled — but `plot_weekly_aggregated` calls it, so its body
+lives on as `plots._aggregate_across_customers`. Only its Monte Carlo branch is real work
+now: the two path-free shapes delegate to the reducer, so the shape contract has one
+definition rather than two near-identical cascades in two subpackages.
+
+### The acyclicity test asserts more than the pair that motivated it
+
+Three deliberate widenings, all cheap: it counts **deferred imports too** (a lazy import is
+still a dependency, and hiding one is how the last cycle survived); it detects cycles of
+**any length**, not just mutual pairs; and `KNOWN_CYCLES` is asserted by **equality**, so
+when issue 12 removes `configs ⇄ data_preparation` the test goes red until that line is
+deleted with it. It is over the map's "~10-line" sketch; the excess is the documented
+allowance, the walk, and the docstrings explaining both.
+
+### Four deferred imports elsewhere lost their reason and went
+
+`studies/analysis.py` deferred its prediction-I/O and plotting imports to keep suite
+discovery torch-free. The reader is now a torch-free leaf, and `analysis.py` already pulls
+torch through the registry at module load, so the comments were false and the laziness
+bought nothing. Same for the stale skip reason in `tests/test_archive_formats.py`, whose
+`needs_torch` gate now names what actually pulls torch. Retargeting that file is issue 14.
+
+### Not done here, by scope
+
+`src/panelclv/training/training_utils.py` still carries the `_utils` suffix the checkbox
+mentions — that rename is issue 09 decision 3's table, which issue 15 executes. Nothing in
+`evaluation/` carries it any more, which is the half this issue owns. `VastAI/vast_search.py`
+names `run_monte_carlo_forecast` in a comment and was left alone: it has unrelated
+uncommitted edits in the working tree.

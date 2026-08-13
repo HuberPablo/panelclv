@@ -16,8 +16,9 @@ The surrounding concerns each have their own sibling subpackage under ``panelclv
 - ``panelclv.registry``    — the table declaring which of these models exist.
 - ``panelclv.training``    — the training loop (``fit_model``, ...).
 - ``panelclv.tuning``      — Optuna architecture / covariate-subset search.
-- ``panelclv.evaluation``  — metrics, plotting, forecast diagnostics, prediction CSV I/O.
-- ``panelclv.benchmarks``  — the non-neural Pareto/NBD comparator.
+- ``panelclv.evaluation``  — metrics, plots, forecast diagnostics.
+- ``panelclv.predictions`` — the on-disk prediction format the rollouts write.
+- ``panelclv.benchmarks``  — the frozen reference implementations (ADR-0004).
 - ``panelclv.trials``      — assembling and refitting one trial.
 """
 
@@ -41,15 +42,13 @@ from .losses import (
     build_criterion,
 )
 from .monte_carlo_forecasting import (
-    # Canonical names...
-    run_monte_carlo_forecast,
-    run_monte_carlo_forecast_transformer,
-    # The scoring authority keeps the name CLAUDE.md uses for it; it never had a
-    # per-path variant, so there is nothing for an ``mc_*`` alias to disambiguate.
+    # The two rollouts, named for the mechanism they step through rather than for
+    # a model family: there are three rollout model classes but only two rollout
+    # functions, and the registry declares which model uses which.
+    forecast_recurrent,
+    forecast_attention,
+    # The scoring authority keeps the name CLAUDE.md uses for it.
     compute_forecast_metrics,
-    # ...and the short ``mc_*`` aliases the notebooks call.
-    run_monte_carlo_forecast as mc_forecast,
-    run_monte_carlo_forecast_transformer as mc_forecast_transformer,
 )
 
 # `__all__` is the curated *headline* surface for the model family. Everything
@@ -58,10 +57,8 @@ from .monte_carlo_forecasting import (
 # OFF this list but still importable: the train-time loss classes/helpers
 # (FocalLoss, SquaredEMDLoss, compute_class_weights, build_criterion).
 #
-# The per-path steppers `simulate_one_path` / `simulate_transformer_path` are NOT
-# re-exported here. They are internals of the two forecast entry points above; the
-# `mc_simulate_*` aliases that once advertised them had no importer anywhere and were
-# deleted (ledger `models/__init__` rows).
+# The per-path steppers `simulate_recurrent_path` / `simulate_attention_path` are
+# NOT re-exported here. They are internals of the two forecast entry points above.
 __all__ = [
     # The embedder seam: how features become a vector (ADR-0005). A model is given
     # one; swapping it is how the published architecture and ours differ.
@@ -74,7 +71,7 @@ __all__ = [
     "MultinomialTransformerModel",
     "RolloutMultinomialTransformerModel",
     # Forecasting (autoregressive Monte Carlo simulator + its metrics)
-    "mc_forecast",
-    "mc_forecast_transformer",
+    "forecast_recurrent",
+    "forecast_attention",
     "compute_forecast_metrics",
 ]

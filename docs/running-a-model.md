@@ -61,7 +61,7 @@ flowchart TD
                 M["MultinomialLSTMModel<br/>models/multinomial_lstm.py"]
                 F["fit_model<br/>training/training_utils.py"]
                 I["trained.to_rollout()<br/>RolloutMultinomialLSTMModel"]
-                R["run_monte_carlo_forecast<br/>models/monte_carlo_forecasting.py"]
+                R["forecast_recurrent<br/>models/monte_carlo_forecasting.py"]
                 S["compute_forecast_metrics<br/>rmse / bias_percent / mape"]
                 P --> D
                 C --> D
@@ -437,7 +437,7 @@ takes no architecture arguments at all, so there is no second set to keep in ste
 ### 4.5 Forecast and score
 
 ```python
-forecast = run_monte_carlo_forecast(rollout_model, data, n_simulations=8,
+forecast = forecast_recurrent(rollout_model, data, n_simulations=8,
                                     seed=7, device="cpu", return_simulations=False)
 metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
 ```
@@ -620,7 +620,7 @@ A forecast is not a forward pass. It is: warm up on calibration, then step throu
 the holdout one period at a time, sampling a count and feeding that sample back.
 Repeat `n_simulations` times and average.
 
-`simulate_one_path` is the stateful (LSTM) version:
+`simulate_recurrent_path` is the stateful (LSTM) version:
 
 1. Feed the **whole calibration window** in one call. Its last-position sample *is*
    the forecast for holdout step 0, and the returned hidden state now summarises
@@ -652,7 +652,7 @@ Three things this diagram is drawn to make unmissable:
   units; the model was warmed up on standardised ones. Skipping the transform feeds
   a silent unit mismatch that no shape check can catch.
 
-`run_monte_carlo_forecast` wraps this: seed once, upload the tensors once, run
+`forecast_recurrent` wraps this: seed once, upload the tensors once, run
 `n_simulations` paths, stack and average. `actual` is pulled from the holdout for
 scoring only — the test `test_forecast_never_reads_the_holdout` asserts a forecast
 that matched the truth exactly would be evidence of leakage, not skill.
@@ -674,7 +674,7 @@ the **single scoring authority** (`CLAUDE.md`). Both arrays are `(N, T_HOLD)`.
 holdout periods are zero and the denominator explodes.
 
 Everything delegates here — `studies/runner.py`, `studies/analysis.py` →
-`study_metrics`, `evaluation/plot_utils.py` → `metrics_table`,
+`study_metrics`, `evaluation/plots.py` → `metrics_table`,
 `evaluation/segment_analysis.py`. That is why tables, plots and archived results
 agree to the last decimal. There is no exception: these three numbers are computed in
 exactly one place in the package.
@@ -725,8 +725,8 @@ For each neural model, for `i` in `1..n_studies_per_model`:
 6. Predictions to CSV, `compute_forecast_metrics`, one row appended.
 
 Which simulator a model type gets is declared by its registry entry, not chosen
-here — the recurrent models roll out through `run_monte_carlo_forecast` and the
-Transformer through `run_monte_carlo_forecast_transformer`, and the wrong pairing
+here — the recurrent models roll out through `forecast_recurrent` and the
+Transformer through `forecast_attention`, and the wrong pairing
 would produce a wrong forecast rather than an error.
 
 Adding a model means one entry in `registry/model_registry.py` (ADR-0006): its
@@ -807,7 +807,7 @@ resolves `d_model` and `nhead` first and raises `optuna.TrialPruned` when
 `embedding_dim=params["d_model"]` to the `ProjectedEmbedder`. There is no separate
 `embedding_dim` knob.
 
-**3 — The rollout carries history explicitly.** `simulate_transformer_path`, because
+**3 — The rollout carries history explicitly.** `simulate_attention_path`, because
 a Transformer has no recurrent state to thread:
 
 ```
@@ -822,7 +822,7 @@ encoding indexes holdout step *t* at `T_CAL + t`, matching training. A single-st
 feed would reset the position to 0 and drop all history. The model is called with
 `only_last=True`.
 
-**4 — Dispatch.** Its registry entry declares `run_monte_carlo_forecast_transformer`
+**4 — Dispatch.** Its registry entry declares `forecast_attention`
 as its rollout. The training model caches a causal mask sized to the training length;
 `to_rollout()` does not carry it over, because the rollout window grows a period at a
 time and the backbone builds a matching mask per call. (The warm-start load in
@@ -896,7 +896,7 @@ neural model, with two differences:
   `dense_units=128` and never enter the search — tuning a width would quietly
   unfreeze the reference. Its builder reads no architecture params at all.
 - `RolloutValendinLSTMModel` returns `(sample, state)` with the same contract as
-  ours, so its entry declares `run_monte_carlo_forecast` — the identical stateful
+  ours, so its entry declares `forecast_recurrent` — the identical stateful
   rollout, no special-casing. The benchmark declares its own `to_rollout()` pairing
   inside the frozen file: ADR-0004 freezes the published numbers, not the code around
   them, and `scripts/validate_valendin_lstm.py` is the gate that proves they held.

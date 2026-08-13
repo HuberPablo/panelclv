@@ -57,7 +57,7 @@ from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
 from panelclv.benchmarks.valendin_lstm import ValendinLSTMModel  # noqa: E402
 from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
     compute_forecast_metrics,
-    run_monte_carlo_forecast,
+    forecast_recurrent,
 )
 from panelclv.training.training_utils import fit_model  # noqa: E402
 
@@ -219,7 +219,7 @@ def main() -> int:
     # the holdout one week at a time, feeding each sampled count back in. True holdout
     # counts are never fed in — they are only used to score.
     rollout = model.to_rollout()
-    forecast = run_monte_carlo_forecast(
+    forecast = forecast_recurrent(
         rollout, data, n_simulations=args.n_simulations,
         device=args.device, seed=args.seed, return_simulations=False,
     )

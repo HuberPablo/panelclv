@@ -10,3 +10,8 @@ would suggest you could swap it out and still have the same model.
 
 `evaluation/` imports the simulator from `models/`, never the other way round.
 Anything that changes how a forecast is produced is a model change.
+
+This held as a rule before it held as a fact. `models/` reached back into
+`evaluation/plot_utils` for prediction I/O through a deferred import that hid the
+cycle rather than removing it. Prediction I/O now has its own module and the
+dependency runs one way only.

@@ -20,7 +20,7 @@ Inputs
            per-customer actuals and the calibration/holdout counts come from it.
 - `model_predictions` : {model_name: csv_path} — the saved per-customer
            prediction CSVs (from `save_predictions_to_csv` /
-           `mc_forecast(save_predictions=True)` / `pareto_forecast(...)`). Rows
+           `forecast_recurrent(save_predictions=True)` / `pareto_forecast(...)`). Rows
            are realigned to `data["ids"]` by customer id.
 """
 
@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
-from .plot_utils import load_predictions_from_csv
+from panelclv.predictions import load_predictions_from_csv
 
 
 def aggregate_bias(y_true: np.ndarray, y_pred: np.ndarray) -> float:

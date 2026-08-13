@@ -16,8 +16,9 @@ pip install -e .
 
 The project uses a **src-layout** (the package lives in `src/panelclv/`), so installing
 it is what puts `panelclv` on the path — there are no `sys.path` hacks. It is split by
-concern into subpackages: `panelclv.models`, `panelclv.training`, `panelclv.tuning`,
-`panelclv.evaluation`, `panelclv.benchmarks`, `panelclv.trials`,
+concern into subpackages: `panelclv.models`, `panelclv.registry`, `panelclv.training`,
+`panelclv.tuning`, `panelclv.evaluation`, `panelclv.predictions`,
+`panelclv.benchmarks`, `panelclv.trials`, `panelclv.studies`,
 `panelclv.data_preparation`, `panelclv.configs`. Import from the relevant one, e.g.
 `from panelclv.tuning import run_optuna_study`. For the test runner, use
 `pip install -e ".[dev]"` and run `pytest`.
@@ -42,7 +43,7 @@ from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation import dynamic_panel_dataset
 from panelclv.tuning import run_optuna_study
 from panelclv.trials import make_data_builder, refit_best_trial
-from panelclv.models import mc_forecast, compute_forecast_metrics
+from panelclv.models import forecast_recurrent, compute_forecast_metrics
 
 # 1. Panel -> model-ready tensors (calibration/holdout/samples/targets/seq_cols/...).
 #    validation_start carves the temporal validation window off the calibration tail.
@@ -72,12 +73,12 @@ study = run_optuna_study(
 rollout_model, data_best = refit_best_trial(study, data_full, "lstm", batch_size=512)
 
 # 4. Autoregressive Monte Carlo forecast + metrics (always forecast with data_best).
-forecast = mc_forecast(rollout_model, data_best, n_simulations=600, seed=42)
+forecast = forecast_recurrent(rollout_model, data_best, n_simulations=600, seed=42)
 print(compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"]))
 ```
 
-Swap `model_type="lstm"` / `"transformer"` (and `mc_forecast` /
-`mc_forecast_transformer`) to run the other family on the same contract.
+Swap `model_type="lstm"` / `"transformer"` (and `forecast_recurrent` /
+`forecast_attention`) to run the other family on the same contract.
 
 ## Notebooks
 

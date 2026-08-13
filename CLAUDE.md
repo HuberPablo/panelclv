@@ -55,7 +55,10 @@ them and there is no umbrella re-export — import from the subpackage that owns
   embedding declaration.
 - `training` — the training loop.
 - `tuning` — Optuna architecture and covariate-subset search.
-- `evaluation` — metrics, plots, forecast diagnostics, prediction I/O.
+- `evaluation` — metrics, plots and forecast diagnostics.
+- `predictions` — the wide per-customer CSV every forecast is written in and read
+  back from. A leaf: it imports nothing from the package, which is what lets the
+  model layer write a forecast without naming anything above it (ADR-0002).
 - `trials` — assembling and refitting one trial: the temporal calibration split
   (ADR-0001) and the full-calibration refit every forecast comes from (ADR-0008).
 - `studies` — running many studies across many models and archiving the results.

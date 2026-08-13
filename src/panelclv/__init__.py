@@ -13,7 +13,9 @@ a single concern:
   builder and the rollout it forecasts through (ADR-0006).
 - ``panelclv.training`` — the training loop (``fit_model`` and friends).
 - ``panelclv.tuning`` — Optuna architecture / covariate-subset search.
-- ``panelclv.evaluation`` — metrics, plotting, forecast diagnostics, prediction CSV I/O.
+- ``panelclv.evaluation`` — metrics, plots and forecast diagnostics.
+- ``panelclv.predictions`` — the wide per-customer CSV every forecast is written
+  in and read back from; a leaf, so the model layer can write without importing up.
 - ``panelclv.benchmarks`` — the non-neural Pareto/NBD comparator (hierarchical Bayes).
 - ``panelclv.trials`` — assembling and refitting one trial (the ADR-0001 split,
   the ADR-0008 refit).

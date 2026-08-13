@@ -42,10 +42,10 @@ silently untracked.)
   electronics suites), raising rather than falling back.
   `test_legacy_suite_has_no_panel_config_to_rebuild_actuals` pins the raise.
 
-**Torch.** The read path is not torch-free, despite `analysis.py` being written to stay so:
-`load_predictions_from_csv` lives in `evaluation/plot_utils.py`, which imports torch at
-module level. The structural half of this file (tree shape, headers, `PanelConfig`
-round-trip) therefore runs without torch; everything that actually loads a prediction is
+**Torch.** `load_predictions_from_csv` is torch-free — it lives in the `panelclv.predictions`
+leaf — but `studies/analysis.py`, which this file drives it through, pulls torch in via the
+model registry. The structural half of this file (tree shape, headers, `PanelConfig`
+round-trip) is written to run without torch; everything that actually loads a prediction is
 marked `needs_torch`.
 
 Run:  PYTHONPATH=src pytest -q tests/test_archive_formats.py
@@ -89,7 +89,7 @@ PNBD_GENERATION = REPO_ROOT / "Datasets" / "Synthetic" / "pnbd_study_4x4x10_2026
 
 needs_torch = pytest.mark.skipif(
     importlib.util.find_spec("torch") is None,
-    reason="the prediction reader imports evaluation.plot_utils, which imports torch",
+    reason="the suite reader pulls torch in through panelclv.registry",
 )
 needs_archive = pytest.mark.skipif(
     not PINNED_SUITE.is_dir(),
@@ -610,7 +610,7 @@ def test_id_col_resolution_including_the_legacy_fallback(suite, legacy_suite):
 
 
 # --------------------------------------------------------------------------------------
-# 2. Reading predictions back — needs torch (via evaluation.plot_utils)
+# 2. Reading predictions back — needs torch (via studies.analysis)
 # --------------------------------------------------------------------------------------
 
 
@@ -654,7 +654,7 @@ def test_aggregate_writes_one_flat_csv_per_model(suite):
     assert text[0] == prediction_header(FIXTURE_T_HOLD)
     assert len(text) == 1 + len(FIXTURE_IDS)
     # It round-trips through the same reader as the per-study files.
-    from panelclv.evaluation.plot_utils import load_predictions_from_csv
+    from panelclv.predictions import load_predictions_from_csv
     values, ids = load_predictions_from_csv(suite / "aggregated_LSTM.csv")
     one, _ = analysis.load_model_predictions(suite / "LSTM", study=1)
     assert list(ids) == FIXTURE_IDS
@@ -686,7 +686,7 @@ def test_writer_still_emits_the_archived_prediction_format(tmp_path):
     The tests above read literal text, so they cannot catch the writer drifting away from
     it. This one drives the real writer and compares.
     """
-    from panelclv.evaluation.plot_utils import save_predictions_to_csv
+    from panelclv.predictions import save_predictions_to_csv
 
     model_dir = tmp_path / "LSTM"
     values = np.arange(len(FIXTURE_IDS) * FIXTURE_T_HOLD, dtype=float).reshape(

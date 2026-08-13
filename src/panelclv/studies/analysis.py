@@ -37,6 +37,9 @@ from typing import Any
 
 import numpy as np
 
+from panelclv.benchmarks import pareto_forecast
+from panelclv.evaluation.plots import plot_weekly_aggregated
+from panelclv.predictions import load_predictions_from_csv, save_predictions_to_csv
 from panelclv.registry import MODEL_TYPES, is_neural
 
 
@@ -151,10 +154,6 @@ def load_model_predictions(
     and the same horizon; a mismatch raises ``ValueError`` naming the offenders,
     because a silent misalignment would corrupt the mean.
     """
-    # Lazy import: plot_utils pulls in torch at module load, so we only pay that
-    # cost when actually touching prediction CSVs (keeps discovery torch-free).
-    from panelclv.evaluation.plot_utils import load_predictions_from_csv
-
     preds_dir = Path(model_dir) / "Predictions"
 
     if study is not None:
@@ -214,8 +213,6 @@ def aggregate_suite_predictions(root: str | Path) -> list[Path]:
     re-run (the aggregate is a pure function of the predictions on disk). Returns
     the list of files written.
     """
-    from panelclv.evaluation.plot_utils import save_predictions_to_csv
-
     root = Path(root)
     id_col = _id_col(root)
     written: list[Path] = []
@@ -390,7 +387,6 @@ def _across_study_band(
     with fewer than two studies (a deterministic benchmark has a single fit, so there is
     no study-to-study spread to shade).
     """
-    from panelclv.evaluation.plot_utils import load_predictions_from_csv
     from scipy import stats
 
     preds_dir = Path(model_dir) / "Predictions"
@@ -487,8 +483,6 @@ def plot_suite_forecast(
 
     Returns ``(fig, ax)``.
     """
-    from panelclv.evaluation.plot_utils import plot_weekly_aggregated, pareto_forecast
-
     root = Path(root)
 
     if (panel_path is None) == (data is None):

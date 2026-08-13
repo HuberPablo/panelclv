@@ -1,10 +1,11 @@
 """Evaluation: metrics and forecast diagnostics / plotting.
 
-The weekly-aggregate plotting / metrics-table / alignment / prediction-CSV-I/O
-helpers (``plot_utils``) and the per-group tables (``segment_analysis``) live here.
-These consume a forecast that the model + Monte Carlo simulator (in
-``panelclv.models``) already produced; they do not define the model, so they sit in
-their own subpackage.
+The weekly-aggregate plot and the metrics table (``plots``) and the per-group
+tables (``segment_analysis``) live here. These consume a forecast that the model +
+Monte Carlo simulator (in ``panelclv.models``) already produced; they do not define
+the model, so they sit in their own subpackage. The forecast's on-disk format is
+not evaluation either — that is ``panelclv.predictions``, which both this
+subpackage and the model layer read from.
 
 ``models.monte_carlo_forecasting.compute_forecast_metrics`` is the single authority for
 ``rmse`` / ``bias_percent`` / ``mape_aggregate`` — the only place in the package
@@ -14,15 +15,9 @@ per-group table needs because percentage bias is uninformative for a group whose
 actual total is near zero.
 """
 
-from .plot_utils import (
-    weekly_actuals,
-    weekly_aggregate_predictions,
+from .plots import (
     plot_weekly_aggregated,
     metrics_table,
-    alignment_check,
-    pareto_forecast,
-    save_predictions_to_csv,
-    load_predictions_from_csv,
 )
 from .segment_analysis import (
     assign_customer_groups,
@@ -31,14 +26,8 @@ from .segment_analysis import (
 )
 
 __all__ = [
-    "weekly_actuals",
-    "weekly_aggregate_predictions",
     "plot_weekly_aggregated",
     "metrics_table",
-    "alignment_check",
-    "pareto_forecast",
-    "save_predictions_to_csv",
-    "load_predictions_from_csv",
     "assign_customer_groups",
     "group_metrics_table",
     "aggregate_bias",

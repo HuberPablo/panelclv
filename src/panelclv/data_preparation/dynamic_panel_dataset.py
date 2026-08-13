@@ -477,7 +477,7 @@ def standardize_covariates(
         rollout recomputes the AR features in raw units at every step and has to
         re-apply this exact transform before feeding them back, otherwise the
         warm-up and the rollout disagree on units
-        (``models/monte_carlo_forecasting.simulate_one_path``).
+        (``models/monte_carlo_forecasting.simulate_recurrent_path``).
     """
     embedded = set(embedded_cols or {})
     seq_cols = list(seq_cols)

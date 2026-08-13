@@ -21,6 +21,7 @@ SUBPACKAGES = [
     "panelclv.training",
     "panelclv.tuning",
     "panelclv.evaluation",
+    "panelclv.predictions",
     "panelclv.benchmarks",
     "panelclv.trials",
     "panelclv.data_preparation",
@@ -36,21 +37,27 @@ def test_subpackage_imports(module):
 
 def test_public_api_resolves_from_new_homes():
     """The headline entry points are importable from the subpackage they now live in."""
-    from panelclv.models import (
+    from panelclv.models import (  # noqa: F401
         MultinomialLSTMModel,
         RolloutMultinomialLSTMModel,
-        mc_forecast,
-        run_monte_carlo_forecast,
+        forecast_attention,
+        forecast_recurrent,
     )
-    from panelclv.training import fit_model
-    from panelclv.tuning import run_optuna_study, select_features
-    from panelclv.evaluation import metrics_table, plot_weekly_aggregated
-    from panelclv.benchmarks import compute_pareto_predictions
+    from panelclv.training import fit_model  # noqa: F401
+    from panelclv.tuning import run_optuna_study, select_features  # noqa: F401
+    from panelclv.evaluation import metrics_table, plot_weekly_aggregated  # noqa: F401
+    from panelclv.benchmarks import (  # noqa: F401
+        compute_pareto_predictions,
+        pareto_forecast,
+        pareto_from_data,
+    )
+    from panelclv.predictions import (  # noqa: F401
+        load_predictions_from_csv,
+        reduce_to_customer_period,
+        save_predictions_to_csv,
+    )
     from panelclv.trials import make_data_builder, refit_best_trial  # noqa: F401
     from panelclv.registry import MODEL_TYPES, build_model, is_neural, rollout_for  # noqa: F401
-
-    # `mc_forecast` is documented as an alias for `run_monte_carlo_forecast`.
-    assert mc_forecast is run_monte_carlo_forecast
 
 
 # `compute_forecast_metrics` is the package's single scoring authority — plots, group
@@ -132,6 +139,47 @@ def test_retired_dead_surface_is_gone():
     # The only `studies` export with zero importers.
     assert not hasattr(st, "group_metrics_suite_distribution"), \
         "group_metrics_suite_distribution should have been retired"
+
+
+def test_retired_forecast_and_plot_surface_is_gone():
+    """Prediction I/O moved out and the `mc_*` aliases went — issue 08 of the cleanup.
+
+    Three deletions in one test, because they were one module. `plot_utils` held
+    prediction I/O, two plots and a Pareto/NBD fit; splitting it three ways is what
+    let the model layer stop importing `evaluation` (ADR-0002), so a re-added
+    `evaluation.plot_utils` would quietly reopen the cycle
+    `tests/test_import_graph.py` now guards.
+
+    The `mc_*` aliases exported one function under two public names, twice over;
+    the rollouts are named for their mechanism now, because there are three rollout
+    model classes but only two rollout functions.
+    """
+    import panelclv.evaluation as ev
+    import panelclv.models as models
+    from panelclv.models import monte_carlo_forecasting as mcf
+
+    with pytest.raises(ImportError):
+        importlib.import_module("panelclv.evaluation.plot_utils")
+
+    # The two aliases, and the old canonical names they aliased.
+    for name in ("mc_forecast", "mc_forecast_transformer",
+                 "run_monte_carlo_forecast", "run_monte_carlo_forecast_transformer"):
+        assert not hasattr(models, name), f"{name} should have been retired"
+        assert not hasattr(mcf, name), f"{name} should have been retired"
+
+    # The two per-path steppers, renamed by mechanism on the same grounds.
+    for name in ("simulate_one_path", "simulate_transformer_path"):
+        assert not hasattr(mcf, name), f"{name} should have been retired"
+
+    # Import-only in the notebooks, so nothing called them: a notebook import is
+    # not a caller.
+    for name in ("weekly_actuals", "weekly_aggregate_predictions", "alignment_check"):
+        assert not hasattr(ev, name), f"{name} should have been retired"
+
+    # Prediction I/O and the Pareto/NBD forecast left `evaluation` entirely.
+    for name in ("save_predictions_to_csv", "load_predictions_from_csv",
+                 "pareto_forecast"):
+        assert not hasattr(ev, name), f"{name} now lives outside evaluation"
 
 
 def test_rollout_composite_selection_is_gone():

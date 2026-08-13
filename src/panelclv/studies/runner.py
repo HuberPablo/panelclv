@@ -8,7 +8,7 @@ config and calls the existing pieces:
         -> run_optuna_study                  (panelclv.tuning)
         -> refit_best_trial                  (panelclv.trials)
         -> the rollout its registry entry declares       (panelclv.registry)
-        -> save_predictions_to_csv           (panelclv.evaluation)
+        -> save_predictions_to_csv           (panelclv.predictions)
         -> compute_forecast_metrics          (panelclv.models)
 
 and, for the baseline, ``compute_pareto_predictions`` (panelclv.benchmarks).
@@ -31,8 +31,8 @@ import optuna
 import pandas as pd
 
 from panelclv.benchmarks import compute_pareto_predictions
-from panelclv.evaluation.plot_utils import save_predictions_to_csv
 from panelclv.models import compute_forecast_metrics
+from panelclv.predictions import save_predictions_to_csv
 from panelclv.registry import rollout_for
 from panelclv.trials import make_data_builder, refit_best_trial
 from panelclv.tuning import run_optuna_study

@@ -20,7 +20,7 @@ from panelclv.studies import (
     plot_suite_forecast,
     study_metrics,
 )
-from panelclv.evaluation.plot_utils import (
+from panelclv.predictions import (
     load_predictions_from_csv,
     save_predictions_to_csv,
 )

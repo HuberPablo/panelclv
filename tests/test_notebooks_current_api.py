@@ -75,6 +75,18 @@ RETIRED = [
      "the class is `Rollout...`; CONTEXT.md lists *inference* under _Avoid_"),
     (r"build_inference_from_trial",
      "`refit_best_trial` hands back the rollout model itself (ADR-0007)"),
+    # Retired by the package cleanup, issue 08: prediction I/O in its own module,
+    # `evaluation/plot_utils.py` split three ways, rollouts named by mechanism.
+    (r"mc_forecast(_transformer)?",
+     "the rollouts are `models.forecast_recurrent` / `models.forecast_attention`"),
+    (r"run_monte_carlo_forecast(_transformer)?",
+     "the rollouts are `models.forecast_recurrent` / `models.forecast_attention`"),
+    (r"plot_utils",
+     "prediction I/O is `panelclv.predictions`; the plots are `evaluation.plots`"),
+    (r"_pareto_from_data",
+     "the fitter is public: `benchmarks.pareto_from_data`"),
+    (r"weekly_actuals|weekly_aggregate_predictions|alignment_check",
+     "import-only helpers, deleted with plot_utils"),
 ]
 
 
