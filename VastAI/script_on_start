@@ -1,1 +1,11 @@
+# Run this inside the Vast.ai machine.
+cd /workspace
 
+# Clone your package repository.
+git clone https://github.com/HuberPablo/panelclv.git
+
+# Enter the repository.
+cd panelclv
+
+# Install the package in editable mode.
+python -m pip install -e .

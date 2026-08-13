@@ -22,7 +22,7 @@ Usage:
     python vast_search.py --show-fields        # dump one raw offer to see the schema
 
 Nothing here rents anything — it is read-only. Copy an offer ID from the output
-into `vastai create instance <ID> ...` when you have picked one.
+into `./VastAI/vast_launch.sh <ID>` when you have picked one.
 """
 
 from __future__ import annotations
@@ -33,6 +33,19 @@ import re
 import shutil
 import subprocess
 import sys
+
+# Minimum CUDA the host driver must advertise. panelclv itself pins nothing —
+# pyproject declares a bare `torch` — so this floor exists only to exclude hosts
+# too old for the CUDA family the PyTorch wheels are built against.
+#
+# Deliberately NOT raised to match the launcher's image tag (currently a cu128 /
+# CUDA 12.9 build). CUDA 12 is minor-version compatible: a 12.x runtime runs on
+# any 12.x driver, so requiring the host to advertise 12.9 would drop machines
+# that run the image fine. The cheap check is downstream anyway — the CUDA probe
+# in vast_onstart.sh aborts provisioning if the GPU is not visible, which costs
+# minutes rather than a lost run.
+IMAGE_CUDA = "12.4"
+
 
 # --- CPU ranking table --------------------------------------------------------
 # vast exposes `cpu_ghz` on most (not all) offers. Clock alone is a poor proxy
@@ -97,16 +110,27 @@ def build_query(args: argparse.Namespace) -> str:
     """
     clauses = [
         # -- GPU: just needs to exist and run the CUDA image ------------------
-        "num_gpus=1",
-        # 6 GB is ~35,000x the 172 KB a simulation path needs. This bound only
-        # exists to exclude broken/near-zero-VRAM listings.
-        "gpu_ram>=6",
-        # The provisioning image is cuda12.4, so the host driver must support it.
-        # Renting below this gives you a box where torch.cuda.is_available() is False.
-        "cuda_max_good>=12.4",
+        # `>=`, not `=`: a 2- or 4-GPU offer runs this job perfectly well on one
+        # of its GPUs. Pinning it to exactly 1 dropped viable machines for no
+        # reason — cost is already bounded by dph_total below.
+        "num_gpus>=1",
+        # A simulation path is 172 KB, so any card qualifies. The floor only
+        # exists to drop broken / near-zero-VRAM listings.
+        "gpu_ram>=4",
+        # The host driver must support the CUDA runtime of the image that
+        # vast_launch.sh actually launches. Renting below this gives you a box
+        # where torch.cuda.is_available() is False — and vast_onstart.sh then
+        # aborts provisioning, so you pay for a machine you cannot use.
+        f"cuda_max_good>={IMAGE_CUDA}",
 
         # -- CPU: the part that decides how long your sweep takes -------------
         f"cpu_cores_effective>={args.min_cores}",
+        # UNITS ARE ASYMMETRIC, verified against the live API: the query threshold
+        # is in GB, the cpu_ram field in the JSON response is in MB. `cpu_ram>=32`
+        # returns machines whose reported cpu_ram is >= 32009, i.e. 32 GB. Do NOT
+        # "fix" this by multiplying by 1024 — `cpu_ram>=8192` asks for 8 TB and
+        # matches nothing, which is silent because the script just prints
+        # "No offers matched".
         f"cpu_ram>={args.min_ram}",
 
         # -- host quality ------------------------------------------------------
@@ -114,9 +138,11 @@ def build_query(args: argparse.Namespace) -> str:
         f"reliability>{args.min_reliability}",
         "rentable=true",
         "verified=true",
-        # Enough headroom for the image, the repo, and Studies/ output.
+        # Enough headroom for the image, the repo, the regenerated synthetic grid
+        # (~340 MB) and the Studies/ output (~435 MB for a 160-dataset sweep).
         f"disk_space>{args.min_disk}",
-        # Only matters for the rsync of Datasets/Synthetic (340 MB/set).
+        # Sized by the IMAGE PULL (several GB), not by the data: the synthetic
+        # grid is regenerated on the box from base_seed rather than transferred.
         "inet_down>=100",
 
         f"dph_total<{args.max_price}",
@@ -165,7 +191,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-price", type=float, default=0.40, help="max $/hr (default 0.40)")
     ap.add_argument("--min-cores", type=int, default=8, help="min effective CPU cores (default 8)")
-    ap.add_argument("--min-ram", type=int, default=32, help="min system RAM in GB (default 32)")
+    # The panels are tiny (1000 customers x 156 weeks of float32 is ~1 MB), so
+    # the real ceiling is the Optuna study plus the MC buffers — hundreds of MB.
+    # 8 GB is already generous; 32 was cargo-culted from GPU-training defaults.
+    ap.add_argument("--min-ram", type=int, default=8, help="min system RAM in GB (default 8)")
     ap.add_argument("--min-disk", type=int, default=40, help="min disk GB (default 40)")
     ap.add_argument("--min-reliability", type=float, default=0.98)
     ap.add_argument("--top", type=int, default=15, help="rows to print (default 15)")
@@ -213,19 +242,25 @@ def main() -> None:
         "\nPick from the top rows, not the cheapest row: a 'current'/'recent' CPU is\n"
         "worth several times its price premium here, because a full sweep costs only\n"
         "a few dollars either way but can differ by days in wall-clock.\n\n"
-        "Then:  vastai create instance <ID> \\\n"
-        "         --image pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime \\\n"
-        "         --disk 40 --ssh --direct --onstart ~/vastai/vast_onstart.sh\n"
+        "Then, from the repo root:  ./VastAI/vast_launch.sh <ID>\n\n"
+        "Use the launcher rather than a bare `vastai create instance`: create only\n"
+        "ALLOCATES — the container does not boot, the image is not pulled and\n"
+        "--onstart never runs until you separately `start` it, and a key attached\n"
+        "after creation is not injected. vast_launch.sh does create -> attach ssh ->\n"
+        "start -> poll until cur_state=running, then prints the ssh command.\n"
     )
 
 
 if __name__ == "__main__":
     main()
 
-#/home/virthian/Desktop/Thesis/venvs/thesis_rocm/bin/python ~/vastai/vast_search.py --verbose
+# Run from the repo root:
 #
-# python ~/vastai/vast_search.py --show-fields
+# python VastAI/vast_search.py --verbose
+# Echoes the query actually sent to vast before the results.
+#
+# python VastAI/vast_search.py --show-fields
 # Dumps one raw offer as JSON. Run this first if anything errors — it tells you what fields your CLI version actually returns.
-
-# python ~/vastai/vast_search.py --max-price 0.15 --min-cores 16 --top 30
+#
+# python VastAI/vast_search.py --max-price 0.15 --min-cores 16 --top 30
 # Tightens price, widens the core requirement, shows more rows.

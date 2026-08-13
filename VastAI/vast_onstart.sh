@@ -15,8 +15,11 @@
 
 set -euo pipefail
 
-BRANCH=covariate-standardization
+BRANCH=main
 REPO_DIR=/root/panelclv
+# 8080 is what vast's own "connect" button suggests forwarding, so keeping it
+# here means the command the UI hands you already works.
+JUPYTER_PORT=8080
 
 exec > >(tee -a /root/onstart.log) 2>&1
 echo "=== panelclv onstart: $(date -u '+%F %T UTC') ==="
@@ -59,5 +62,44 @@ echo "HEAD: $(git -C "$REPO_DIR" log -1 --oneline)"
 # numpy/scipy ABI the image was built against.
 "$PY" -m pip install -q -e "$REPO_DIR"
 
+# --- JupyterLab ---------------------------------------------------------------
+# Not every image ships a notebook server (the plain pytorch/pytorch images do
+# not), so install one into the SAME interpreter the package went into —
+# otherwise `import panelclv` fails inside the notebook.
+#
+# Bound to 127.0.0.1, NOT 0.0.0.0: `ssh -L 8080:localhost:8080` connects from the
+# instance's own loopback, so the tunnel reaches it either way, and a loopback
+# bind keeps the server off the public internet.
+#
+# onstart replays on every instance start, so skip if a server is already up.
+if ! pgrep -f "jupyter.*--port=?$JUPYTER_PORT" >/dev/null 2>&1; then
+    "$PY" -m pip install -q jupyterlab
+
+    # Random per-instance token, stored on disk rather than baked into this file
+    # (which lives in a public repo). jupyter-server reads JUPYTER_TOKEN from the
+    # environment, which is stable across the ServerApp/IdentityProvider flag
+    # rename in jupyter-server 2.
+    TOKEN="$("$PY" -c 'import secrets; print(secrets.token_hex(16))')"
+    echo "$TOKEN" > /root/jupyter_token
+
+    # setsid + nohup so the server outlives this script (onstart must exit).
+    # --notebook-dir roots the file browser at the repo, so no symlink is needed.
+    JUPYTER_TOKEN="$TOKEN" setsid nohup "$PY" -m jupyter lab \
+        --ip 127.0.0.1 --port "$JUPYTER_PORT" --allow-root --no-browser \
+        --notebook-dir "$REPO_DIR" > /root/jupyter.log 2>&1 &
+    sleep 3
+fi
+
 touch /root/.onstart_done
-echo "=== provisioning complete: $REPO_DIR ($BRANCH) ==="
+cat <<EOF
+
+=== provisioning complete: $REPO_DIR ($BRANCH) ===
+
+JupyterLab is running on the instance's loopback. From your laptop:
+
+  ssh -p <PORT> root@<HOST> -L ${JUPYTER_PORT}:localhost:${JUPYTER_PORT}
+
+then open  http://localhost:${JUPYTER_PORT}/lab?token=$(cat /root/jupyter_token 2>/dev/null)
+
+The token is also in /root/jupyter_token, and the server log in /root/jupyter.log.
+EOF
