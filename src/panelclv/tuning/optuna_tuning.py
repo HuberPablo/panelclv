@@ -4,7 +4,7 @@ One shared `objective` over every registered model type: what each one searches,
 that space is sampled and how the model is built all come from its registry entry
 (ADR-0006), so this file holds the *search*, not a list of architectures. Each trial
 samples an architecture + training HPs (and, optionally, a covariate subset), trains
-via `training_utils.fit_model` — which optimises classification cross-entropy and
+via `training.loop.fit_model` — which optimises classification cross-entropy and
 owns the loss curve, early stopping, and per-epoch pruning reports — then returns
 that same cross-entropy, scored on the temporal validation window (ADR-0001), to
 Optuna. Selection and training therefore minimise one number.
@@ -69,7 +69,7 @@ from panelclv.registry import (
     suggest_params,
     validate_model_knobs,
 )
-from panelclv.training.training_utils import fit_model
+from panelclv.training.loop import fit_model
 
 
 # The `training` keys this module reads — every one appears as a `training.get(...)`
@@ -329,7 +329,7 @@ def objective(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        max_trans=model.num_target_classes,
+        num_target_classes=model.num_target_classes,
         # n_epochs / patience are training control, but the caller may still hand
         # them a search spec (e.g. patience over {5,7,9}); resolve through the same
         # mini-language so a scalar stays fixed and a set/tuple is searched.

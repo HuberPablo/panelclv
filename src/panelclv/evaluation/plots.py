@@ -26,7 +26,7 @@ import pandas as pd
 # Both cross-package imports point DOWN the altitude split: the metric authority
 # scores the model's own forecast and stays in `panelclv.models`; the Pareto/NBD
 # fit lives with the benchmark it belongs to; the shape reducer is prediction I/O.
-from panelclv.benchmarks.pareto_benchmark import pareto_from_data
+from panelclv.benchmarks.pareto_nbd import pareto_from_data
 from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
 from panelclv.predictions import reduce_to_customer_period
 

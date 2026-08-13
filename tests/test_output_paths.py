@@ -25,9 +25,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from panelclv.benchmarks.pareto_benchmark import pareto_forecast
-from panelclv.data_preparation.pareto_simulation import (
-    _auto_study_name,
+from panelclv.benchmarks.pareto_nbd import pareto_forecast
+from panelclv.data_preparation.pareto_nbd_simulation import (
+    _auto_dataset_dir_name,
     generate_pnbd_study,
 )
 from panelclv.predictions import RUN_METADATA_FILE, create_run_directory
@@ -175,17 +175,17 @@ def test_the_pareto_dump_names_the_default_seed_the_fit_used(pareto_data, tmp_pa
 
 
 # --------------------------------------------------------------------------------------
-# Site 3 — the synthetic study folder
+# Site 3 — the synthetic dataset directory
 # --------------------------------------------------------------------------------------
 
 
-def test_the_study_name_is_the_grid_shape_and_the_base_seed():
-    """The grid and the seed decide every dataset in the study, so they name it."""
-    name = _auto_study_name(6, 4, 5, base_seed=42)
+def test_the_dataset_dir_name_is_the_grid_shape_and_the_base_seed():
+    """The grid and the seed decide every dataset in the directory, so they name it."""
+    name = _auto_dataset_dir_name(6, 4, 5, base_seed=42)
 
     assert name == "pnbd_study_6x4x5_seed42"
     assert not TIMESTAMP.search(name)
-    assert _auto_study_name(6, 4, 5, base_seed=43) != name   # a different study, told apart
+    assert _auto_dataset_dir_name(6, 4, 5, base_seed=43) != name   # a different grid, told apart
 
 
 def test_regenerating_a_study_writes_to_the_same_folder_and_keeps_its_creation_time(tmp_path):

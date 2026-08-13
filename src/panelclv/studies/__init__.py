@@ -2,7 +2,7 @@
 
 Specify a set of models and a single shared dataset, run ``n_studies_per_model``
 independent Optuna studies per model, keep the best trial of each study, forecast
-it, and archive everything under ``Studies/<study_name>/`` in a uniform,
+it, and archive everything under ``Studies/<suite_name>/`` in a uniform,
 analysis-ready layout. This subpackage holds only orchestration — it reuses
 ``panelclv.trials`` / ``tuning`` / ``models`` / ``benchmarks`` and adds no
 modeling logic.
@@ -13,7 +13,7 @@ Typical use (see ``scripts/run_studies.py`` for a full example)::
 
     config = StudySuiteConfig(
         studies_base_path="/path/to/Studies",
-        study_name="electronics_2026_06",
+        suite_name="electronics_2026_06",
         data=data_full,                       # one prepare_dataset dict, shared
         n_studies_per_model=5,
         models=[
@@ -61,7 +61,7 @@ from .suite_metrics import (
 )
 from .pareto_nbd_grid import (
     collect_grid_results,
-    group_summary,
+    cell_summary,
     compare_models_table,
     plot_pattern,
     plot_diff_grid,
@@ -87,7 +87,7 @@ __all__ = [
     "describe_dataset",
     "describe_suite_dataset",
     "collect_grid_results",
-    "group_summary",
+    "cell_summary",
     "compare_models_table",
     "plot_pattern",
     "plot_diff_grid",

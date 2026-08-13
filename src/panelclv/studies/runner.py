@@ -43,14 +43,14 @@ from . import layout
 
 
 def run_study_suite(config: StudySuiteConfig) -> Path:
-    """Run the whole suite and return the path to ``Studies/<study_name>/``.
+    """Run the whole suite and return the path to ``Studies/<suite_name>/``.
 
     Validates the config, creates the suite root, then runs every model. Writes
     the suite-level ``config.json`` and the combined ``results.csv`` at the end.
     """
     config.validate()
     root = layout.create_suite_root(
-        config.studies_base_path, config.study_name, overwrite=config.overwrite
+        config.studies_base_path, config.suite_name, overwrite=config.overwrite
     )
     layout.write_json(root / "config.json", _suite_record(config))
 
@@ -226,7 +226,7 @@ def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
     data = config.data
     panel_config = data.get("panel_config")
     return {
-        "study_name": config.study_name,
+        "suite_name": config.suite_name,
         "created": datetime.now().isoformat(timespec="seconds"),
         "studies_base_path": str(config.studies_base_path),
         "n_studies_per_model": config.n_studies_per_model,

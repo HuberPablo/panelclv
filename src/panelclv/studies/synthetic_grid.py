@@ -35,8 +35,8 @@ Typical use::
 
     from panelclv.studies import seasonality_grid, dead_customer_mass
 
-    seasonality_grid(study_dir)              # (rate, churn) x model, correlation
-    dead_customer_mass(study_dir)            # long: one row per (dataset, model)
+    seasonality_grid(dataset_dir)              # (rate, churn) x model, correlation
+    dead_customer_mass(dataset_dir)            # long: one row per (dataset, model)
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ from typing import Callable, Iterator
 import numpy as np
 import pandas as pd
 
-from panelclv.data_preparation.pareto_simulation import (
+from panelclv.data_preparation.pareto_nbd_simulation import (
     list_pnbd_datasets,
     load_pnbd_dataset,
     seasonal_weekly_multiplier,
@@ -121,13 +121,13 @@ class _Forecast:
 _Measure = Callable[[_Dataset, _Forecast], float]
 
 
-def _datasets(study_dir: Path, train_base: Path) -> Iterator[_Dataset]:
+def _datasets(dataset_dir: Path, train_base: Path) -> Iterator[_Dataset]:
     """Every generated dataset that has a trained suite beside it."""
-    for row in list_pnbd_datasets(study_dir).itertuples(index=False):
+    for row in list_pnbd_datasets(dataset_dir).itertuples(index=False):
         suite = _suite_dir(train_base, row.combo, row.dataset)
         if not suite.is_dir():
             continue                                   # dataset not trained yet — skip
-        panel, ground_truth, config = load_pnbd_dataset(study_dir, row.combo, row.dataset)
+        panel, ground_truth, config = load_pnbd_dataset(dataset_dir, row.combo, row.dataset)
         yield _Dataset(
             mean_transaction_rate=row.mean_transaction_rate,
             churn_rate=row.churn_rate,
@@ -166,16 +166,16 @@ def _forecasts(dataset: _Dataset) -> Iterator[_Forecast]:
 
 
 def _measure_grid(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None,
     measure: _Measure,
     value: str,
 ) -> pd.DataFrame:
     """Apply ``measure`` to every trained (dataset, model) pair, into one long table."""
-    study_dir, train_base = _resolve_grid(study_dir, train_base)
+    dataset_dir, train_base = _resolve_grid(dataset_dir, train_base)
 
     rows: list[dict] = []
-    for dataset in _datasets(study_dir, train_base):
+    for dataset in _datasets(dataset_dir, train_base):
         for forecast in _forecasts(dataset):
             rows.append({
                 "mean_transaction_rate": dataset.mean_transaction_rate,
@@ -348,7 +348,7 @@ def _shape_correlation(dataset: _Dataset, forecast: _Forecast) -> float:
 
 
 def seasonality_grid(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None = None,
 ) -> pd.DataFrame:
     """Per-``(rate, churn)`` seasonal-detection ability of each model.
@@ -361,12 +361,12 @@ def seasonality_grid(
 
     Parameters
     ----------
-    study_dir
-        The generation study folder (what ``generate_pnbd_study`` returned) — supplies
+    dataset_dir
+        The dataset directory (what ``generate_pnbd_study`` returned) — supplies
         the panels, the latent ground truth, and the true seasonal curve per dataset.
     train_base
         The trained-suites folder (``<combo>__<dataset>/`` subfolders). Defaults to
-        ``Studies/<study_dir name>``, the convention the training loop uses.
+        ``Studies/<dataset_dir name>``, the convention the training loop uses.
 
     Returns
     -------
@@ -380,12 +380,12 @@ def seasonality_grid(
         If the study has no seasonal component (``seasonal_peaks`` absent), so the
         metric would be undefined.
     """
-    long = _measure_grid(study_dir, train_base, _seasonal_corr, "seasonal_corr")
+    long = _measure_grid(dataset_dir, train_base, _seasonal_corr, "seasonal_corr")
     return _cell_matrix(long, "seasonal_corr")
 
 
 def alive_volume_ratio_grid(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None = None,
 ) -> pd.DataFrame:
     """Per-``(rate, churn)`` alive-volume ratio of each model.
@@ -417,23 +417,23 @@ def alive_volume_ratio_grid(
 
     Parameters
     ----------
-    study_dir
-        The generation study folder — supplies the latent ground truth (``lambda``,
+    dataset_dir
+        The dataset directory — supplies the latent ground truth (``lambda``,
         ``tau``) and the true seasonal curve per dataset.
     train_base
-        The trained-suites folder. Defaults to ``Studies/<study_dir name>``.
+        The trained-suites folder. Defaults to ``Studies/<dataset_dir name>``.
 
     Returns
     -------
     DataFrame indexed by ``(mean_transaction_rate, churn_rate)`` with one column per
     model, holding the mean alive-volume ratio across that cell's replicates.
     """
-    long = _measure_grid(study_dir, train_base, _alive_volume_ratio, "alive_volume_ratio")
+    long = _measure_grid(dataset_dir, train_base, _alive_volume_ratio, "alive_volume_ratio")
     return _cell_matrix(long, "alive_volume_ratio")
 
 
 def dead_volume_leakage_grid(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None = None,
 ) -> pd.DataFrame:
     """Per-``(rate, churn)`` dead-volume leakage of each model.
@@ -456,23 +456,23 @@ def dead_volume_leakage_grid(
 
     Parameters
     ----------
-    study_dir
-        The generation study folder — supplies ``lambda`` / ``tau`` and the true
+    dataset_dir
+        The dataset directory — supplies ``lambda`` / ``tau`` and the true
         seasonal curve per dataset.
     train_base
-        The trained-suites folder. Defaults to ``Studies/<study_dir name>``.
+        The trained-suites folder. Defaults to ``Studies/<dataset_dir name>``.
 
     Returns
     -------
     DataFrame indexed by ``(mean_transaction_rate, churn_rate)`` with one column per
     model, holding the mean dead-volume leakage across that cell's replicates.
     """
-    long = _measure_grid(study_dir, train_base, _dead_volume_leakage, "dead_volume_leakage")
+    long = _measure_grid(dataset_dir, train_base, _dead_volume_leakage, "dead_volume_leakage")
     return _cell_matrix(long, "dead_volume_leakage")
 
 
 def dead_customer_mass(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None = None,
 ) -> pd.DataFrame:
     """Share of each model's predicted holdout volume spent on silent customers.
@@ -491,10 +491,10 @@ def dead_customer_mass(
 
     Parameters
     ----------
-    study_dir
-        The generation study folder — supplies the panels the holdout actuals come from.
+    dataset_dir
+        The dataset directory — supplies the panels the holdout actuals come from.
     train_base
-        The trained-suites folder. Defaults to ``Studies/<study_dir name>``.
+        The trained-suites folder. Defaults to ``Studies/<dataset_dir name>``.
 
     Returns
     -------
@@ -502,11 +502,11 @@ def dead_customer_mass(
     ``dataset`` labels, the ``model`` name and ``dead_customer_mass``. Replicate
     granularity, so a caller can average across whichever axis its figure fixes.
     """
-    return _measure_grid(study_dir, train_base, _dead_customer_mass, "dead_customer_mass")
+    return _measure_grid(dataset_dir, train_base, _dead_customer_mass, "dead_customer_mass")
 
 
 def shape_correlation(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None = None,
 ) -> pd.DataFrame:
     """Per-dataset correlation between predicted and actual weekly holdout totals.
@@ -519,10 +519,10 @@ def shape_correlation(
 
     Parameters
     ----------
-    study_dir
-        The generation study folder — supplies the panels the holdout actuals come from.
+    dataset_dir
+        The dataset directory — supplies the panels the holdout actuals come from.
     train_base
-        The trained-suites folder. Defaults to ``Studies/<study_dir name>``.
+        The trained-suites folder. Defaults to ``Studies/<dataset_dir name>``.
 
     Returns
     -------
@@ -530,4 +530,4 @@ def shape_correlation(
     ``dataset`` labels, the ``model`` name and ``shape_correlation``. Replicate
     granularity, so a caller can average across whichever axis its figure fixes.
     """
-    return _measure_grid(study_dir, train_base, _shape_correlation, "shape_correlation")
+    return _measure_grid(dataset_dir, train_base, _shape_correlation, "shape_correlation")

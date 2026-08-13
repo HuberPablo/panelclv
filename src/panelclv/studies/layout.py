@@ -2,7 +2,7 @@
 
 The on-disk tree the runner produces:
 
-    <studies_base_path>/<study_name>/
+    <studies_base_path>/<suite_name>/
         config.json                 # whole-suite record
         results.csv                 # tidy one-row-per-(model, study) table
         <ModelName>/
@@ -29,9 +29,9 @@ import numpy as np
 
 
 def create_suite_root(
-    studies_base_path: str | Path, study_name: str, overwrite: bool = False
+    studies_base_path: str | Path, suite_name: str, overwrite: bool = False
 ) -> Path:
-    """Create (and return) ``<studies_base_path>/<study_name>``.
+    """Create (and return) ``<studies_base_path>/<suite_name>``.
 
     The base path must already exist (it is the user's ``Studies`` folder); the
     suite folder is created. If it already exists, refuse unless ``overwrite`` —
@@ -42,10 +42,10 @@ def create_suite_root(
         raise FileNotFoundError(
             f"studies_base_path does not exist or is not a directory: {base}"
         )
-    root = base / study_name
+    root = base / suite_name
     if root.exists() and not overwrite:
         raise FileExistsError(
-            f"study folder already exists: {root} (pass overwrite=True to reuse it)"
+            f"suite folder already exists: {root} (pass overwrite=True to reuse it)"
         )
     root.mkdir(parents=True, exist_ok=True)
     return root

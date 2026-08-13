@@ -323,7 +323,7 @@ def compute_pareto_predictions(
     """Hierarchical-Bayes Pareto/NBD forecast (BTYDplus-faithful).
 
     Fits on the calibration panel and returns `(predictions (N, holdout_length),
-    ids)` — the shape the `pareto_benchmark` plots/metrics consume. MCMC controls
+    ids)` — the shape the `pareto_benchmark=True` plots/metrics consume. MCMC controls
     default to BTYDplus's own (`mcmc=2500, burnin=500, thin=50, chains=2`); `seed`
     makes the whole run reproducible.
 

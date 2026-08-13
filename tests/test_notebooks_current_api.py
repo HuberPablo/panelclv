@@ -87,6 +87,17 @@ RETIRED = [
      "the fitter is public: `benchmarks.pareto_from_data`"),
     (r"weekly_actuals|weekly_aggregate_predictions|alignment_check",
      "import-only helpers, deleted with plot_utils"),
+    # Retired by the package cleanup, issue 15: the orphan rename sweep.
+    (r"dynamic_panel_dataset", "the module is `data_preparation.panel_dataset`"),
+    (r"pareto_simulation",
+     "the module is `data_preparation.pareto_nbd_simulation`; one spelling of Pareto/NBD"),
+    (r"training_utils", "the training loop is `training.loop`"),
+    (r"panelclv\.benchmarks\.pareto_benchmark",
+     "the module is `benchmarks.pareto_nbd` (the `pareto_benchmark=` plot flag stays)"),
+    (r"\bmax_trans\b",
+     "the softmax head size is `num_target_classes`; the config knob is `clip_target_upper`"),
+    (r"group_summary",
+     "a `(rate, churn)` grid point is a cell: `studies.cell_summary`"),
 ]
 
 

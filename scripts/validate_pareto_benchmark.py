@@ -1,4 +1,4 @@
-"""Validate benchmarks/pareto_benchmark.py (pure-Python HB Pareto/NBD) against the
+"""Validate benchmarks/pareto_nbd.py (pure-Python HB Pareto/NBD) against the
 real R BTYDplus package it ports.
 
 Generates one synthetic Pareto/NBD cohort, runs BOTH estimators on the identical

@@ -1,7 +1,7 @@
 """Valendin-style autoregressive Monte Carlo holdout simulation.
 
 Companion to `multinomial_lstm.py` / `multinomial_transformer.py` (training) and
-the data dict produced by `Data_preparation/dynamic_panel_dataset.py`. The model
+the data dict produced by `data_preparation/panel_dataset.py`. The model
 has only ever seen the calibration window; this module asks it to simulate the
 holdout window autoregressively:
 
@@ -450,7 +450,7 @@ def forecast_recurrent(
     """Monte Carlo holdout forecast for a recurrent (LSTM) rollout model.
 
     Uses the stateful `simulate_recurrent_path` rollout. `data` is the dict returned
-    by `dynamic_panel_dataset.prepare_dataset`, so calibration / holdout /
+    by `panel_dataset.prepare_dataset`, so calibration / holdout /
     seq_cols / target_col are all read from it.
 
     `seed`, if given, is passed to `torch.manual_seed` before sampling so the

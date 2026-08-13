@@ -58,7 +58,7 @@ from panelclv.benchmarks import (  # noqa: E402
     compute_pareto_predictions,
 )
 from panelclv.configs.panel_config import PanelConfig  # noqa: E402
-from panelclv.data_preparation import dynamic_panel_dataset  # noqa: E402
+from panelclv.data_preparation import panel_dataset  # noqa: E402
 from panelclv.trials import split_calibration  # noqa: E402
 from panelclv.models.embedders import ProjectedEmbedder  # noqa: E402
 from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
@@ -210,7 +210,7 @@ def _fit_and_roll(data, train_cls, build, forecaster, tmp_path) -> dict:
         trained,
         split.train_loader,
         split.val_loader,
-        max_trans=n_classes,          # class COUNT, not the maximum class index
+        num_target_classes=n_classes,  # class COUNT, not the maximum class index
         n_epochs=2,
         patience=2,
         device="cpu",                 # CPU keeps the run reproducible and GPU-free
@@ -236,7 +236,7 @@ def _fit_and_roll(data, train_cls, build, forecaster, tmp_path) -> dict:
 
 def run_lstm_pipeline(tmp_path) -> dict:
     """The recurrent arm: panel -> tensors -> train -> rollout -> metrics, seeded end to end."""
-    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    data = panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
 
     def build(cls, metadata):
         return cls(
@@ -262,7 +262,7 @@ def run_transformer_pipeline(tmp_path) -> dict:
     and the recurrent/attention crossing fails silently rather than raising — which
     is why this arm exists.
     """
-    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    data = panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
 
     def build(cls, metadata):
         return cls(
@@ -289,7 +289,7 @@ def run_valendin_pipeline(tmp_path) -> dict:
     `scripts/validate_valendin_lstm.py` needs the gitignored `Datasets/`, so this arm is
     the only coverage of a full Valendin rollout that runs on a fresh clone.
     """
-    data = dynamic_panel_dataset.prepare_dataset(
+    data = panel_dataset.prepare_dataset(
         _golden_panel(), _valendin_config(), verbose=False
     )
 
@@ -322,7 +322,7 @@ def run_pareto_fit(tmp_path) -> dict:
     runs and that it runs reproducibly, not that the sampler has converged. `tmp_path` is
     accepted and ignored, so every scenario has the same signature.
     """
-    data = dynamic_panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    data = panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
     predictions, ids = compute_pareto_predictions(
         data["train_panel"],
         holdout_length=int(data["T_HOLD"]),

@@ -2,7 +2,7 @@
 
 All criterions take (logits, targets) — same call signature as
 `nn.CrossEntropyLoss`, with shapes `(B*T, K)` and `(B*T,)` (long indices) —
-so they're drop-in replacements inside `training_utils.fit_model`.
+so they're drop-in replacements inside `training.loop.fit_model`.
 
 Selectable via `loss_type` strings:
 
@@ -105,8 +105,8 @@ def compute_class_weights(
       `data["targets"]` and, unless `num_classes` is passed, the class count is
       derived from the resolved target embedding
       (`data["embedded_cols"][data["target_col"]]`, i.e. the same
-      `max_trans` the softmax head uses). This folds the old notebook
-      boilerplate (squeeze the target axis, look up `max_trans`) into one call.
+      `num_target_classes` the softmax head uses). This folds the old notebook
+      boilerplate (squeeze the target axis, look up the class count) into one call.
 
     The train/val split is **temporal** (a time window over all customers), so with
     the dict form `training_only=True` (default) weights on the **training prefix**

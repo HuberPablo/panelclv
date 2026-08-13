@@ -2,7 +2,7 @@
 
 A *study suite* runs ``n_studies_per_model`` independent Optuna studies for each
 of several models over a single shared dataset, keeps the best trial of every
-study, forecasts it, and archives everything under ``Studies/<study_name>/`` (see
+study, forecasts it, and archives everything under ``Studies/<suite_name>/`` (see
 ``panelclv.studies.runner`` for the orchestration and ``layout`` for the on-disk
 tree). The user only writes two dataclasses:
 
@@ -102,7 +102,7 @@ class StudySuiteConfig:
     ----------
     studies_base_path
         Existing ``Studies`` directory; the suite folder is created inside it.
-    study_name
+    suite_name
         New folder created under ``studies_base_path`` for this whole suite.
     data
         The ``prepare_dataset`` output, shared by every model.
@@ -118,7 +118,7 @@ class StudySuiteConfig:
         studies are genuine independent replications.
     device, refit_kwargs, overwrite
         Passed through to the trainer / forecaster; ``overwrite`` allows reusing an
-        existing study-name folder.
+        existing suite folder.
     keep_only_best_checkpoint
         Disk policy for the per-study Optuna search. ``False`` (default) keeps every
         trial's ``.pth``; these accumulate fast (``n_trials`` per study × every
@@ -130,7 +130,7 @@ class StudySuiteConfig:
     """
 
     studies_base_path: str | Path
-    study_name: str
+    suite_name: str
     data: dict[str, Any]
     models: list[ModelSpec]
     n_studies_per_model: int = 5
@@ -148,9 +148,9 @@ class StudySuiteConfig:
             raise FileNotFoundError(
                 f"studies_base_path does not exist or is not a directory: {base}"
             )
-        if not self.study_name or "/" in self.study_name or "\\" in self.study_name:
+        if not self.suite_name or "/" in self.suite_name or "\\" in self.suite_name:
             raise ValueError(
-                f"study_name must be a single folder name, got {self.study_name!r}"
+                f"suite_name must be a single folder name, got {self.suite_name!r}"
             )
         if not self.models:
             raise ValueError("models is empty — add at least one ModelSpec")

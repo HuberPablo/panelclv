@@ -56,10 +56,10 @@ flowchart TD
                 direction TB
                 P["raw panel<br/>DataFrame (rows, cols)"]
                 C["PanelConfig<br/>configs/panel_config.py"]
-                D["prepare_dataset<br/>data_preparation/dynamic_panel_dataset.py"]
+                D["prepare_dataset<br/>data_preparation/panel_dataset.py"]
                 L["split_calibration<br/>trials/loaders.py"]
                 M["MultinomialLSTMModel<br/>models/multinomial_lstm.py"]
-                F["fit_model<br/>training/training_utils.py"]
+                F["fit_model<br/>training/loop.py"]
                 I["trained.to_rollout()<br/>RolloutMultinomialLSTMModel"]
                 R["forecast_recurrent<br/>models/monte_carlo_forecasting.py"]
                 S["compute_forecast_metrics<br/>rmse / bias_percent / mape"]
@@ -152,7 +152,7 @@ can be read back to see exactly which panel produced it.
 
 ## 3. `prepare_dataset` — panel to tensors
 
-`data_preparation/dynamic_panel_dataset.py` → `prepare_dataset(panel, config, verbose=True)`.
+`data_preparation/panel_dataset.py` → `prepare_dataset(panel, config, verbose=True)`.
 
 One call. In: a long customer-period DataFrame. Out: a dict of numpy arrays plus
 the bookkeeping everything downstream reads.
@@ -270,14 +270,14 @@ pre-seam checkpoint ever resurfaces.)
 
 ### 4.3 `fit_model`
 
-`training/training_utils.py` → `fit_model(...)`. Standard supervised training of a
+`training/loop.py` → `fit_model(...)`. Standard supervised training of a
 classifier: `build_criterion` from `models/losses.py`, `AdamW`, per-epoch validation,
 early stopping on validation loss, best weights written to disk.
 
 ```python
 fit = fit_model(
     model, train_loader, val_loader,
-    max_trans=n_classes,       # class COUNT, not the maximum class index
+    num_target_classes=n_classes,   # class COUNT, not the maximum class index
     n_epochs=2, patience=2, device="cpu",
     checkpoint_dir=str(tmp_path), model_name="golden",
     val_score_start=metadata["val_score_start"],
@@ -694,7 +694,7 @@ provenance; nothing reads them to drive one.)
 ```python
 config = StudySuiteConfig(
     studies_base_path="/path/to/Studies",
-    study_name="electronics_2026_06",
+    suite_name="electronics_2026_06",
     data=data_full,                  # ONE prepare_dataset dict, shared by all models
     n_studies_per_model=5,
     n_simulations=600,
@@ -742,7 +742,7 @@ table's keys.
 directory contract is unit-testable on its own.
 
 ```
-Studies/<study_name>/
+Studies/<suite_name>/
     config.json                  whole-suite record, incl. serialised PanelConfig
     results.csv                  tidy: one row per (model, study)
     aggregated_LSTM.csv          written later by aggregate_suite_predictions
@@ -841,7 +841,7 @@ the refit, `compute_forecast_metrics`, the archive — is unchanged.
 
 ## 12. The Pareto/NBD baseline
 
-`benchmarks/pareto_benchmark.py`, reached through `studies/runner.py` →
+`benchmarks/pareto_nbd.py`, reached through `studies/runner.py` →
 `_run_pareto_model`. Not a neural model: no Optuna, no torch, no rollout.
 
 `ModelSpec(name="ParetoNBD", model_type="pareto_nbd")` and the runner takes the other
@@ -962,7 +962,7 @@ alongside the model for this reason.
 looks unlike the val loss from tuning, that is usually why — the refit trains on the
 validation window too, and nothing validates the weights it ends on.
 
-**`max_trans` is a class count, not a maximum index.** Pass
+**`num_target_classes` is a class count, not a maximum index.** Pass
 `data["embedded_cols"][target_col]`, which is already the count.
 
 **`selection_metric="rollout_composite"` is gone.** Trials are selected on validation
@@ -970,7 +970,7 @@ cross-entropy, full stop; `run_optuna_study` no longer takes a `selection_metric
 any `rollout_*`) argument. Archived `Studies/*/trials.csv` files still record the
 attribute — every one of them reads `val_loss`. ADR-0003 records why the option went.
 
-**A study folder will not be reused.** `create_suite_root` raises `FileExistsError`
+**A suite folder will not be reused.** `create_suite_root` raises `FileExistsError`
 unless `overwrite=True`.
 
 **Long studies fill the disk with checkpoints.** One `.pth` per trial. Set

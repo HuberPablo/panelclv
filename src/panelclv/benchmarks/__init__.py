@@ -19,7 +19,7 @@ An earlier frequentist-MLE Pareto/NBD (via ``lifetimes``) was retired; it is kep
 provenance in the repo-root ``archive/``, outside the package.
 """
 
-from .pareto_benchmark import (
+from .pareto_nbd import (
     compute_pareto_predictions,
     pareto_forecast,
     pareto_from_data,

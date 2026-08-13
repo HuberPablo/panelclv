@@ -60,7 +60,7 @@ Grid studies (this module's second half)
 generating ``n_datasets`` independent replicate panels per combination and laying
 them out on disk for later training / benchmarking:
 
-    <out_path>/<study_name>/
+    <out_path>/<dataset_dir_name>/
         study_config.json                 <- the whole grid + settings
         index.csv                         <- manifest: one row per dataset
         Dataset_{rate%}_{churn%}/         <- one folder per (rate, churn) combo,
@@ -71,7 +71,7 @@ them out on disk for later training / benchmarking:
             Dataset_2/
             ...
 
-`list_pnbd_datasets(study_dir)` and `load_pnbd_dataset(study_dir, combo, dataset)`
+`list_pnbd_datasets(dataset_dir)` and `load_pnbd_dataset(dataset_dir, combo, dataset)`
 read them back, so nothing about a dataset has to be remembered outside its folder.
 """
 
@@ -286,11 +286,12 @@ def _beta_for_churn(churn_rate: float, s: float, horizon_weeks: float) -> float:
     return horizon_weeks / ((1.0 - churn_rate) ** (-1.0 / s) - 1.0)
 
 
-def _auto_study_name(n_rate: int, n_churn: int, n_datasets: int, base_seed: int) -> str:
-    """Default study name from the grid shape and the seed, e.g. ``pnbd_study_6x4x5_seed42``.
+def _auto_dataset_dir_name(n_rate: int, n_churn: int, n_datasets: int, base_seed: int) -> str:
+    """Default dataset-directory name from the grid shape and the seed,
+    e.g. ``pnbd_study_6x4x5_seed42``.
 
-    Every character comes from the arguments that decide what the study contains, so
-    regenerating a study finds its own folder instead of making a second one beside
+    Every character comes from the arguments that decide what the directory holds, so
+    regenerating a grid finds its own folder instead of making a second one beside
     it — the wall clock used to sit here, and its time is now recorded in
     ``study_config.json`` as ``created_at`` instead.
     """
@@ -312,7 +313,7 @@ def generate_pnbd_study(
     seasonal_peaks: Sequence[int] = (),
     seasonal_amplitude: float = 0.0,
     seasonal_width: float = 1.0,
-    study_name: str | None = None,
+    dataset_dir_name: str | None = None,
     base_seed: int = 42,
     start_year: int = 1999,
 ) -> tuple[Path, pd.DataFrame]:
@@ -324,7 +325,7 @@ def generate_pnbd_study(
     parameter internally — ``alpha = r / mean_rate`` and ``beta`` from the inverse
     Lomax survival — so the folder labels always match the values. It sweeps every
     ``(rate, churn)`` combination and generates ``n_datasets`` independent replicate
-    panels each, under ``out_path/study_name/`` in the layout documented atop this
+    panels each, under ``out_path/dataset_dir_name/`` in the layout documented atop this
     module (folders named ``Dataset_{rate%}_{churn%}`` with integer percents).
 
     Parameters
@@ -339,7 +340,7 @@ def generate_pnbd_study(
     n_datasets
         Number of replicate panels per combination (the "X" in ``Dataset_1 .. X``).
     out_path
-        Base directory in which the study folder is created.
+        Base directory in which the dataset directory is created.
     r, s
         Shared Gamma **shapes** for the purchase / dropout priors (default 2.0 each).
     n_weeks_for_churn_rate
@@ -353,24 +354,25 @@ def generate_pnbd_study(
         ``simulate_pareto_nbd_panel`` for the full trade-off.
     seasonal_peaks, seasonal_amplitude, seasonal_width
         Optional recurring within-year seasonality, applied identically to every
-        dataset in the study (fixed, not a grid axis). See
+        dataset in the grid (fixed, not a grid axis). See
         ``simulate_pareto_nbd_panel`` for the meaning; default = no seasonality.
-    study_name
-        Folder name for this study. When omitted it is derived from the grid shape
-        and ``base_seed``, so the same study always regenerates into the same folder.
+    dataset_dir_name
+        Name of the dataset directory this grid writes. When omitted it is derived
+        from the grid shape and ``base_seed``, so the same grid always regenerates
+        into the same folder.
     base_seed
         Seeds are assigned ``base_seed, base_seed+1, ...`` across all datasets in
-        generation order, so the whole study is reproducible and every replicate
+        generation order, so the whole grid is reproducible and every replicate
         is a distinct draw.
     start_year
         Calendar year of week 0 for the ``(year, week)`` columns.
 
     Returns
     -------
-    study_dir : Path
-        The created ``out_path/study_name`` directory.
+    dataset_dir : Path
+        The created ``out_path/dataset_dir_name`` directory.
     manifest : DataFrame
-        One row per generated dataset (also written to ``study_dir/index.csv``).
+        One row per generated dataset (also written to ``dataset_dir/index.csv``).
     """
     mean_rates = list(mean_transaction_rates)
     churns = list(churn_rates)
@@ -387,18 +389,18 @@ def generate_pnbd_study(
     alpha_by_rate = [(m, r / m) for m in mean_rates]
     beta_by_churn = [(c, _beta_for_churn(c, s, n_weeks_for_churn_rate)) for c in churns]
 
-    study_name = study_name or _auto_study_name(
+    dataset_dir_name = dataset_dir_name or _auto_dataset_dir_name(
         len(mean_rates), len(churns), n_datasets, base_seed
     )
-    study_dir = Path(out_path) / study_name
-    study_dir.mkdir(parents=True, exist_ok=True)
+    dataset_dir = Path(out_path) / dataset_dir_name
+    dataset_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, Any]] = []
     seed = base_seed
     # product() varies churn fastest: all churns for rate[0], then rate[1], ...
     for (mrate, alpha), (churn, beta) in product(alpha_by_rate, beta_by_churn):
         combo = f"Dataset_{_pct(mrate)}_{_pct(churn)}"       # e.g. Dataset_10_20
-        combo_dir = study_dir / combo
+        combo_dir = dataset_dir / combo
         combo_dir.mkdir(parents=True, exist_ok=True)
 
         for k in range(1, n_datasets + 1):
@@ -415,7 +417,7 @@ def generate_pnbd_study(
             ds_dir.mkdir(parents=True, exist_ok=True)
 
             cfg = {
-                "study": study_name,
+                "dataset_dir_name": dataset_dir_name,
                 "combo": combo,
                 "dataset": ds_name,
                 "replicate": k,
@@ -454,11 +456,14 @@ def generate_pnbd_study(
             seed += 1
 
     manifest = pd.DataFrame(rows)
-    manifest.to_csv(study_dir / "index.csv", index=False)
+    manifest.to_csv(dataset_dir / "index.csv", index=False)
 
-    # Study-level self-describing config (the whole grid at a glance).
-    study_cfg = {
-        "study_name": study_name,
+    # Grid-level self-describing config (the whole grid at a glance). Keys mirror the
+    # parameters that set them, so the file reads as the call that wrote it. Grids
+    # generated before this rename spell this one `study_name`; nothing reads either
+    # spelling back, so the older files stay valid as records.
+    grid_cfg = {
+        "dataset_dir_name": dataset_dir_name,
         "model": "pareto_nbd",
         "grid": {"mean_transaction_rates": mean_rates, "churn_rates": churns},
         "r": r, "s": s,
@@ -476,37 +481,37 @@ def generate_pnbd_study(
         "base_seed": int(base_seed), "start_year": int(start_year),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    with open(study_dir / "study_config.json", "w") as fh:
-        json.dump(study_cfg, fh, indent=2)
+    with open(dataset_dir / "study_config.json", "w") as fh:
+        json.dump(grid_cfg, fh, indent=2)
 
-    return study_dir, manifest
+    return dataset_dir, manifest
 
 
 # ---------------------------------------------------------------------------
-# 3. Retrieval — read a study's datasets back for training
+# 3. Retrieval — read a dataset directory back for training
 # ---------------------------------------------------------------------------
 
 
-def list_pnbd_datasets(study_dir: str | Path) -> pd.DataFrame:
-    """Return a manifest of every dataset in a study by scanning its config.json files.
+def list_pnbd_datasets(dataset_dir: str | Path) -> pd.DataFrame:
+    """Return a manifest of every dataset in the directory by scanning its config.json files.
 
     Rebuilt from disk (the source of truth), so it stays correct even if
     ``index.csv`` is stale or missing.
 
-    Raises ``FileNotFoundError`` if ``study_dir`` is not a generation study. The
-    check matters because a *trained* suite tree (``Studies/<study>/<combo>__<dataset>/
+    Raises ``FileNotFoundError`` if ``dataset_dir`` is not a dataset directory. The
+    check matters because a *trained* suite tree (``Studies/<suite>/<combo>__<dataset>/
     <Model>/config.json``) puts a config.json at exactly the same glob depth as a
     generation tree (``<combo>/<dataset>/config.json``). Pointing this function at
     the trained folder therefore used to match those model-spec configs and die on
     a bare ``KeyError: 'combo'`` deep inside the loop; now it says what is wrong.
     """
-    study_dir = Path(study_dir)
-    if not study_dir.is_dir():
-        raise FileNotFoundError(f"study_dir does not exist: {study_dir}")
+    dataset_dir = Path(dataset_dir)
+    if not dataset_dir.is_dir():
+        raise FileNotFoundError(f"dataset_dir does not exist: {dataset_dir}")
 
     rows: list[dict[str, Any]] = []
     skipped = 0
-    for cfg_path in sorted(study_dir.glob("*/*/config.json")):
+    for cfg_path in sorted(dataset_dir.glob("*/*/config.json")):
         with open(cfg_path) as fh:
             cfg = json.load(fh)
         if "combo" not in cfg:
@@ -524,20 +529,20 @@ def list_pnbd_datasets(study_dir: str | Path) -> pd.DataFrame:
 
     if not rows:
         # Distinguish the two ways an empty result happens: a path that looks like a
-        # study but is the trained-results tree, vs a path with nothing in it at all.
+        # dataset directory but is the trained-results tree, vs a path with nothing in it.
         hint = (
             f"found {skipped} config.json file(s) with no 'combo' key — this looks like a "
-            "trained-results folder (Studies/...), not a generation study"
+            "trained-results folder (Studies/...), not a dataset directory"
             if skipped
             else "no <combo>/<dataset>/config.json files found"
         )
-        raise FileNotFoundError(f"no Pareto/NBD datasets under {study_dir}: {hint}")
+        raise FileNotFoundError(f"no Pareto/NBD datasets under {dataset_dir}: {hint}")
 
     return pd.DataFrame(rows)
 
 
 def load_pnbd_dataset(
-    study_dir: str | Path, combo: str, dataset: str,
+    dataset_dir: str | Path, combo: str, dataset: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     """Load one dataset by ``combo`` (``Dataset_{rate%}_{churn%}``) and ``dataset``
     (``Dataset_k``) folder names.
@@ -545,7 +550,7 @@ def load_pnbd_dataset(
     Returns ``(panel, ground_truth, config)`` — the training-ready panel, the
     per-customer latent ground truth, and the parsed ``config.json``.
     """
-    ds_dir = Path(study_dir) / combo / dataset
+    ds_dir = Path(dataset_dir) / combo / dataset
     cfg_path = ds_dir / "config.json"
     if not cfg_path.exists():
         raise FileNotFoundError(f"no dataset at {ds_dir} (looked for {cfg_path})")

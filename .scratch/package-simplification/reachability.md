@@ -10,47 +10,64 @@ want of a caller, not for want of a purpose. Unreached means *investigate*.
 
 Scenarios traced: lstm, transformer, valendin_lstm, pareto_nbd.
 
-Reached 78 of 206 defined symbols (37 of 110 public).
+Reached 84 of 217 defined symbols (43 of 117 public).
 
 | module | symbols | reached | public unreached |
 | --- | --- | --- | --- |
-| `src/panelclv/benchmarks/__init__.py` | 2 | 0 | 0 |
-| `src/panelclv/benchmarks/pareto_benchmark.py` | 7 | 7 | 0 |
-| `src/panelclv/benchmarks/valendin_lstm.py` | 6 | 6 | 0 |
+| `src/panelclv/benchmarks/pareto_nbd.py` | 9 | 7 | 2 |
+| `src/panelclv/benchmarks/valendin_lstm.py` | 7 | 7 | 0 |
+| `src/panelclv/configs/ar_feature_names.py` | 2 | 2 | 0 |
 | `src/panelclv/configs/panel_config.py` | 9 | 7 | 2 |
-| `src/panelclv/data_preparation/ar_features.py` | 7 | 7 | 0 |
-| `src/panelclv/data_preparation/dynamic_panel_dataset.py` | 13 | 13 | 0 |
-| `src/panelclv/data_preparation/pareto_simulation.py` | 8 | 0 | 4 |
-| `src/panelclv/evaluation/forecast_run.py` | 9 | 0 | 6 |
-| `src/panelclv/evaluation/plot_utils.py` | 12 | 0 | 10 |
+| `src/panelclv/data_preparation/ar_features.py` | 5 | 5 | 0 |
+| `src/panelclv/data_preparation/panel_dataset.py` | 13 | 13 | 0 |
+| `src/panelclv/data_preparation/pareto_nbd_simulation.py` | 8 | 0 | 5 |
+| `src/panelclv/data_preparation/period_calendar.py` | 5 | 1 | 4 |
+| `src/panelclv/data_preparation/target_channel.py` | 4 | 3 | 1 |
+| `src/panelclv/evaluation/plots.py` | 3 | 0 | 2 |
 | `src/panelclv/evaluation/segment_analysis.py` | 8 | 0 | 3 |
-| `src/panelclv/experiments/experiment_utils.py` | 7 | 2 | 5 |
 | `src/panelclv/models/embedders.py` | 7 | 7 | 0 |
 | `src/panelclv/models/losses.py` | 5 | 1 | 3 |
-| `src/panelclv/models/monte_carlo_forecasting.py` | 10 | 8 | 0 |
-| `src/panelclv/models/multinomial_lstm.py` | 6 | 6 | 0 |
-| `src/panelclv/models/multinomial_transformer.py` | 9 | 9 | 0 |
-| `src/panelclv/studies/analysis.py` | 25 | 0 | 11 |
+| `src/panelclv/models/monte_carlo_forecasting.py` | 9 | 7 | 0 |
+| `src/panelclv/models/multinomial_lstm.py` | 7 | 7 | 0 |
+| `src/panelclv/models/multinomial_transformer.py` | 10 | 10 | 0 |
+| `src/panelclv/predictions/prediction_csv.py` | 3 | 0 | 3 |
+| `src/panelclv/predictions/run_directory.py` | 1 | 0 | 1 |
+| `src/panelclv/registry/model_registry.py` | 14 | 0 | 7 |
 | `src/panelclv/studies/config.py` | 3 | 0 | 2 |
 | `src/panelclv/studies/layout.py` | 6 | 0 | 6 |
-| `src/panelclv/studies/pnbd_grid.py` | 13 | 0 | 8 |
-| `src/panelclv/studies/runner.py` | 6 | 0 | 1 |
-| `src/panelclv/training/training_utils.py` | 6 | 5 | 1 |
-| `src/panelclv/tuning/optuna_tuning.py` | 22 | 0 | 11 |
+| `src/panelclv/studies/pareto_nbd_grid.py` | 8 | 0 | 5 |
+| `src/panelclv/studies/runner.py` | 5 | 0 | 1 |
+| `src/panelclv/studies/suite_metrics.py` | 6 | 0 | 4 |
+| `src/panelclv/studies/suite_plots.py` | 6 | 0 | 1 |
+| `src/panelclv/studies/suite_reader.py` | 12 | 0 | 6 |
+| `src/panelclv/studies/synthetic_grid.py` | 22 | 0 | 5 |
+| `src/panelclv/training/loop.py` | 6 | 5 | 1 |
+| `src/panelclv/trials/loaders.py` | 5 | 2 | 3 |
+| `src/panelclv/trials/refit.py` | 1 | 0 | 1 |
+| `src/panelclv/tuning/optuna_tuning.py` | 8 | 0 | 6 |
 
 ## Public symbols no scenario reached
 
+- `src/panelclv/benchmarks/pareto_nbd.py` — pareto_forecast, pareto_from_data
 - `src/panelclv/configs/panel_config.py` — PanelConfig.from_dict, PanelConfig.to_dict
-- `src/panelclv/data_preparation/pareto_simulation.py` — generate_pnbd_study, list_pnbd_datasets, load_pnbd_dataset, simulate_pareto_nbd_panel
-- `src/panelclv/evaluation/forecast_run.py` — ForecastRun.new, ForecastRun.open, ForecastRun.path, ForecastRun.predictions, ForecastRun.save_config, ForecastRun.save_predictions
-- `src/panelclv/evaluation/plot_utils.py` — alignment_check, forecast_from_checkpoint, holdout_actuals_NT, load_predictions_from_csv, metrics_table, pareto_forecast, plot_weekly_aggregated, save_predictions_to_csv, weekly_actuals, weekly_aggregate_predictions
+- `src/panelclv/data_preparation/pareto_nbd_simulation.py` — generate_pnbd_study, list_pnbd_datasets, load_pnbd_dataset, seasonal_weekly_multiplier, simulate_pareto_nbd_panel
+- `src/panelclv/data_preparation/period_calendar.py` — days_per_period, flat_week_index, week_of_year, year_and_week
+- `src/panelclv/data_preparation/target_channel.py` — calibration_counts
+- `src/panelclv/evaluation/plots.py` — metrics_table, plot_weekly_aggregated
 - `src/panelclv/evaluation/segment_analysis.py` — aggregate_bias, assign_customer_groups, group_metrics_table
-- `src/panelclv/experiments/experiment_utils.py` — build_inference_from_trial, make_data_builder, make_data_builder.data_builder, make_refit_loader, refit_best_trial
 - `src/panelclv/models/losses.py` — FocalLoss.forward, SquaredEMDLoss.forward, compute_class_weights
-- `src/panelclv/studies/analysis.py` — aggregate_suite_predictions, compare_study_metrics, describe_dataset, describe_dataset.cfg, describe_dataset.pct, describe_suite_dataset, group_metrics_suite_distribution, group_metrics_suite_table, load_model_predictions, plot_suite_forecast, study_metrics
+- `src/panelclv/predictions/prediction_csv.py` — load_predictions_from_csv, reduce_to_customer_period, save_predictions_to_csv
+- `src/panelclv/predictions/run_directory.py` — create_run_directory
+- `src/panelclv/registry/model_registry.py` — build_model, entry, is_neural, rollout_for, suggest_param, suggest_params, validate_model_knobs
 - `src/panelclv/studies/config.py` — ModelSpec.is_neural, StudySuiteConfig.validate
 - `src/panelclv/studies/layout.py` — create_suite_root, jsonify, model_dirs, prediction_path, study_dir, write_json
-- `src/panelclv/studies/pnbd_grid.py` — alive_volume_ratio_grid, collect_grid_results, compare_models_table, dead_volume_leakage_grid, group_summary, plot_diff_grid, plot_pattern, seasonality_grid
+- `src/panelclv/studies/pareto_nbd_grid.py` — cell_summary, collect_grid_results, compare_models_table, plot_diff_grid, plot_pattern
 - `src/panelclv/studies/runner.py` — run_study_suite
-- `src/panelclv/training/training_utils.py` — refit_full_calibration
-- `src/panelclv/tuning/optuna_tuning.py` — objective, run_optuna_study, select_features, select_features_for_trial, suggest_covariate_selection, suggest_lstm_params, suggest_transformer_params, suggest_valendin_params, validate_data_info, validate_removable_features, weekly_aggregate_rollout_metrics
+- `src/panelclv/studies/suite_metrics.py` — compare_study_metrics, group_metrics_suite_table, study_metrics, t_interval_half_width
+- `src/panelclv/studies/suite_plots.py` — plot_suite_forecast
+- `src/panelclv/studies/suite_reader.py` — aggregate_suite_predictions, describe_dataset, describe_dataset.cfg, describe_dataset.pct, describe_suite_dataset, load_model_predictions
+- `src/panelclv/studies/synthetic_grid.py` — alive_volume_ratio_grid, dead_customer_mass, dead_volume_leakage_grid, seasonality_grid, shape_correlation
+- `src/panelclv/training/loop.py` — refit_full_calibration
+- `src/panelclv/trials/loaders.py` — make_data_builder, make_data_builder.data_builder, refit_loader
+- `src/panelclv/trials/refit.py` — refit_best_trial
+- `src/panelclv/tuning/optuna_tuning.py` — objective, run_optuna_study, select_features, select_features_for_trial, suggest_covariate_selection, validate_removable_features

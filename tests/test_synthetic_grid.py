@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from panelclv.data_preparation.pareto_simulation import seasonal_weekly_multiplier
+from panelclv.data_preparation.pareto_nbd_simulation import seasonal_weekly_multiplier
 from panelclv.studies.synthetic_grid import (
     alive_volume_ratio_grid,
     dead_customer_mass,

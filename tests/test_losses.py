@@ -2,7 +2,7 @@
 
 Focus on the data-dict convenience overload added on top of the original
 array-of-labels form: passing a ``prepare_dataset`` dict must (a) reproduce the
-exact weights the old ``y.squeeze(-1)[:, :s-1]`` + ``max_trans`` boilerplate
+exact weights the old ``y.squeeze(-1)[:, :s-1]`` + ``num_target_classes`` boilerplate
 produced, (b) auto-derive ``num_classes`` from the resolved target embedding,
 (c) honour ``training_only`` (weight on the training-prefix periods only, so the
 temporal validation window never leaks into the loss) and an explicit
@@ -61,15 +61,15 @@ def test_absent_class_gets_finite_weight():
 
 
 def test_dict_form_matches_training_prefix_boilerplate():
-    """The dict overload reproduces the squeeze + prefix-slice + max_trans lookup."""
+    """The dict overload reproduces the squeeze + prefix-slice + class-count lookup."""
     data = _fake_data()
     s = data["val_start_idx"]
 
     w_dict = compute_class_weights(data)  # training_only=True by default
 
     y_arr = data["targets"].squeeze(-1).astype(np.int64)
-    max_trans = data["embedded_cols"][data["target_col"]]
-    w_arr = compute_class_weights(y_arr[:, : s - 1], num_classes=max_trans)
+    num_target_classes = data["embedded_cols"][data["target_col"]]
+    w_arr = compute_class_weights(y_arr[:, : s - 1], num_classes=num_target_classes)
 
     torch.testing.assert_close(w_dict, w_arr)
 

@@ -20,7 +20,7 @@ Everything below is a consequence of that rule.
 | Concern | Module |
 | --- | --- |
 | Declarative feature spec + validation | `src/panelclv/configs/panel_config.py` |
-| Panel → tensor pipeline, calendar features, embeddings | `src/panelclv/data_preparation/dynamic_panel_dataset.py` |
+| Panel → tensor pipeline, calendar features, embeddings | `src/panelclv/data_preparation/panel_dataset.py` |
 | Autoregressive target-derived features | `src/panelclv/data_preparation/ar_features.py` |
 | Feature consumption (embeddings / covariate projection) | `src/panelclv/models/multinomial_lstm.py`, `multinomial_transformer.py` |
 | Feature reconstruction during the rollout | `src/panelclv/models/monte_carlo_forecasting.py` |

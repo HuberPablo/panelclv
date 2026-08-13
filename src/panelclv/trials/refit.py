@@ -18,7 +18,7 @@ import torch
 # Models are built through the registry rather than constructed here, so this module
 # never has to know which architectures exist (ADR-0006).
 from panelclv.registry import build_model
-from panelclv.training.training_utils import refit_full_calibration
+from panelclv.training.loop import refit_full_calibration
 from panelclv.tuning.optuna_tuning import select_features_for_trial
 
 from .loaders import refit_loader
@@ -98,7 +98,7 @@ def refit_best_trial(
     refit_full_calibration(
         model,
         refit_loader(data_best, batch_size),
-        max_trans=model.num_target_classes,
+        num_target_classes=model.num_target_classes,
         n_epochs=n_epochs,
         learning_rate=learning_rate,
         weight_decay=weight_decay,

@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 from panelclv.configs.panel_config import PanelConfig
-from panelclv.data_preparation import dynamic_panel_dataset
+from panelclv.data_preparation import panel_dataset
 from panelclv.data_preparation.target_channel import (
     calibration_counts,
     holdout_actuals,
@@ -70,7 +70,7 @@ def test_prepare_dataset_records_what_the_derivation_computes():
     without updating the recorded index, every consumer reading that key would score a
     covariate channel, and this is the only place that would notice.
     """
-    data = dynamic_panel_dataset.prepare_dataset(_panel(), _config(), verbose=False)
+    data = panel_dataset.prepare_dataset(_panel(), _config(), verbose=False)
     assert data["target_idx"] == target_index(data["seq_cols"], data["target_col"])
 
 

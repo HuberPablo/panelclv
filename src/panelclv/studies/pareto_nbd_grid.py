@@ -1,6 +1,6 @@
 """Cross-grid analysis of a Pareto/NBD generation study trained per-dataset.
 
-``data_preparation.pareto_simulation.generate_pnbd_study`` lays out a grid of
+``data_preparation.pareto_nbd_simulation.generate_pnbd_study`` lays out a grid of
 synthetic datasets — ``mean_transaction_rate`` x ``churn_rate``, with
 ``n_datasets`` replicate panels per cell. Training one study suite per dataset
 (``run_study_suite`` with ``n_studies_per_model=1``) produces a parallel tree
@@ -9,7 +9,7 @@ synthetic datasets — ``mean_transaction_rate`` x ``churn_rate``, with
 
 This module joins the two halves: it reads every dataset's model metrics, tags
 each with the dataset's grid coordinates, averages the replicate datasets within
-each ``(rate, churn)`` **group** with a confidence interval, and plots how each
+each ``(rate, churn)`` **cell** with a confidence interval, and plots how each
 model performs across the grid — so you can compare models per dataset and spot
 performance patterns (e.g. does the LSTM's error track the Pareto/NBD benchmark's
 as churn rises, or diverge in the sparse low-rate corner?).
@@ -25,15 +25,15 @@ that module reads this one's grid axes, never the reverse.
 Typical use::
 
     from panelclv.studies import (
-        collect_grid_results, group_summary, compare_models_table,
+        collect_grid_results, cell_summary, compare_models_table,
         plot_pattern, plot_diff_grid,
     )
 
-    results = collect_grid_results(study_dir, train_base)   # long: one row / (model, dataset)
-    summary = group_summary(results)                        # mean + 95% CI per (model, cell)
-    compare_models_table(summary, "mape")                   # side-by-side per group
-    plot_pattern(summary, "mape")                           # metric vs churn, panel per rate
-    plot_diff_grid(results, "mape")                         # LSTM - ParetoNBD heatmap
+    results = collect_grid_results(dataset_dir, train_base)  # long: one row / (model, dataset)
+    summary = cell_summary(results)                          # mean + 95% CI per (model, cell)
+    compare_models_table(summary, "mape")                    # side-by-side per cell
+    plot_pattern(summary, "mape")                            # metric vs churn, panel per rate
+    plot_diff_grid(results, "mape")                          # LSTM - ParetoNBD heatmap
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from panelclv.data_preparation.pareto_simulation import list_pnbd_datasets
+from panelclv.data_preparation.pareto_nbd_simulation import list_pnbd_datasets
 
 from .suite_metrics import t_interval_half_width
 
@@ -67,19 +67,19 @@ _AXES = ["mean_transaction_rate", "churn_rate"]
 
 
 def _resolve_grid(
-    study_dir: str | Path, train_base: str | Path | None
+    dataset_dir: str | Path, train_base: str | Path | None
 ) -> tuple[Path, Path]:
-    """The generation study and the trained suites beside it, as paths.
+    """The dataset directory and the trained suites beside it, as paths.
 
-    ``train_base`` defaults to ``Studies/<study_dir name>`` — the convention the
+    ``train_base`` defaults to ``Studies/<dataset_dir name>`` — the convention the
     training loop uses — resolved relative to the current working directory. Written
     once here and reused by ``synthetic_grid``, so the two halves of the grid surface
-    cannot come to disagree about where a study's suites live.
+    cannot come to disagree about where a grid's suites live.
     """
-    study_dir = Path(study_dir)
+    dataset_dir = Path(dataset_dir)
     if train_base is None:
-        train_base = Path("Studies") / study_dir.name
-    return study_dir, Path(train_base)
+        train_base = Path("Studies") / dataset_dir.name
+    return dataset_dir, Path(train_base)
 
 
 def _suite_dir(train_base: Path, combo: str, dataset: str) -> Path:
@@ -97,7 +97,7 @@ def _suite_dir(train_base: Path, combo: str, dataset: str) -> Path:
 
 
 def collect_grid_results(
-    study_dir: str | Path,
+    dataset_dir: str | Path,
     train_base: str | Path | None = None,
     *,
     metrics: Sequence[str] = DEFAULT_METRICS,
@@ -106,12 +106,12 @@ def collect_grid_results(
 
     Parameters
     ----------
-    study_dir
-        The generation study folder (what ``generate_pnbd_study`` returned) — used
+    dataset_dir
+        The dataset directory (what ``generate_pnbd_study`` returned) — used
         to enumerate the datasets and their ``(rate, churn)`` coordinates.
     train_base
         The folder holding the trained suites (``<combo>__<dataset>/`` subfolders).
-        Defaults to ``Studies/<study_dir name>``, the convention the training loop uses.
+        Defaults to ``Studies/<dataset_dir name>``, the convention the training loop uses.
     metrics
         Which metrics to pull from each suite's ``results.csv``.
 
@@ -122,13 +122,13 @@ def collect_grid_results(
     the ``model`` name, and one column per requested metric. Datasets with no
     ``results.csv`` yet (not trained) are skipped.
     """
-    study_dir, train_base = _resolve_grid(study_dir, train_base)
+    dataset_dir, train_base = _resolve_grid(dataset_dir, train_base)
 
     unknown = [m for m in metrics if m not in _METRIC_SOURCE]
     if unknown:
         raise ValueError(f"unknown metrics {unknown}; known: {list(_METRIC_SOURCE)}")
 
-    grid = list_pnbd_datasets(study_dir)
+    grid = list_pnbd_datasets(dataset_dir)
     rows: list[dict] = []
     for g in grid.itertuples(index=False):
         res_path = _suite_dir(train_base, g.combo, g.dataset) / "results.csv"
@@ -160,7 +160,7 @@ def collect_grid_results(
 
 
 def _mean_ci(values: np.ndarray, ci: float) -> dict:
-    """Mean + Student-t confidence interval on the mean over a group's replicates.
+    """Mean + Student-t confidence interval on the mean over a cell's replicates.
 
     The interval itself is `suite_metrics.t_interval_half_width` — the package's one
     implementation — so a grid cell's CI and the suite tables' are the same arithmetic.
@@ -176,17 +176,17 @@ def _mean_ci(values: np.ndarray, ci: float) -> dict:
     return {"mean": mean, "std": std, "n": n, "ci_low": mean - half, "ci_high": mean + half}
 
 
-def group_summary(
+def cell_summary(
     results: pd.DataFrame,
     *,
     metrics: Sequence[str] = DEFAULT_METRICS,
     ci: float = 0.95,
 ) -> pd.DataFrame:
-    """Average each ``(model, rate, churn)`` group over its replicate datasets.
+    """Average each ``(model, rate, churn)`` cell over its replicate datasets.
 
-    A *group* is the set of replicate datasets sharing a grid cell (and, if a model
-    ran several studies, those too) — i.e. all rows in ``results`` with the same
-    ``(model, mean_transaction_rate, churn_rate)``. For each group and metric it
+    A *cell* is the set of replicate datasets sharing a grid coordinate (and, if a
+    model ran several studies, those too) — i.e. all rows in ``results`` with the same
+    ``(model, mean_transaction_rate, churn_rate)``. For each cell and metric it
     reports the mean, sample std, count, and a Student-t ``ci`` interval on the
     mean (the replicate-to-replicate uncertainty — "how does this model do on *this
     kind* of dataset").
@@ -195,14 +195,14 @@ def group_summary(
     ``[model, mean_transaction_rate, churn_rate, metric, mean, std, n, ci_low, ci_high]``.
     """
     records: list[dict] = []
-    for (model, rate, churn), grp in results.groupby(["model", *_AXES]):
+    for (model, rate, churn), cell in results.groupby(["model", *_AXES]):
         for metric in metrics:
             records.append({
                 "model": model,
                 "mean_transaction_rate": rate,
                 "churn_rate": churn,
                 "metric": metric,
-                **_mean_ci(grp[metric].to_numpy(), ci),
+                **_mean_ci(cell[metric].to_numpy(), ci),
             })
     return pd.DataFrame(records)
 
@@ -210,7 +210,7 @@ def group_summary(
 def compare_models_table(summary: pd.DataFrame, metric: str) -> pd.DataFrame:
     """Side-by-side ``mean [ci_low, ci_high]`` per grid cell, models as columns.
 
-    Reads the long table from :func:`group_summary` and pivots one ``metric`` into a
+    Reads the long table from :func:`cell_summary` and pivots one ``metric`` into a
     readable comparison: rows are ``(rate, churn)`` cells, columns are models.
     """
     sub = summary[summary["metric"] == metric].copy()

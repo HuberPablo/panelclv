@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from panelclv.configs.panel_config import TIME_FEATURE_FLAGS, PanelConfig
-from panelclv.data_preparation.dynamic_panel_dataset import add_time_features
+from panelclv.data_preparation.panel_dataset import add_time_features
 
 # One row per period of 2019, in each of the three frequencies the package supports.
 # Small enough to read, long enough that every flag has something to compute on.

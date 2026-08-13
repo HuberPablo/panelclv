@@ -59,7 +59,7 @@ from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
     compute_forecast_metrics,
     forecast_recurrent,
 )
-from panelclv.training.training_utils import fit_model  # noqa: E402
+from panelclv.training.loop import fit_model  # noqa: E402
 
 # --- the notebook's constants ------------------------------------------------
 TRAINING_START = "1993-01-01"
@@ -133,9 +133,9 @@ def build_banking_dataset(csv_path: Path, seed: int = 0) -> dict:
     matrix[rows, cols] = counts["transactions"].to_numpy()
     assert matrix.sum() == len(df), "lost transactions while gridding"
 
-    max_trans = int(matrix.max()) + 1        # +1: 0 is a valid weekly count
+    num_target_classes = int(matrix.max()) + 1   # +1: 0 is a valid weekly count
     print(f"max transactions per account-week: {int(matrix.max())} "
-          f"-> {max_trans} count classes")
+          f"-> {num_target_classes} count classes")
 
     # Feature 0 is the week index, feature 1 the transaction count — the order the
     # notebook concatenates its embeddings in.
@@ -166,10 +166,10 @@ def build_banking_dataset(csv_path: Path, seed: int = 0) -> dict:
         # by hand (see the header — the gate reproduces the notebook's own grid), so it
         # states the same thing itself. 1, matching the stack order above.
         "target_idx": 1,
-        "embedded_cols": {"week": WEEKS_PER_YEAR, "transaction": max_trans},
+        "embedded_cols": {"week": WEEKS_PER_YEAR, "transaction": num_target_classes},
         "ids": cohort,
         "id_col": "account_id",
-        "max_trans": max_trans,
+        "num_target_classes": num_target_classes,
         "seq_len": samples.shape[1],
         "train_ds": TensorDataset(samples[train_idx], targets[train_idx]),
         "valid_ds": TensorDataset(samples[valid_idx], targets[valid_idx]),
@@ -208,7 +208,7 @@ def main() -> int:
         model,
         DataLoader(data["train_ds"], batch_size=BATCH_SIZE_TRAIN, shuffle=True),
         DataLoader(data["valid_ds"], batch_size=len(data["valid_ds"])),
-        max_trans=data["max_trans"],
+        num_target_classes=data["num_target_classes"],
         n_epochs=args.epochs,
         patience=PATIENCE,
         learning_rate=1e-3,

@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 
 from panelclv.configs.panel_config import PanelConfig
-from panelclv.data_preparation.dynamic_panel_dataset import prepare_dataset
+from panelclv.data_preparation.panel_dataset import prepare_dataset
 from panelclv.data_preparation.target_channel import (
     calibration_counts,
     holdout_actuals,

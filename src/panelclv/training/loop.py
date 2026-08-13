@@ -1,9 +1,9 @@
-"""Shared training utilities for the multinomial LSTM / Transformer baselines.
+"""The training loop shared by the multinomial LSTM / Transformer baselines.
 
-Both models output logits with shape (batch, seq_len, max_trans), so the same
+Both models output logits with shape (batch, seq_len, num_target_classes), so the same
 loop trains both. The targets are integer transaction-count class labels with
 shape (batch, seq_len), and the loss is plain CrossEntropyLoss reshaped to a
-flat (batch * seq_len, max_trans) prediction vs (batch * seq_len,) target.
+flat (batch * seq_len, num_target_classes) prediction vs (batch * seq_len,) target.
 
 Side concerns kept optional:
     - Weights & Biases logging   (wandb)
@@ -49,17 +49,17 @@ class FitResult:
 # ---------------------------------------------------------------------------
 
 
-def _validate_targets(targets: torch.Tensor, max_trans: int) -> None:
-    """Sanity-check that targets are integer class labels in [0, max_trans)."""
+def _validate_targets(targets: torch.Tensor, num_target_classes: int) -> None:
+    """Sanity-check that targets are integer class labels in [0, num_target_classes)."""
     if targets.dtype not in (torch.int64, torch.long, torch.int32, torch.int16, torch.int8):
         raise TypeError(
             f"Targets must be integer class labels, got dtype={targets.dtype}"
         )
     t_min = int(targets.min().item())
     t_max = int(targets.max().item())
-    if t_min < 0 or t_max >= max_trans:
+    if t_min < 0 or t_max >= num_target_classes:
         raise ValueError(
-            f"Targets must be in [0, {max_trans - 1}], "
+            f"Targets must be in [0, {num_target_classes - 1}], "
             f"got min={t_min}, max={t_max}"
         )
 
@@ -81,7 +81,7 @@ def train_one_epoch(
     optimizer: optim.Optimizer,
     criterion: nn.Module,
     device: torch.device,
-    max_trans: int,
+    num_target_classes: int,
     grad_clip: float | None = 1.0,
     validate_targets: bool = True,
 ) -> dict[str, float]:
@@ -95,7 +95,7 @@ def train_one_epoch(
         samples = samples.to(device)
         targets = targets.to(device).long()
         if validate_targets:
-            _validate_targets(targets, max_trans)
+            _validate_targets(targets, num_target_classes)
 
         optimizer.zero_grad(set_to_none=True)
         output = model(samples)
@@ -103,7 +103,7 @@ def train_one_epoch(
         if isinstance(output, tuple):
             output = output[0]
 
-        loss = criterion(output.reshape(-1, max_trans), targets.reshape(-1))
+        loss = criterion(output.reshape(-1, num_target_classes), targets.reshape(-1))
         loss.backward()
         if grad_clip is not None:
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -128,7 +128,7 @@ def validate_one_epoch(
     loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
-    max_trans: int,
+    num_target_classes: int,
     compute_f1: bool = True,
     validate_targets: bool = True,
     val_score_start: int = 0,
@@ -155,7 +155,7 @@ def validate_one_epoch(
             samples = samples.to(device)
             targets = targets.to(device).long()
             if validate_targets:
-                _validate_targets(targets, max_trans)
+                _validate_targets(targets, num_target_classes)
 
             output = model(samples)
             if isinstance(output, tuple):
@@ -167,7 +167,7 @@ def validate_one_epoch(
                 output = output[:, val_score_start:]
                 targets = targets[:, val_score_start:]
 
-            loss = criterion(output.reshape(-1, max_trans), targets.reshape(-1))
+            loss = criterion(output.reshape(-1, num_target_classes), targets.reshape(-1))
             total_loss += loss.item()
             n_batches += 1
 
@@ -200,7 +200,7 @@ def fit_model(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    max_trans: int,
+    num_target_classes: int,
     n_epochs: int = 50,
     patience: int = 5,
     learning_rate: float = 1e-3,
@@ -292,11 +292,11 @@ def fit_model(
     for epoch in range(n_epochs):
         train_metrics = train_one_epoch(
             model, train_loader, optimizer, criterion, device,
-            max_trans, grad_clip=grad_clip, validate_targets=validate_targets,
+            num_target_classes, grad_clip=grad_clip, validate_targets=validate_targets,
         )
         val_metrics = validate_one_epoch(
             model, val_loader, criterion, device,
-            max_trans, validate_targets=validate_targets,
+            num_target_classes, validate_targets=validate_targets,
             val_score_start=val_score_start,
         )
 
@@ -386,7 +386,7 @@ def fit_model(
 def refit_full_calibration(
     model: nn.Module,
     train_loader: DataLoader,
-    max_trans: int,
+    num_target_classes: int,
     *,
     n_epochs: int,
     learning_rate: float = 1e-3,
@@ -453,7 +453,7 @@ def refit_full_calibration(
     for epoch in range(n_epochs):
         train_metrics = train_one_epoch(
             model, train_loader, optimizer, criterion, device,
-            max_trans, grad_clip=grad_clip, validate_targets=validate_targets,
+            num_target_classes, grad_clip=grad_clip, validate_targets=validate_targets,
         )
         record = {
             "epoch": epoch,

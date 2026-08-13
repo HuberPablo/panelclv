@@ -66,7 +66,7 @@ def _fit_past_the_best_epoch(tmp_path):
         model,
         _loader(target_class=0),
         _loader(target_class=1),
-        max_trans=N_CLASSES,
+        num_target_classes=N_CLASSES,
         n_epochs=12,
         patience=2,
         learning_rate=0.1,     # large enough that one epoch moves the weights visibly

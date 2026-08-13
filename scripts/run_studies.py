@@ -1,7 +1,7 @@
 """Entry point for a study suite — copy, edit the data loading + models, run.
 
 Runs ``n_studies_per_model`` independent Optuna studies for each model over one
-shared dataset and archives everything under ``Studies/<study_name>/``. The config
+shared dataset and archives everything under ``Studies/<suite_name>/``. The config
 below is the same set of arguments you already pass to ``run_optuna_study``, so
 there is nothing new to learn — paste your ``search_space`` / ``training`` blocks
 verbatim.
@@ -9,10 +9,10 @@ verbatim.
 Usage:
     1. Edit ``load_panel()`` to read your panel CSV.
     2. Edit the ``PanelConfig`` and the ``models=[...]`` list.
-    3. Pick a ``study_name``.
+    3. Pick a ``suite_name``.
     4. ``python scripts/run_studies.py``
 
-Output lands in ``<repo root>/Studies/<study_name>/``, resolved from this file's
+Output lands in ``<repo root>/Studies/<suite_name>/``, resolved from this file's
 location rather than from an absolute path, so the script runs unchanged on a
 laptop or on a rented GPU box with no edit and no patching step.
 """
@@ -25,7 +25,7 @@ import pandas as pd
 import torch
 
 from panelclv.configs.panel_config import PanelConfig
-from panelclv.data_preparation import dynamic_panel_dataset
+from panelclv.data_preparation import panel_dataset
 from panelclv.studies import ModelSpec, StudySuiteConfig, run_study_suite
 
 # --- EDIT ME: tags that name this run (mirrors the notebook constants) ----------
@@ -116,7 +116,7 @@ def main() -> None:
         holdout_start="2001-01-01", holdout_end="2001-12-31",
         time_cols=("year", "week"), clip_target_upper=6,
     )
-    data_full = dynamic_panel_dataset.prepare_dataset(panel, cfg)
+    data_full = panel_dataset.prepare_dataset(panel, cfg)
 
     # --- 2. the suite config ------------------------------------------------
     # run_study_suite requires the base directory to already exist, and failing on
@@ -124,7 +124,7 @@ def main() -> None:
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     config = StudySuiteConfig(
         studies_base_path=str(STUDIES_BASE),
-        study_name=f"{LOSS_TYPE}_{CONFIG_NAME}",     # new folder created under it
+        suite_name=f"{LOSS_TYPE}_{CONFIG_NAME}",     # new folder created under it
         n_studies_per_model=5,                       # X independent studies per model
         n_simulations=600,
         device=device,

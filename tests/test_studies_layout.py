@@ -106,7 +106,7 @@ def _data_stub():
 
 def test_validate_ok(tmp_path):
     StudySuiteConfig(
-        studies_base_path=tmp_path, study_name="s", data=_data_stub(),
+        studies_base_path=tmp_path, suite_name="s", data=_data_stub(),
         models=[ModelSpec(name="LSTM", model_type="LSTM")],  # case-normalised
     ).validate()
 
@@ -117,7 +117,7 @@ def test_modelspec_normalises_model_type():
 
 def test_validate_rejects_bad_model_type(tmp_path):
     cfg = StudySuiteConfig(
-        studies_base_path=tmp_path, study_name="s", data=_data_stub(),
+        studies_base_path=tmp_path, suite_name="s", data=_data_stub(),
         models=[ModelSpec(name="x", model_type="xgboost")],
     )
     with pytest.raises(ValueError):
@@ -126,7 +126,7 @@ def test_validate_rejects_bad_model_type(tmp_path):
 
 def test_validate_rejects_duplicate_names(tmp_path):
     cfg = StudySuiteConfig(
-        studies_base_path=tmp_path, study_name="s", data=_data_stub(),
+        studies_base_path=tmp_path, suite_name="s", data=_data_stub(),
         models=[ModelSpec(name="m", model_type="lstm"),
                 ModelSpec(name="m", model_type="transformer")],
     )
@@ -136,7 +136,7 @@ def test_validate_rejects_duplicate_names(tmp_path):
 
 def test_validate_rejects_missing_data_keys(tmp_path):
     cfg = StudySuiteConfig(
-        studies_base_path=tmp_path, study_name="s", data={"ids": [1]},
+        studies_base_path=tmp_path, suite_name="s", data={"ids": [1]},
         models=[ModelSpec(name="m", model_type="lstm")],
     )
     with pytest.raises(KeyError):

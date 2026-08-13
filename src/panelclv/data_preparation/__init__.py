@@ -1,7 +1,7 @@
 """Data-preparation package: customer-period panel -> model-ready tensors.
 
 Modules:
-  - ``dynamic_panel_dataset``  ``prepare_dataset(panel, ...)`` -> the model-ready
+  - ``panel_dataset``          ``prepare_dataset(panel, ...)`` -> the model-ready
                                ``data`` dict (calibration/holdout/samples/targets/...).
   - ``ar_features``            autoregressive target-derived feature builders
                                (recency / frequency / tenure / rate).
@@ -9,7 +9,7 @@ Modules:
                                week-numbering convention and the days-per-period table.
   - ``target_channel``         the one statement of where the target sits on the
                                feature axis, and the reads of that channel.
-  - ``pareto_simulation``      synthetic Pareto/NBD panels with known ground truth.
+  - ``pareto_nbd_simulation``  synthetic Pareto/NBD panels with known ground truth.
 
 (Building the raw customer-period panel itself now lives outside the package — see
 ``notebooks/archive/dataset_building.ipynb``.)

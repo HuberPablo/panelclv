@@ -40,7 +40,7 @@ trained on. There is no customer-wise split.
 import pandas as pd
 
 from panelclv.configs.panel_config import PanelConfig
-from panelclv.data_preparation import dynamic_panel_dataset
+from panelclv.data_preparation import panel_dataset
 from panelclv.tuning import run_optuna_study
 from panelclv.trials import make_data_builder, refit_best_trial
 from panelclv.models import forecast_recurrent, compute_forecast_metrics
@@ -53,7 +53,7 @@ cfg = PanelConfig(id_col="Id", target_col="Transactions", frequency="weekly",
                   validation_start="2000-07-01",
                   holdout_start="2001-01-01", holdout_end="2001-12-31",
                   time_cols=("year", "week"), clip_target_upper=6)
-data_full = dynamic_panel_dataset.prepare_dataset(panel, cfg)
+data_full = panel_dataset.prepare_dataset(panel, cfg)
 
 # 2. Tune. make_data_builder gives run_optuna_study the per-trial data closure (the
 #    temporal split is carried in data_full["val_start_idx"]); every other knob

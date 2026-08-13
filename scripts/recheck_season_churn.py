@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-from panelclv.data_preparation import pareto_simulation as ps
+from panelclv.data_preparation import pareto_nbd_simulation as ps
 
 GEN = Path("Datasets/Synthetic/pnbd_study_4x4x10_20260716-154143")
 TRAIN = Path("Studies/pnbd_study_4x4x10_20260716-154143")

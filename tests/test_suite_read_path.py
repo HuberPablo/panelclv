@@ -79,8 +79,12 @@ def prediction_header(n_weeks: int, id_col: str = FIXTURE_ID_COL) -> str:
 
 # Keys a suite `config.json` carries in both generations of the format. The reader
 # requires nothing beyond these, which is what lets it open a suite older than itself.
+# One exception, listed here because it is what the writer emits today: suites written
+# before the suite/study collision was resolved spell `suite_name` as `study_name`.
+# The reader touches neither spelling — only `models` and `panel_config` — so an older
+# suite still opens; this set describes the format, it does not gate the read path.
 SUITE_CONFIG_KEYS = {
-    "study_name",
+    "suite_name",
     "created",
     "studies_base_path",
     "n_studies_per_model",
@@ -200,7 +204,7 @@ FIXTURE_PANEL_CONFIG = {
 }
 
 FIXTURE_SUITE_CONFIG = {
-    "study_name": "fixture_suite",
+    "suite_name": "fixture_suite",
     "created": "2026-01-01T00:00:00",
     "studies_base_path": "Studies",
     "n_studies_per_model": 2,
