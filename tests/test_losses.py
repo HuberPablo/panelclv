@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 import torch
 
-from panelclv.models.losses import compute_class_weights
+from panelclv.models.losses import build_criterion, compute_class_weights
 
 
 def _fake_data(seed=0, n=5, t=4, num_classes=3, val_start_idx=4):
@@ -140,3 +140,90 @@ def test_dict_without_inferable_num_classes_raises():
 def test_dict_missing_targets_key_raises():
     with pytest.raises(KeyError):
         compute_class_weights({"target_col": "Transactions"})
+
+
+# ---------------------------------------------------------------------------
+# The criterions themselves. `compute_class_weights` feeds these, but until this
+# section nothing in the suite ever called `FocalLoss.forward` or
+# `SquaredEMDLoss.forward` — two of the four `loss_type` values a study may be
+# configured with went straight from `build_criterion` to production untested.
+# ---------------------------------------------------------------------------
+
+LOSS_TYPES = ("cross_entropy", "weighted_ce", "focal", "emd")
+
+
+def _logits_and_targets(n=6, num_classes=4, seed=0):
+    """A flat (N, K) logit batch and its (N,) class-index targets.
+
+    Flat rather than (B, T, K) because that is the shape `fit_model` reshapes to
+    before calling the criterion.
+    """
+    g = torch.Generator().manual_seed(seed)
+    logits = torch.randn(n, num_classes, generator=g)
+    targets = torch.randint(0, num_classes, (n,), generator=g)
+    return logits, targets
+
+
+@pytest.mark.parametrize("loss_type", LOSS_TYPES)
+def test_every_loss_type_returns_a_finite_scalar_that_backpropagates(loss_type):
+    """Each configurable loss runs forward and backward on the training shape.
+
+    Every one of these is reachable from a `ModelSpec`'s `training={"loss_type": ...}`,
+    so a criterion that raises, returns a non-scalar, or produces no gradient breaks a
+    study only once someone selects it — after the run has started.
+    """
+    logits, targets = _logits_and_targets()
+    logits.requires_grad_(True)
+    weights = torch.ones(logits.shape[-1])
+
+    criterion = build_criterion(loss_type, class_weights=weights, focal_gamma=2.0)
+    loss = criterion(logits, targets)
+
+    assert loss.ndim == 0, f"{loss_type} returned a non-scalar of shape {loss.shape}"
+    assert torch.isfinite(loss), f"{loss_type} returned {loss.item()}"
+    assert loss.item() >= 0.0
+
+    loss.backward()
+    assert logits.grad is not None and torch.isfinite(logits.grad).all()
+
+
+def test_focal_gamma_zero_is_weighted_cross_entropy():
+    """`gamma=0` collapses the focal term to 1, so focal reduces to CE.
+
+    The identity the class docstring claims. It pins that the `(1 - p_t)^gamma` factor
+    is applied to the CE term rather than replacing it — the mistake that would make
+    focal silently a different loss at every gamma.
+    """
+    logits, targets = _logits_and_targets()
+
+    focal = build_criterion("focal", focal_gamma=0.0)(logits, targets)
+    ce = build_criterion("cross_entropy")(logits, targets)
+
+    assert focal.item() == pytest.approx(ce.item(), rel=1e-6)
+
+
+def test_emd_punishes_a_distant_class_more_than_a_neighbour():
+    """The ordinal property EMD exists for, and the reason it is not just CE.
+
+    Cross-entropy scores a confident wrong answer identically wherever the truth sits,
+    because it reads only the true class's probability. EMD compares CDFs, so predicting
+    class 0 when the answer is 3 must cost more than predicting 0 when the answer is 1.
+    """
+    logits = torch.tensor([[8.0, 0.0, 0.0, 0.0]])      # confidently class 0
+    emd = build_criterion("emd")
+
+    near = emd(logits, torch.tensor([1]))
+    far = emd(logits, torch.tensor([3]))
+    assert far.item() > near.item()
+
+    # The contrast that makes the point: CE cannot tell these two apart.
+    ce = build_criterion("cross_entropy")
+    assert ce(logits, torch.tensor([1])).item() == pytest.approx(
+        ce(logits, torch.tensor([3])).item(), rel=1e-6
+    )
+
+
+def test_an_unknown_loss_type_is_rejected_by_name():
+    """A typo in `training={"loss_type": ...}` fails at build, not mid-epoch."""
+    with pytest.raises(ValueError, match="loss_type"):
+        build_criterion("mse")
