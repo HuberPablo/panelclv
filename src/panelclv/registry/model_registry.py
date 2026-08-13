@@ -57,8 +57,10 @@ def suggest_param(trial: optuna.Trial, name: str, spec: Any) -> Any:
     The spec mini-language lets a caller describe a search dimension (or a fixed
     value) declaratively in a notebook, instead of editing this module:
 
-    - **scalar** (`int`/`float`/`str`/`bool`) -> returned as-is, FIXED. No trial
-      parameter is registered, so it never appears in `best_params`.
+    - **scalar** (`int`/`float`/`str`/`bool`) -> FIXED, registered as a
+      single-choice categorical. The value is the only one that can be sampled, so
+      pinning still pins — but the parameter reaches `best_params` like every other
+      key, instead of being absent from a dict downstream code indexes directly.
     - **set / frozenset** -> `suggest_categorical` over the values (sorted for a
       deterministic, reproducible category order).
     - **list** -> `suggest_categorical` in the given order.
@@ -72,9 +74,22 @@ def suggest_param(trial: optuna.Trial, name: str, spec: Any) -> Any:
     unknown range mode) so mistakes surface immediately, not as a silent default.
     """
     # bool is a subclass of int — check it within the scalar branch so a fixed
-    # boolean flag is returned verbatim rather than mis-read as a number.
+    # boolean flag stays a boolean rather than being mis-read as a number.
+    #
+    # A pinned scalar registers as a one-element categorical rather than being
+    # returned unregistered. Returning it silently kept it out of `trial.params`, so
+    # anything rebuilding from `study.best_trial.params` raised `KeyError` on that
+    # key — after every trial had trained. Registering it is the structural fix: the
+    # search is unchanged (one choice is no choice), and the record of what was used
+    # is complete.
+    #
+    # It does make a pinned value part of the study's recorded search space, so
+    # RESUMING a stored study (`run_optuna_study(storage=...)`) after editing a pin
+    # now raises Optuna's distribution-mismatch error instead of quietly searching a
+    # different space than the trials already in the storage. That is the same
+    # loud-over-silent trade this change is here to make.
     if isinstance(spec, (bool, int, float, str)):
-        return spec
+        return trial.suggest_categorical(name, [spec])
     if isinstance(spec, (set, frozenset)):
         if not spec:
             raise ValueError(f"{name}: empty set of choices")

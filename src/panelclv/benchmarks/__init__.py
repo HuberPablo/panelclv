@@ -7,17 +7,19 @@ Carlo simulator, evaluation) so a comparison isolates architecture:
 - ``compute_pareto_predictions`` — the Pareto/NBD, a hierarchical-Bayes MCMC port of
                                    R's BTYDplus (the estimator Valendin et al. use).
 - ``ValendinLSTMModel`` /        — the Valendin et al. LSTM, transcribed layer for
-  ``InferenceValendinLSTMModel``   layer from the reference notebook.
+  ``RolloutValendinLSTMModel``     layer from the reference notebook. The trained
+                                   class hands over the rollout one (ADR-0007),
+                                   declared inside the frozen file.
 
 An earlier frequentist-MLE Pareto/NBD (via ``lifetimes``) was retired; it is kept for
 provenance in the repo-root ``archive/``, outside the package.
 """
 
 from .pareto_benchmark import compute_pareto_predictions
-from .valendin_lstm import InferenceValendinLSTMModel, ValendinLSTMModel
+from .valendin_lstm import RolloutValendinLSTMModel, ValendinLSTMModel
 
 __all__ = [
     "compute_pareto_predictions",
     "ValendinLSTMModel",
-    "InferenceValendinLSTMModel",
+    "RolloutValendinLSTMModel",
 ]

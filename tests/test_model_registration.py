@@ -130,21 +130,20 @@ def test_neural_type_builds_its_own_architecture(model_type):
 
 
 @pytest.mark.parametrize("model_type", NEURAL_TYPES)
-def test_neural_type_builds_a_matching_inference_model(model_type):
-    """The rollout model loads its weights from the trained model it is paired with.
+def test_the_trained_model_hands_over_its_own_rollout_model(model_type):
+    """Every neural type answers ``to_rollout()``, and shares its backbone (ADR-0007).
 
-    Their constructor arguments must match, and a mismatch surfaces only after a full
-    training run, so it is pinned. The builder for that paired model is still an
-    ``if``-chain in the tuner — the one dispatch site the registry does not yet own —
-    which is exactly why the class assertion stays.
+    There used to be a second construction to keep in step, and a mismatch surfaced
+    only after a full training run. Now the pairing is the trained class's own — so
+    what is worth pinning is that the handover exists for every registered type and
+    that it hands over the *same* weights object, not a copy that could drift from it.
     """
     params = suggest_params(model_type, _FixedTrial(), {})
     trained = build_model(model_type, params, RECIPE)
-    inference, forecaster = tuning._build_inference_model_for(
-        model_type, params, RECIPE
-    )
-    inference.load_state_dict(trained.state_dict(), strict=True)
-    assert callable(forecaster)
+
+    rollout = trained.to_rollout()
+    assert rollout.backbone is trained.backbone
+    assert rollout.num_target_classes == trained.num_target_classes
 
 
 @pytest.mark.parametrize("model_type", NEURAL_TYPES)
@@ -165,7 +164,6 @@ def test_unknown_model_type_is_rejected_everywhere():
         lambda: suggest_params("nonesuch", _FixedTrial(), {}),
         lambda: build_model("nonesuch", {}, RECIPE),
         lambda: rollout_for("nonesuch"),
-        lambda: tuning._build_inference_model_for("nonesuch", {}, RECIPE),
     ):
         with pytest.raises(ValueError, match="model_type"):
             call()
@@ -210,6 +208,33 @@ def test_a_knob_in_the_wrong_dict_is_rejected():
     # actually reads — the half of the old allowlist that is not per-model.
     with pytest.raises(ValueError, match="paitence"):
         tuning._validate_training("lstm", {"paitence": 7})
+
+
+def test_a_pinned_scalar_reaches_the_recorded_params():
+    """Pinning a hyperparameter to a scalar must still record it on the trial.
+
+    The scalar branch used to return the value without registering anything, so the
+    key was simply absent from `study.best_trial.params` — and anything reading that
+    dict raised `KeyError` after every trial had already trained. Registering it as a
+    one-element categorical keeps the pin exact (one choice is no choice) while
+    leaving a complete record of what was used.
+    """
+    import optuna
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    def objective(trial):
+        params = suggest_params("lstm", trial, {"dropout": 0.0, "dense_units": 32})
+        # The pinned values are what comes back, not a sampled substitute.
+        assert params["dropout"] == 0.0
+        assert params["dense_units"] == 32
+        return 0.0
+
+    study = optuna.create_study(sampler=optuna.samplers.TPESampler(seed=0))
+    study.optimize(objective, n_trials=2)
+
+    assert study.best_trial.params["dropout"] == 0.0
+    assert study.best_trial.params["dense_units"] == 32
 
 
 def test_study_entry_point_accepts_every_registered_type():

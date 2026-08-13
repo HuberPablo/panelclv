@@ -24,8 +24,10 @@ of ADR-0002 / ticket 05 and construct inference models the old way:
 - `Data_integration_LSTM.ipynb` — `InferenceMultinomialLSTMModel(seq_cols=..., embedded_cols=..., target_col=..., embedding_dim=...)`
 - `Data_integration_TRANSFORMER.ipynb` — `InferenceMultinomialTransformerModel(seq_cols=..., embedded_cols=..., target_col=..., d_model=...)`
 
-Both become `embedder=ProjectedEmbedder(seq_cols=..., embedded_cols=..., target_col=...,
-embedding_dim=<embedding_dim or d_model>)` with the remaining arguments unchanged; see
+Neither construction survives. A rollout model is now obtained from the trained model
+that holds the weights — `trained.to_rollout()` (ADR-0007) — and the trained model takes
+`embedder=ProjectedEmbedder(seq_cols=..., embedded_cols=..., target_col=...,
+embedding_dim=<embedding_dim or d_model>)` in place of those columns; see
 `docs/running-a-model.md` for the current call shape. Any checkpoint they reload also
 predates the seam, so its `state_dict` keys need renaming before it will load — see the
 same document.

@@ -69,6 +69,12 @@ RETIRED = [
      "`search_space` and `training`"),
     (r"VALID_MODEL_TYPES|NEURAL_MODEL_TYPES",
      "the model types are the registry table's keys, and neural is `is_neural`"),
+    # Retired by the package cleanup, issue 07: a rollout model comes from its
+    # trained model.
+    (r"Inference(Multinomial|Valendin)\w*Model",
+     "the class is `Rollout...`; CONTEXT.md lists *inference* under _Avoid_"),
+    (r"build_inference_from_trial",
+     "`refit_best_trial` hands back the rollout model itself (ADR-0007)"),
 ]
 
 

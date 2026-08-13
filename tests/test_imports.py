@@ -38,7 +38,7 @@ def test_public_api_resolves_from_new_homes():
     """The headline entry points are importable from the subpackage they now live in."""
     from panelclv.models import (
         MultinomialLSTMModel,
-        InferenceMultinomialLSTMModel,
+        RolloutMultinomialLSTMModel,
         mc_forecast,
         run_monte_carlo_forecast,
     )
@@ -46,7 +46,7 @@ def test_public_api_resolves_from_new_homes():
     from panelclv.tuning import run_optuna_study, select_features
     from panelclv.evaluation import metrics_table, plot_weekly_aggregated
     from panelclv.benchmarks import compute_pareto_predictions
-    from panelclv.trials import make_data_builder, build_inference_from_trial
+    from panelclv.trials import make_data_builder, refit_best_trial  # noqa: F401
     from panelclv.registry import MODEL_TYPES, build_model, is_neural, rollout_for  # noqa: F401
 
     # `mc_forecast` is documented as an alias for `run_monte_carlo_forecast`.
@@ -194,6 +194,37 @@ def test_refit_is_the_only_forecast_source():
 
     # The two halves the old catch-all split into, under their current names.
     from panelclv.trials import CalibrationSplit, refit_loader, split_calibration  # noqa: F401
+
+
+def test_a_rollout_model_comes_from_its_trained_model():
+    """The rebuild-beside-it path is gone — issue 07 of the package cleanup.
+
+    ADR-0007: a rollout model is obtained from the trained model that holds the
+    weights, so the two can never be built with different constructor arguments.
+    The names below were the second construction — a tuner-side if-chain and the
+    function that drove it from a stored study's parameters — and re-adding either
+    would make a mismatch expressible again. The `Inference*` spelling goes with
+    them: `CONTEXT.md` lists *inference* under `_Avoid_`.
+    """
+    import panelclv.benchmarks as benchmarks
+    import panelclv.models as models
+    import panelclv.trials as trials
+    from panelclv.tuning import optuna_tuning
+
+    assert not hasattr(optuna_tuning, "_build_inference_model_for"), \
+        "the rollout model comes from the trained model, not a second dispatch site"
+    assert not hasattr(trials, "build_inference_from_trial"), \
+        "a forecast comes from the refit, which hands back its own rollout model"
+
+    for module in (models, benchmarks):
+        retired = [n for n in dir(module) if n.startswith("Inference")]
+        assert not retired, f"{module.__name__} still exports {retired}"
+
+    # Every neural family answers the handover, under the name CONTEXT.md defines.
+    for trained_cls in (models.MultinomialLSTMModel,
+                        models.MultinomialTransformerModel,
+                        benchmarks.ValendinLSTMModel):
+        assert hasattr(trained_cls, "to_rollout"), trained_cls.__name__
 
 
 def test_the_model_set_is_enumerated_once():

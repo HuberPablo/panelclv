@@ -86,11 +86,6 @@ search space, its builder and the rollout function it forecasts through. Every
 model-type list in the package derives from that table's keys, and whether a type
 is neural is read off the entry rather than restated.
 
-**Invariants worth knowing before you hit them:**
-
-- An inference model loads its `state_dict` from the trained model, so their
-  constructor arguments must match.
-
 ## Environment
 
 The project venv is `/home/virthian/Desktop/Thesis/venvs/thesis_rocm/` (PyTorch on

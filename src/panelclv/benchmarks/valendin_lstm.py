@@ -70,7 +70,7 @@ class _ValendinLSTMBackbone(nn.Module):
     The dense layer has no activation (the notebook leaves `activation=` commented
     out, so Keras applies the linear default), and the head emits raw logits — the
     published `Dense(..., activation='softmax')` is folded into the cross-entropy
-    loss at training time and into sampling at inference time, which is the same
+    loss at training time and into sampling at rollout time, which is the same
     function computed in a numerically stabler order.
     """
 
@@ -140,11 +140,22 @@ class ValendinLSTMModel(nn.Module):
         logits, _ = self.backbone(x)
         return logits
 
+    def to_rollout(self) -> "RolloutValendinLSTMModel":
+        """The rollout model paired with this one, over this model's own backbone.
 
-class InferenceValendinLSTMModel(nn.Module):
-    """Inference-mode Valendin LSTM. Returns (sample, state).
+        The benchmark declares its own pairing here, inside the frozen file, for the
+        same reason `models/` does (ADR-0007): the pair is never assembled by a
+        caller. ADR-0004 freezes the published *numbers*, not the surrounding code,
+        and `scripts/validate_valendin_lstm.py` is the gate that proves they did not
+        move.
+        """
+        return RolloutValendinLSTMModel(self.backbone)
 
-    Same contract as `models.InferenceMultinomialLSTMModel`, so the shared Monte
+
+class RolloutValendinLSTMModel(nn.Module):
+    """Rollout-mode Valendin LSTM. Returns (sample, state).
+
+    Same contract as `models.RolloutMultinomialLSTMModel`, so the shared Monte
     Carlo simulator drives this benchmark with no special-casing:
 
         sample : (B, T, 1) float — a count class drawn from Categorical(softmax(logits)).
@@ -152,29 +163,17 @@ class InferenceValendinLSTMModel(nn.Module):
                  the notebook's `stateful=True` prediction LSTM, whose state it also
                  manages by hand across steps.
 
-    Constructor arguments must match the trained model's, since the rollout loads
-    that model's `state_dict` into this one.
+    Built only by `ValendinLSTMModel.to_rollout()`, which hands over the trained
+    backbone it already holds — so the two can never be built with different sizes.
     """
 
-    def __init__(
-        self,
-        seq_cols: Sequence[str],
-        embedded_cols: dict[str, int],
-        target_col: str = "Transactions",
-        memory_units: int = _MEMORY_UNITS,
-        dense_units: int = _DENSE_UNITS,
-    ) -> None:
+    def __init__(self, backbone: _ValendinLSTMBackbone) -> None:
         super().__init__()
-        self.backbone = _ValendinLSTMBackbone(
-            seq_cols=seq_cols,
-            embedded_cols=embedded_cols,
-            target_col=target_col,
-            memory_units=memory_units,
-            dense_units=dense_units,
-        )
-        self.seq_cols: list[str] = self.backbone.seq_cols
-        self.target_col: str = self.backbone.target_col
-        self.num_target_classes: int = self.backbone.num_target_classes
+        # Shared, not copied: these are the trained weights themselves.
+        self.backbone = backbone
+        self.seq_cols: list[str] = backbone.seq_cols
+        self.target_col: str = backbone.target_col
+        self.num_target_classes: int = backbone.num_target_classes
 
     def forward(self, x: torch.Tensor, state=None):
         logits, state = self.backbone(x, state)

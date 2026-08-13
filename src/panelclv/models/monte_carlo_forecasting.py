@@ -452,7 +452,7 @@ def run_monte_carlo_forecast(
     file_name: str = "predictions.csv",
     run_name: str | None = None,
 ) -> dict[str, Any]:
-    """Monte Carlo holdout forecast for a recurrent (LSTM) inference model.
+    """Monte Carlo holdout forecast for a recurrent (LSTM) rollout model.
 
     Uses the stateful `simulate_one_path` rollout. `data` is the dict returned
     by `dynamic_panel_dataset.prepare_dataset`, so calibration / holdout /
@@ -512,12 +512,12 @@ def run_monte_carlo_forecast_transformer(
     file_name: str = "predictions.csv",
     run_name: str | None = None,
 ) -> dict[str, Any]:
-    """Monte Carlo holdout forecast for an attention (Transformer) inference model.
+    """Monte Carlo holdout forecast for an attention (Transformer) rollout model.
 
     Identical contract to `run_monte_carlo_forecast`, but uses the growing-window
     `simulate_transformer_path` rollout because the Transformer is stateless. The
-    inference model must be an `InferenceMultinomialTransformerModel` (its
-    `forward` accepts `only_last=` and ignores `state`). Returns the same dict
+    rollout model must be a `RolloutMultinomialTransformerModel` (its `forward`
+    accepts `only_last=` and ignores `state`). Returns the same dict
     described in `run_monte_carlo_forecast`, and accepts the same opt-in
     per-customer prediction-dump arguments (`save_predictions`, `output_dir`,
     `file_name`, `run_name`); the subfolder tag defaults to "transformer".
@@ -589,31 +589,17 @@ def compute_forecast_metrics(
 # from panelclv.models.monte_carlo_forecasting import (
 #     run_monte_carlo_forecast, compute_forecast_metrics,
 # )
-# from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
-# from panelclv.models.embedders import ProjectedEmbedder
 #
-# inference_model = InferenceMultinomialLSTMModel(
-#     embedder=ProjectedEmbedder(
-#         seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
-#         target_col=data["target_col"],
-#     ),
-# )
-# inference_model.load_state_dict(trained_model.state_dict())
-# forecast = run_monte_carlo_forecast(inference_model, data, n_simulations=30)
+# The rollout model is never constructed here: the trained model hands over its own,
+# sharing the backbone it already holds (ADR-0007).
+# rollout_model = trained_model.to_rollout()
+# forecast = run_monte_carlo_forecast(rollout_model, data, n_simulations=30)
 #
-# Transformer:
+# Transformer — same handover, different stepper:
 # from panelclv.models.monte_carlo_forecasting import run_monte_carlo_forecast_transformer
-# from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
-# from panelclv.models.embedders import ProjectedEmbedder
 #
-# inference_model = InferenceMultinomialTransformerModel(
-#     embedder=ProjectedEmbedder(
-#         seq_cols=data["seq_cols"], embedded_cols=data["embedded_cols"],
-#         target_col=data["target_col"], embedding_dim=64,
-#     ),
-# )
-# inference_model.load_state_dict(trained_model.state_dict())
-# forecast = run_monte_carlo_forecast_transformer(inference_model, data, n_simulations=30)
+# rollout_model = trained_transformer.to_rollout()
+# forecast = run_monte_carlo_forecast_transformer(rollout_model, data, n_simulations=30)
 #
 # metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
 # print(metrics)

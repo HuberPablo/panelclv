@@ -58,22 +58,12 @@ from typing import Any, Callable, Sequence
 import optuna
 import torch
 
-# Model definitions and the Monte Carlo simulator live in `panelclv.models`; the
-# training loop lives in `panelclv.training`. After the subpackage split these are
-# cross-package imports, so they are absolute rather than relative.
-from panelclv.models.embedders import ProjectedEmbedder
-from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
-from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
-from panelclv.models.monte_carlo_forecasting import (
-    run_monte_carlo_forecast,
-    run_monte_carlo_forecast_transformer,
-)
 # Which architectures exist, what they search and how they are built is declared once,
-# in the registry (ADR-0006). This module searches; it does not enumerate models.
+# in the registry (ADR-0006). This module searches; it does not enumerate models. The
+# training loop lives in `panelclv.training`. After the subpackage split both are
+# cross-package imports, so they are absolute rather than relative.
 from panelclv.registry import (
-    MODEL_TYPES,
     build_model,
-    is_neural,
     suggest_param,
     suggest_params,
     validate_model_knobs,
@@ -252,13 +242,13 @@ def select_features_for_trial(
     `objective` records each trial's dropped columns in the `dropped_features`
     user attribute; this reads them back and applies `select_features`, so the
     write and the read sit in one module and cannot drift. The intended use is
-    after a study, to rebuild the winning model and run the forecast on matching
+    after a study, to refit the winning model and run the forecast on matching
     columns (otherwise the checkpoint — trained on the sliced layout — will not
-    load into a full-feature model):
+    warm-start a full-feature model):
 
         data_best = select_features_for_trial(data_full, study.best_trial)
-        # build the inference model from data_best["seq_cols"]/["embedded_cols"]
-        # and pass data_best (not data_full) to the Monte Carlo forecast.
+        # refit from data_best["seq_cols"]/["embedded_cols"] and pass data_best
+        # (not data_full) to the Monte Carlo forecast.
 
     A trial with no `dropped_features` attribute (e.g. a study run without
     `removable_features`) dropped nothing, so `data` is returned with every
@@ -268,65 +258,6 @@ def select_features_for_trial(
     raw = trial.user_attrs.get("dropped_features", "")
     dropped = raw.split(",") if raw else []
     return select_features(data, dropped)
-
-
-def _build_inference_model_for(
-    model_type: str, params: dict[str, Any], metadata: dict[str, Any]
-):
-    """Build the matching rollout model and the simulator that drives it.
-
-    Returns ``(rollout_model, forecaster)``. Constructor arguments mirror the training
-    model's, since the rollout loads that model's ``state_dict`` into this one.
-
-    **The one dispatch site the registry does not own.** It re-states the
-    model-to-rollout pairing that ``ModelEntry.rollout`` already declares, so until it
-    goes, adding a model means a branch here as well as a registry entry. ADR-0007
-    removes it: the trained model hands over its own paired rollout, and this whole
-    rebuild-from-params path disappears with it.
-    """
-    seq_cols = metadata["seq_cols"]
-    embedded_cols = metadata["embedded_cols"]
-    target_col = metadata.get("target_col", "Transactions")
-
-    if model_type == "lstm":
-        return (
-            InferenceMultinomialLSTMModel(
-                embedder=ProjectedEmbedder(
-                    seq_cols=seq_cols, embedded_cols=embedded_cols,
-                    target_col=target_col, embedding_dim=params["embedding_dim"],
-                ),
-                lstm_hidden_size=params["lstm_hidden_size"],
-                dense_units=params["dense_units"], dropout=params["dropout"],
-            ),
-            run_monte_carlo_forecast,
-        )
-    if model_type == "transformer":
-        return (
-            InferenceMultinomialTransformerModel(
-                embedder=ProjectedEmbedder(
-                    seq_cols=seq_cols, embedded_cols=embedded_cols,
-                    target_col=target_col, embedding_dim=params["d_model"],
-                ),
-                d_model=params["d_model"], nhead=params["nhead"],
-                num_encoder_layers=params["num_encoder_layers"],
-                dropout=params["dropout"],
-            ),
-            run_monte_carlo_forecast_transformer,
-        )
-    if model_type == "valendin_lstm":
-        from panelclv.benchmarks.valendin_lstm import InferenceValendinLSTMModel
-
-        # Frozen architecture, so no params are read: the sizes are the published ones.
-        return (
-            InferenceValendinLSTMModel(
-                seq_cols=seq_cols, embedded_cols=embedded_cols, target_col=target_col,
-            ),
-            run_monte_carlo_forecast,   # stateful rollout, as for the LSTM
-        )
-    raise ValueError(
-        f"Unknown model_type {model_type!r} — no inference model registered. "
-        f"Registered types: {sorted(t for t in MODEL_TYPES if is_neural(t))}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +420,7 @@ def run_optuna_study(
     `keep_only_best_checkpoint` (default False) trades inspectability for disk:
     every trial writes a `.pth` (one per trial, they accumulate fast over a long
     study), but only the best trial's checkpoint is needed afterwards
-    (`build_inference_from_trial` / `refit_best_trial` both load the best trial).
+    (`trials.refit_best_trial` warm-starts from the best trial).
     Set it True to delete all non-best trial checkpoints once the study completes
     and the summary is written. The best trial's file (and its recorded
     `checkpoint_path`) is preserved, so the downstream workflow is unaffected; you
@@ -581,9 +512,9 @@ def run_optuna_study(
         json.dump(summary, f, indent=2, default=str)
 
     # Optional disk cleanup. Each completed trial recorded its checkpoint under the
-    # "checkpoint_path" user attr; the downstream rebuild (build_inference_from_trial
-    # / refit_best_trial) only ever reloads the BEST trial, so once the summary above
-    # is written every other trial's .pth is dead weight. Delete them when asked.
+    # "checkpoint_path" user attr; the downstream refit (`trials.refit_best_trial`)
+    # only ever warm-starts from the BEST trial, so once the summary above is written
+    # every other trial's .pth is dead weight. Delete them when asked.
     if keep_only_best_checkpoint:
         best_ckpt = best.user_attrs.get("checkpoint_path")
         if best_ckpt:

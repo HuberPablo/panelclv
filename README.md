@@ -67,11 +67,12 @@ study = run_optuna_study(
 
 # 3. Final model: warm-start retrain the winner on the FULL calibration window
 #    (validation tail included) for several big-batch epochs — the Valendin et al.
-#    paper's final step, and the only route to a forecast here (ADR-0008).
-inference_model, data_best = refit_best_trial(study, data_full, "lstm", batch_size=512)
+#    paper's final step, and the only route to a forecast here (ADR-0008). It hands
+#    back the rollout model the refit model itself provides (ADR-0007).
+rollout_model, data_best = refit_best_trial(study, data_full, "lstm", batch_size=512)
 
 # 4. Autoregressive Monte Carlo forecast + metrics (always forecast with data_best).
-forecast = mc_forecast(inference_model, data_best, n_simulations=600, seed=42)
+forecast = mc_forecast(rollout_model, data_best, n_simulations=600, seed=42)
 print(compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"]))
 ```
 

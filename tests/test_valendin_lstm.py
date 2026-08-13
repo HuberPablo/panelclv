@@ -13,7 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from panelclv.benchmarks.valendin_lstm import (  # noqa: E402
-    InferenceValendinLSTMModel,
+    RolloutValendinLSTMModel,
     ValendinLSTMModel,
 )
 
@@ -123,17 +123,21 @@ def test_forward_returns_logits_over_the_count_classes(model):
     assert model.num_target_classes == 12
 
 
-def test_inference_model_samples_and_threads_state(model):
-    """The rollout contract: (sample, state), state chainable across steps."""
-    inference = InferenceValendinLSTMModel(SEQ_COLS, EMBEDDED_COLS, TARGET)
-    inference.load_state_dict(model.state_dict(), strict=True)
-    inference.eval()
+def test_rollout_model_samples_and_threads_state(model):
+    """The rollout contract: (sample, state), state chainable across steps.
+
+    The benchmark declares its pairing inside the frozen file (ADR-0007), so the
+    rollout model comes from the trained one and shares its backbone.
+    """
+    rollout = model.to_rollout()
+    assert rollout.backbone is model.backbone
+    rollout.eval()
 
     x = make_x(seq_len=4)
     with torch.no_grad():
-        sample, state = inference(x)
+        sample, state = rollout(x)
         # Feeding the state back is how the simulator steps through the holdout.
-        next_sample, _ = inference(x[:, -1:, :], state)
+        next_sample, _ = rollout(x[:, -1:, :], state)
 
     assert sample.shape == (2, 4, 1)
     assert next_sample.shape == (2, 1, 1)
@@ -161,7 +165,7 @@ def test_benchmark_names_resolve_from_the_subpackage():
     import panelclv.benchmarks as bench
 
     assert bench.ValendinLSTMModel is ValendinLSTMModel
-    assert bench.InferenceValendinLSTMModel is InferenceValendinLSTMModel
+    assert bench.RolloutValendinLSTMModel is RolloutValendinLSTMModel
     assert "ValendinLSTMModel" in dir(bench)
 
 

@@ -123,12 +123,12 @@ def _run_neural_model(
             "checkpoint_dir": str(sdir / "refit_checkpoints"),
             **config.refit_kwargs,
         }
-        inference_model, data_best = refit_best_trial(
+        rollout_model, data_best = refit_best_trial(
             study, config.data, spec.model_type, **refit_args
         )
 
         forecast = forecaster(
-            inference_model,
+            rollout_model,
             data_best,
             n_simulations=config.n_simulations,
             seed=seed,

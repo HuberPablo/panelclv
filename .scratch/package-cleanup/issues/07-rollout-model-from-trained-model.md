@@ -6,7 +6,7 @@ disappears entirely.
 
 **Blocked by:** 05, 06
 
-**Status:** ready-for-agent
+**Status:** done
 
 Source: `.scratch/package-simplification/issues/07-collapse-invariants.md` (decisions 2, 5),
 `08-reconcile-adrs-and-vocabulary.md`, `09-module-naming.md` (decision 4),
@@ -88,12 +88,12 @@ guarantee, at the price of a scaffold that must then be removed.
   this issue applies the last of the three and leaves no empty heading behind. Verbatim in
   ticket 07 of the map.
 
-- [ ] `to_rollout()` returns the paired rollout model sharing the backbone
-- [ ] Registry has no rollout-class field; the benchmark declares its own pair in the frozen file
-- [ ] Inference-model builder, rebuild-from-trial function and the two notebook cells deleted
-- [ ] Training loop loads the best snapshot back into the returned model, with its own test
-- [ ] A pinned scalar registers as a single-choice categorical and reaches the best-params dict
-- [ ] `Inference*` renamed to `Rollout*`; the four notebook import names updated
-- [ ] ADR-0007 present, copied verbatim from ticket 08
-- [ ] `CLAUDE.md` Edit 4 applied and the invariants heading removed — that section no longer exists
-- [ ] **Golden numbers unchanged at rel=1e-6**; notebook API test green
+- [x] `to_rollout()` returns the paired rollout model sharing the backbone
+- [x] Registry has no rollout-class field; the benchmark declares its own pair in the frozen file
+- [x] Inference-model builder, rebuild-from-trial function and the two notebook cells deleted
+- [x] Training loop loads the best snapshot back into the returned model, with its own test
+- [x] A pinned scalar registers as a single-choice categorical and reaches the best-params dict
+- [x] `Inference*` renamed to `Rollout*`; the four notebook import names updated
+- [x] ADR-0007 present, copied verbatim from ticket 08
+- [x] `CLAUDE.md` Edit 4 applied and the invariants heading removed — that section no longer exists
+- [x] **Golden numbers unchanged at rel=1e-6**; notebook API test green

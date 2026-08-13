@@ -223,6 +223,10 @@ def fit_model(
     The optimisation objective is the configured `loss_type` (default
     cross-entropy). Accuracy and weighted F1 are logged for diagnostics only.
 
+    On return, `model` holds the best-by-validation weights — the same ones written
+    to the checkpoint, not the last epoch's. Both channels out of training therefore
+    carry what was selected, which is what `to_rollout()` depends on (ADR-0007).
+
     Loss options
     ------------
     "cross_entropy"  plain CE (default).
@@ -346,6 +350,12 @@ def fit_model(
         best_epoch = len(history) - 1
 
     torch.save(best_state, checkpoint_path)
+    # Put the selected weights back into the object as well as onto disk. Patience
+    # means the loop keeps training past its best epoch by design, so without this
+    # the returned model holds the LAST epoch's weights while its own checkpoint
+    # holds the best ones — two answers to one question. `to_rollout()` reads the
+    # object (ADR-0007), so the difference is a quietly wrong forecast.
+    model.load_state_dict(best_state)
 
     if log_wandb and wandb is not None:
         try:
@@ -417,7 +427,7 @@ def refit_full_calibration(
 
     # Warm start: load the tuned weights before fine-tuning. Accept a state_dict or a
     # checkpoint path; drop the Transformer's non-persistent cached-mask key if present
-    # (the same guard build_inference_from_trial uses) so a strict load succeeds.
+    # (older checkpoints can still carry it) so a strict load succeeds.
     if warm_start_state is not None:
         if isinstance(warm_start_state, (str, Path)):
             state = torch.load(warm_start_state, map_location=device)

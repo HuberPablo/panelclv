@@ -28,11 +28,11 @@ from .embedders import (
 )
 from .multinomial_lstm import (
     MultinomialLSTMModel,
-    InferenceMultinomialLSTMModel,
+    RolloutMultinomialLSTMModel,
 )
 from .multinomial_transformer import (
     MultinomialTransformerModel,
-    InferenceMultinomialTransformerModel,
+    RolloutMultinomialTransformerModel,
 )
 from .losses import (
     FocalLoss,
@@ -68,11 +68,11 @@ __all__ = [
     "Embedder",
     "ProjectedEmbedder",
     "ValendinEmbedder",
-    # Model + inference wrappers, both families
+    # Trained model + the rollout model it hands over, both families
     "MultinomialLSTMModel",
-    "InferenceMultinomialLSTMModel",
+    "RolloutMultinomialLSTMModel",
     "MultinomialTransformerModel",
-    "InferenceMultinomialTransformerModel",
+    "RolloutMultinomialTransformerModel",
     # Forecasting (autoregressive Monte Carlo simulator + its metrics)
     "mc_forecast",
     "mc_forecast_transformer",

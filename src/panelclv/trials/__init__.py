@@ -26,16 +26,12 @@ from .loaders import (
     refit_loader,
     make_data_builder,
 )
-from .refit import (
-    build_inference_from_trial,
-    refit_best_trial,
-)
+from .refit import refit_best_trial
 
 __all__ = [
     "CalibrationSplit",
     "split_calibration",
     "refit_loader",
     "make_data_builder",
-    "build_inference_from_trial",
     "refit_best_trial",
 ]

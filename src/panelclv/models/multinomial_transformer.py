@@ -229,8 +229,8 @@ class MultinomialTransformerModel(nn.Module):
             # Cache a causal mask for the common fixed-length training case.
             # persistent=False keeps it OUT of state_dict: it is fully
             # recomputable from seq_len, and persisting it would otherwise leak
-            # an "_cached_mask" key into checkpoints that the inference model
-            # (which has no such buffer) then rejects on load.
+            # an "_cached_mask" key into checkpoints that a warm-start into a
+            # freshly built model then rejects on load.
             self.register_buffer(
                 "_cached_mask",
                 self.backbone.generate_causal_mask(seq_len, torch.device("cpu")),
@@ -251,52 +251,53 @@ class MultinomialTransformerModel(nn.Module):
             mask = None  # backbone builds one for the actual sequence length
         return self.backbone(x, mask=mask, only_last=False)
 
+    def to_rollout(self) -> "RolloutMultinomialTransformerModel":
+        """The rollout model paired with this one, over this model's own backbone.
+
+        Same handover as the LSTM's (ADR-0007), including the consequence of sharing
+        documented there: the two models are one set of weights in one mode, so the
+        simulator's `.eval()` reaches this model's backbone too.
+
+        The cached causal mask does not travel. The rollout window grows a period at
+        a time, so a mask pinned to the training length would never fit, and the
+        backbone builds one per call instead.
+        """
+        return RolloutMultinomialTransformerModel(self.backbone)
+
 
 # ---------------------------------------------------------------------------
-# Inference-time wrapper (sampling)
+# Rollout-time wrapper (sampling)
 # ---------------------------------------------------------------------------
 
 
-class InferenceMultinomialTransformerModel(nn.Module):
-    """Inference-mode Transformer. Returns (sample, None):
+class RolloutMultinomialTransformerModel(nn.Module):
+    """Rollout-mode Transformer. Returns (sample, None):
 
         sample : (B, T, 1) float — a count class drawn from
                  Categorical(softmax(logits)) at each step.
         None   : the Transformer is stateless across calls (no hidden state to
                  thread), so the second tuple element is always None — kept for
-                 call-signature parity with the inference LSTM.
+                 call-signature parity with the rollout LSTM.
 
-    Sampling is the only inference behaviour the forecast needs, so it is
+    Sampling is the only rollout behaviour the forecast needs, so it is
     hardcoded here (no mode switch).
+
+    Built only by `MultinomialTransformerModel.to_rollout()`, which hands over the
+    trained backbone it already holds (ADR-0007).
     """
 
-    def __init__(
-        self,
-        embedder: Embedder,
-        seq_len: int | None = None,  # accepted for API symmetry; unused here
-        d_model: int = 64,
-        nhead: int = 8,
-        num_encoder_layers: int = 1,
-        dropout: float = 0.0,
-    ) -> None:
+    def __init__(self, backbone: _MultinomialTransformerBackbone) -> None:
         super().__init__()
-        self.backbone = _MultinomialTransformerBackbone(
-            embedder=embedder,
-            d_model=d_model,
-            nhead=nhead,
-            num_encoder_layers=num_encoder_layers,
-            dropout=dropout,
-        )
-        self.seq_cols: list[str] = self.backbone.seq_cols
-        self.target_col: str = self.backbone.target_col
-        self.num_target_classes: int = self.backbone.num_target_classes
-
-        self._seq_len_hint = seq_len
+        # Shared, not copied: these are the trained weights themselves.
+        self.backbone = backbone
+        self.seq_cols: list[str] = backbone.seq_cols
+        self.target_col: str = backbone.target_col
+        self.num_target_classes: int = backbone.num_target_classes
 
     def forward(
         self,
         x: torch.Tensor,
-        state=None,  # unused; kept for API parity with the LSTM inference model
+        state=None,  # unused; kept for API parity with the LSTM rollout model
         only_last: bool = False,
     ):
         logits = self.backbone(x, mask=None, only_last=only_last)

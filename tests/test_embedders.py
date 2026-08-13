@@ -249,24 +249,25 @@ def test_transformer_accepts_either_embedder(kind, seq_cols, embedded_cols):
 
 
 @pytest.mark.parametrize("kind,seq_cols,embedded_cols", [PROJECTED, VALENDIN])
-def test_inference_model_loads_the_trained_models_weights(kind, seq_cols, embedded_cols):
-    """The invariant the rollout depends on: same constructor arguments, same keys.
+def test_the_rollout_model_carries_the_embedder_it_was_trained_with(kind, seq_cols, embedded_cols):
+    """Whichever strategy the seam supplies, the handover keeps it (ADR-0005/0007).
 
-    `run_monte_carlo_forecast` builds an inference model and loads the trained
-    model's state_dict into it, so a mismatch surfaces only after training finishes.
+    The rollout model is the trained model's own (`to_rollout()`), so the embedder
+    travels with the backbone rather than being reconstructed — and the sampling head
+    reads the same width whichever strategy was chosen.
     """
-    from panelclv.models import MultinomialLSTMModel, InferenceMultinomialLSTMModel
+    from panelclv.models import MultinomialLSTMModel
 
-    kwargs = dict(lstm_hidden_size=8, dense_units=4, dropout=0.0)
+    embedder = build_embedder(kind, seq_cols, embedded_cols, width=16)
     trained = MultinomialLSTMModel(
-        embedder=build_embedder(kind, seq_cols, embedded_cols, width=16), **kwargs)
-    inference = InferenceMultinomialLSTMModel(
-        embedder=build_embedder(kind, seq_cols, embedded_cols, width=16), **kwargs)
+        embedder=embedder, lstm_hidden_size=8, dense_units=4, dropout=0.0)
 
-    inference.load_state_dict(trained.state_dict(), strict=True)
-    inference.eval()
+    rollout = trained.to_rollout()
+    assert rollout.backbone.embedder is embedder
+
+    rollout.eval()
     with torch.no_grad():
-        sample, state = inference(make_x(seq_cols, embedded_cols))
+        sample, state = rollout(make_x(seq_cols, embedded_cols))
     assert sample.shape == (B, T, 1)
     assert state is not None
 

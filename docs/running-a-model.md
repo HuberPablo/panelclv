@@ -19,7 +19,7 @@ by reading the source. The numbers come from the golden fixture in
 3. [`prepare_dataset` — panel to tensors](#3-prepare_dataset--panel-to-tensors)
 4. [Altitude 1 — the eight-call pipeline](#4-altitude-1--the-eight-call-pipeline)
 5. [Altitude 2 — adding Optuna](#5-altitude-2--adding-optuna)
-6. [From winning trial to inference model](#6-from-winning-trial-to-inference-model)
+6. [From winning trial to rollout model](#6-from-winning-trial-to-rollout-model)
 7. [The rollout](#7-the-rollout)
 8. [Metrics](#8-metrics)
 9. [Altitude 3 — the study suite](#9-altitude-3--the-study-suite)
@@ -60,7 +60,7 @@ flowchart TD
                 L["split_calibration<br/>trials/loaders.py"]
                 M["MultinomialLSTMModel<br/>models/multinomial_lstm.py"]
                 F["fit_model<br/>training/training_utils.py"]
-                I["InferenceMultinomialLSTMModel<br/>+ load_state_dict"]
+                I["trained.to_rollout()<br/>RolloutMultinomialLSTMModel"]
                 R["run_monte_carlo_forecast<br/>models/monte_carlo_forecasting.py"]
                 S["compute_forecast_metrics<br/>rmse / bias_percent / mape"]
                 P --> D
@@ -289,18 +289,23 @@ Returns a `FitResult`: `best_val_loss`, `best_val_f1`, `best_epoch`,
 golden run, `best_val_loss = 1.6929405132929485` after two epochs — the fixture is
 deliberately undertrained.
 
+It also loads the best epoch's weights **back into `model`** before returning. Early
+stopping keeps training past the best epoch by design, so without that the object
+would hold the last epoch's weights while its own checkpoint held the best ones —
+and `to_rollout()` reads the object (ADR-0007).
+
 When a `trial` is passed, `fit_model` also reports per-epoch loss to Optuna and
 honours pruning. That is the only coupling between training and tuning.
 
-### 4.4 The inference model
+### 4.4 The rollout model
 
 ```python
-inference_model = InferenceMultinomialLSTMModel(
-    embedder=ProjectedEmbedder(...same args...),
-    lstm_hidden_size=8, dense_units=8, dropout=0.0,   # ← must match exactly
-)
-inference_model.load_state_dict(torch.load(fit.checkpoint_path, map_location="cpu"))
+rollout_model = trained_model.to_rollout()
 ```
+
+That is the whole construction (ADR-0007). There is nothing to pass, because there is
+nothing to get wrong: `to_rollout()` hands over the backbone the trained model is
+already holding, and `fit_model` left the best-by-validation weights in it.
 
 Two public classes wrap **one** shared backbone. `_MultinomialLSTMBackbone` holds the
 embedder, the LSTM, the dropout, the dense layer and the output layer — every weight
@@ -313,7 +318,14 @@ class MultinomialLSTMModel(nn.Module):              # training
         logits, _ = self.backbone(x)                # state built, used, discarded
         return logits
 
-class InferenceMultinomialLSTMModel(nn.Module):     # rollout
+    def to_rollout(self):                           # hands over its own backbone
+        return RolloutMultinomialLSTMModel(self.backbone)
+
+class RolloutMultinomialLSTMModel(nn.Module):       # rollout
+    def __init__(self, backbone):                   # shared, never rebuilt
+        super().__init__()
+        self.backbone = backbone
+
     def forward(self, x, state=None):
         logits, state = self.backbone(x, state)     # state accepted and returned
         probs = torch.softmax(logits, dim=-1)
@@ -384,7 +396,7 @@ dispersion at all.
 
 #### Side by side
 
-| | `MultinomialLSTMModel` | `InferenceMultinomialLSTMModel` |
+| | `MultinomialLSTMModel` | `RolloutMultinomialLSTMModel` |
 |---|---|---|
 | forward signature | `(x)` | `(x, state=None)` |
 | returns | `logits (B, T, K)` | `sample (B, T, 1)`, `state` |
@@ -403,7 +415,7 @@ argument could serve both. Three reasons it is split instead:
 
 1. **The return types genuinely differ** — logits for the loss, a drawn class plus
    state for the rollout. The class docstring rejects a mode switch explicitly:
-   *"sampling is the only inference behaviour the forecast needs, so it is hardcoded
+   *"sampling is the only rollout behaviour the forecast needs, so it is hardcoded
    here (no mode switch)."*
 2. **Sampling is the forecast mechanism, not post-processing** (ADR-0002). A separate
    class states that in the type system rather than in a comment.
@@ -415,17 +427,17 @@ argument could serve both. Three reasons it is split instead:
    split — its LSTM takes state as an argument — so in `models/` this shape is a
    choice, not a necessity.
 
-**What it costs.** Both constructors take the same arguments and are written out
-separately, so the two objects can disagree. `load_state_dict` only succeeds when
-their shapes match, and it runs *after* training — on a study, after every trial has
-finished. `_build_inference_model_for` exists to build both from one registry, which
-reduces the risk without removing it. See
-[Gotchas](#14-gotchas-and-invariants).
+**What it used to cost.** Both constructors took the same arguments and were written
+out separately, so the two objects could disagree — and `load_state_dict` only fails
+when their shapes differ, which is *after* training, on a study after every trial has
+finished. `to_rollout()` removes that: only the trained class constructs the rollout
+one, and it does so from the backbone it already holds (ADR-0007). The rollout class
+takes no architecture arguments at all, so there is no second set to keep in step.
 
 ### 4.5 Forecast and score
 
 ```python
-forecast = run_monte_carlo_forecast(inference_model, data, n_simulations=8,
+forecast = run_monte_carlo_forecast(rollout_model, data, n_simulations=8,
                                     seed=7, device="cpu", return_simulations=False)
 metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
 ```
@@ -489,7 +501,7 @@ small spec language, `registry.suggest_param`:
 | `(1e-4, 3e-3, "log")` | float, log scale |
 | `(1, 3, "int")` | integer |
 | `(0.0, 0.4, 0.1)` | float on a step grid |
-| `0.0` scalar | **fixed** — no trial parameter registered |
+| `0.0` scalar | **fixed** — registered as a one-choice categorical |
 
 Anything not supplied falls back per-key to the range the model's registry entry
 declares. `search_space` keys are validated up front against that entry, so a typo
@@ -499,7 +511,11 @@ raises before the first trial rather than being silently ignored. `training` hol
 control but may still be handed a spec (`"patience": {5, 7, 9}`), so they go through
 the same mini-language.
 
-The scalar row is a trap — see [Gotchas](#14-gotchas-and-invariants).
+A pinned scalar still reaches `study.best_trial.params`, because it registers as a
+categorical with a single choice. It used to be returned unregistered, so the key was
+simply missing from that dict and anything reading it raised `KeyError` after every
+trial had trained; pinning with a one-element set (`{0.0}`) was the workaround and is
+no longer needed.
 
 ### 5.2 The covariate-subset search
 
@@ -558,7 +574,7 @@ finishes. Long studies otherwise accumulate one checkpoint per trial.
 
 ---
 
-## 6. From winning trial to inference model
+## 6. From winning trial to rollout model
 
 The winner is a set of hyperparameters and a feature subset — not yet a model that
 can forecast. One route turns it into one: the refit (ADR-0008).
@@ -568,8 +584,8 @@ winning feature set and rebuild the training model from `best_trial.params`, the
 `refit_full_calibration` warm-starts from the trial's checkpoint and trains
 `DEFAULT_REFIT_EPOCHS = 5` more epochs over the **full** calibration window
 (`refit_loader`) — no validation, no early stopping — and saves the *final* weights.
-`build_inference_from_trial`, pointed at that new checkpoint, rebuilds the inference
-model and loads them.
+Those are the weights the model is still holding, so the refit ends by asking it for
+its rollout model (ADR-0007) rather than reloading anything from disk.
 
 The reasoning is paper fidelity: Valendin et al. perform several fine-tuning epochs
 using the entire calibration set after selection. The validation window is real data
@@ -589,7 +605,7 @@ refit      : rmse 1.691715748556194  bias_percent 173.121387283237
 If a forecast does not match the val loss you remember from tuning, this is usually
 why.
 
-It returns `(inference_model, data_best)`, and **the forecaster must be fed
+It returns `(rollout_model, data_best)`, and **the forecaster must be fed
 `data_best`**, never `data_full` — its `seq_cols` and `target_idx` match the trained
 weights. Returning both together is what removes that footgun.
 
@@ -787,9 +803,9 @@ shared `learning_rate` / `weight_decay` / `batch_size`. `suggest_transformer_par
 resolves `d_model` and `nhead` first and raises `optuna.TrialPruned` when
 `d_model % nhead != 0`, rather than narrowing the categorical domain per trial.
 
-**2 — Embedding width is tied to the model width.** `_build_inference_model_for`
-passes `embedding_dim=params["d_model"]` to the `ProjectedEmbedder`. There is no
-separate `embedding_dim` knob.
+**2 — Embedding width is tied to the model width.** Its registry builder passes
+`embedding_dim=params["d_model"]` to the `ProjectedEmbedder`. There is no separate
+`embedding_dim` knob.
 
 **3 — The rollout carries history explicitly.** `simulate_transformer_path`, because
 a Transformer has no recurrent state to thread:
@@ -807,9 +823,11 @@ feed would reset the position to 0 and drop all history. The model is called wit
 `only_last=True`.
 
 **4 — Dispatch.** Its registry entry declares `run_monte_carlo_forecast_transformer`
-as its rollout, and
-`build_inference_from_trial` drops a stale `_cached_mask` key before
-`load_state_dict` (older checkpoints persisted the causal mask; a no-op for the LSTM).
+as its rollout. The training model caches a causal mask sized to the training length;
+`to_rollout()` does not carry it over, because the rollout window grows a period at a
+time and the backbone builds a matching mask per call. (The warm-start load in
+`refit_full_calibration` still drops a stale `_cached_mask` key, for checkpoints old
+enough to have persisted one; a no-op for the LSTM.)
 
 Everything else — `PanelConfig`, `prepare_dataset`, `split_calibration`, `fit_model`,
 the refit, `compute_forecast_metrics`, the archive — is unchanged.
@@ -877,9 +895,11 @@ neural model, with two differences:
   and `batch_size`. The widths are the published `memory_units=128` /
   `dense_units=128` and never enter the search — tuning a width would quietly
   unfreeze the reference. Its builder reads no architecture params at all.
-- `InferenceValendinLSTMModel` returns `(sample, state)` with the same contract as
+- `RolloutValendinLSTMModel` returns `(sample, state)` with the same contract as
   ours, so its entry declares `run_monte_carlo_forecast` — the identical stateful
-  rollout, no special-casing.
+  rollout, no special-casing. The benchmark declares its own `to_rollout()` pairing
+  inside the frozen file: ADR-0004 freezes the published numbers, not the code around
+  them, and `scripts/validate_valendin_lstm.py` is the gate that proves they held.
 
 Deliberate departures that stay: the temporal validation split (ADR-0001) and Optuna
 tuning over training hyperparameters. Everything else matches.
@@ -905,23 +925,6 @@ match exactly — Keras carries one bias vector per gate, PyTorch two, so ours h
 
 Failure modes that surface late, silently, or both.
 
-**Pinning an architecture hyperparameter to a scalar breaks the rebuild.** A scalar
-in `search_space` is returned as-is and **no trial parameter is registered**, so it
-never appears in `best_params`. But `build_inference_from_trial` rebuilds from
-`study.best_trial.params` and indexes required keys directly. Pinning `dropout` to
-`0.0` and running a study raises, after every trial has finished training:
-
-```
-KeyError: 'dropout'
-  in _build_inference_model_for, optuna_tuning.py
-```
-
-Affects `embedding_dim`, `lstm_hidden_size`, `dense_units`, `dropout` for the LSTM
-and `d_model`, `nhead`, `num_encoder_layers`, `dropout` for the Transformer.
-**Workaround: pin with a one-element set — `{0.0}`, not `0.0`.** That registers a
-categorical with a single choice, so the key reaches `best_params`. Non-architecture
-scalars (`loss_type`, `n_epochs`, `weight_decay`) are unaffected.
-
 **`observed_past` covariates are silently dropped.** Declared in that role, they are
 removed from the schema with a `warnings.warn` and never enter the tensors, model or
 simulator — the rollout would have to feed their true future values, which is
@@ -941,18 +944,13 @@ predicted.
 `embedded_cols["Transactions"] = 5` → a 5-way head. Change it and every checkpoint
 for that panel becomes unloadable.
 
-**Training and inference constructors must match exactly.** The inference model
-loads the trained model's `state_dict`. A mismatch fails at `load_state_dict` —
-after training. `_build_inference_model_for` exists so both are built from one
-registry rather than by hand twice.
-
 **Feature order is part of the checkpoint contract.** The last tensor axis is
 positional. A reordered `seq_cols` loads cleanly and reads the wrong channel —
 `test_golden_feature_axis_is_pinned` exists for this.
 
 **Feed the forecaster `data_best`, not `data_full`.** After a covariate search the
-winning trial's model has a different `F`. Both `build_inference_from_trial` and
-`refit_best_trial` return the sliced dict alongside the model for this reason.
+winning trial's model has a different `F`. `refit_best_trial` returns the sliced dict
+alongside the model for this reason.
 
 **The refit's weights are not the tuning checkpoint's.** See section 6. If a forecast
 looks unlike the val loss from tuning, that is usually why — the refit trains on the

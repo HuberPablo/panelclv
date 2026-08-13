@@ -44,9 +44,13 @@ Training (`MultinomialLSTMModel.forward`):
     Use with `nn.CrossEntropyLoss` — integer class targets of shape
     (B, T) with values in [0, num_target_classes).
 
-Inference (`InferenceMultinomialLSTMModel.forward`) — returns (sample, state):
+Rollout (`RolloutMultinomialLSTMModel.forward`) — returns (sample, state):
     sample → (B, T, 1) count classes drawn from Categorical(softmax(logits)).
     state  → the LSTM hidden state, chainable across AR steps.
+
+The rollout model is obtained from the trained one — `trained.to_rollout()` — and
+shares its backbone object, so there is no second construction to keep in step
+(ADR-0007).
 
 
 Architecture
@@ -168,41 +172,53 @@ class MultinomialLSTMModel(nn.Module):
         logits, _ = self.backbone(x)
         return logits
 
+    def to_rollout(self) -> "RolloutMultinomialLSTMModel":
+        """The rollout model paired with this one, over this model's own backbone.
+
+        The arrow points outward from the trained model (ADR-0007): the pair is
+        never assembled by a caller, so pairing the wrong two classes — or building
+        the rollout with different constructor arguments — is not expressible. The
+        backbone is *shared*, not deep-copied, which is what makes that guarantee
+        hold and avoids doubling peak memory right after training.
+
+        Sharing cuts both ways, and the consequence is worth stating: the two models
+        are one set of weights in one mode. The simulator calls `.eval()` on the
+        rollout model, which puts this model's backbone in eval too. Every caller
+        hands the rollout model on and stops using the trained one, so nothing is
+        currently surprised by it — but resuming training after `to_rollout()` would
+        need an explicit `.train()`.
+        """
+        return RolloutMultinomialLSTMModel(self.backbone)
+
 
 # ---------------------------------------------------------------------------
-# Inference-time wrapper (sampling)
+# Rollout-time wrapper (sampling)
 # ---------------------------------------------------------------------------
 
 
-class InferenceMultinomialLSTMModel(nn.Module):
-    """Inference-mode LSTM. Returns (sample, state):
+class RolloutMultinomialLSTMModel(nn.Module):
+    """Rollout-mode LSTM. Returns (sample, state):
 
         sample : (B, T, 1) float — a count class drawn from
                  Categorical(softmax(logits)) at each step.
         state  : the LSTM hidden state, suitable for chaining autoregressive steps.
 
     The autoregressive Monte Carlo simulator threads `state` across steps and
-    averages many sampled paths; sampling is the only inference behaviour the
+    averages many sampled paths; sampling is the only rollout behaviour the
     forecast needs, so it is hardcoded here (no mode switch).
+
+    Built only by `MultinomialLSTMModel.to_rollout()`, which hands over the trained
+    backbone it already holds (ADR-0007). Taking the backbone rather than the
+    constructor arguments is what makes a mismatched pair unconstructible.
     """
 
-    def __init__(
-        self,
-        embedder: Embedder,
-        lstm_hidden_size: int = 64,
-        dense_units: int = 64,
-        dropout: float = 0.0,
-    ) -> None:
+    def __init__(self, backbone: _MultinomialLSTMBackbone) -> None:
         super().__init__()
-        self.backbone = _MultinomialLSTMBackbone(
-            embedder=embedder,
-            lstm_hidden_size=lstm_hidden_size,
-            dense_units=dense_units,
-            dropout=dropout,
-        )
-        self.seq_cols: list[str] = self.backbone.seq_cols
-        self.target_col: str = self.backbone.target_col
-        self.num_target_classes: int = self.backbone.num_target_classes
+        # Shared, not copied: these are the trained weights themselves.
+        self.backbone = backbone
+        self.seq_cols: list[str] = backbone.seq_cols
+        self.target_col: str = backbone.target_col
+        self.num_target_classes: int = backbone.num_target_classes
 
     def forward(self, x: torch.Tensor, state=None):
         logits, state = self.backbone(x, state)

@@ -54,10 +54,7 @@ sys.path.insert(0, str(_REPO / "src"))
 import torch  # noqa: E402
 from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
 
-from panelclv.benchmarks.valendin_lstm import (  # noqa: E402
-    InferenceValendinLSTMModel,
-    ValendinLSTMModel,
-)
+from panelclv.benchmarks.valendin_lstm import ValendinLSTMModel  # noqa: E402
 from panelclv.models.monte_carlo_forecasting import (  # noqa: E402
     compute_forecast_metrics,
     run_monte_carlo_forecast,
@@ -211,10 +208,9 @@ def main() -> int:
         loss_type="cross_entropy",
         verbose=True,
     )
-    # The notebook's EarlyStopping uses restore_best_weights=True. `fit_model` saves
-    # the best epoch to its checkpoint but leaves `model` on the final epoch, so load
-    # it back — otherwise the rollout scores a model the protocol would have discarded.
-    model.load_state_dict(torch.load(result.checkpoint_path, map_location="cpu"))
+    # The notebook's EarlyStopping uses restore_best_weights=True, and `fit_model`
+    # matches it: the model it returns holds the best epoch's weights, not the last
+    # one's (ADR-0007), so the rollout below scores the model the protocol selected.
     val_loss = result.best_val_loss
     print(f"\nbest validation loss: {val_loss:.4f} (epoch {result.best_epoch + 1})  "
           f"(published: around {PUBLISHED_VAL_LOSS})")
@@ -222,14 +218,9 @@ def main() -> int:
     # Holdout rollout through the shared simulator: warm up on calibration, then step
     # the holdout one week at a time, feeding each sampled count back in. True holdout
     # counts are never fed in — they are only used to score.
-    inference = InferenceValendinLSTMModel(
-        seq_cols=data["seq_cols"],
-        embedded_cols=data["embedded_cols"],
-        target_col=data["target_col"],
-    )
-    inference.load_state_dict(model.state_dict(), strict=True)
+    rollout = model.to_rollout()
     forecast = run_monte_carlo_forecast(
-        inference, data, n_simulations=args.n_simulations,
+        rollout, data, n_simulations=args.n_simulations,
         device=args.device, seed=args.seed, return_simulations=False,
     )
     metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
