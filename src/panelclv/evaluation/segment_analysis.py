@@ -36,6 +36,10 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from panelclv.data_preparation.target_channel import (
+    calibration_counts,
+    holdout_actuals,
+)
 from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
 from panelclv.predictions import load_predictions_from_csv
 
@@ -82,11 +86,10 @@ CUSTOMER_GROUPS = tuple(_GROUP_PREDICATES)
 
 def _counts(data: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per-customer calibration count, holdout count, holdout actuals (N order)."""
-    target_idx = list(data["seq_cols"]).index(data["target_col"])
-    calib = np.asarray(data["calibration"])[:, :, target_idx].sum(axis=1)   # (N,)
-    actual = np.asarray(data["holdout"])[:, :, target_idx]                   # (N, T_HOLD)
+    calib = calibration_counts(data).sum(axis=1)                             # (N,)
+    actual = holdout_actuals(data)                                           # (N, T_HOLD)
     hold = actual.sum(axis=1)                                                # (N,)
-    return calib.astype(float), hold.astype(float), actual.astype(float)
+    return calib, hold, actual
 
 
 def _resolve_rows(data: dict[str, Any], ids: Sequence) -> np.ndarray:

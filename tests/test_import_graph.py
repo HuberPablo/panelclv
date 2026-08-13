@@ -16,12 +16,6 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "panelclv"
 
-# `configs.panel_config` imports a validator from `data_preparation`, which imports
-# `PanelConfig` back. It is latent — the module graph underneath is acyclic — and
-# issue 12 of the package cleanup removes it. The assertion below is an equality, so
-# when that lands this line has to go with it and the test tightens by one.
-KNOWN_CYCLES = {frozenset({"configs", "data_preparation"})}
-
 
 def _subpackage_graph() -> dict[str, set[str]]:
     """{subpackage: subpackages it imports}, over every module under `src/panelclv/*/`."""
@@ -77,4 +71,4 @@ def _cycles(graph: dict[str, set[str]]) -> set[frozenset[str]]:
 def test_subpackage_imports_are_acyclic():
     graph = _subpackage_graph()
     assert graph, f"no subpackages found under {SRC}"
-    assert _cycles(graph) == KNOWN_CYCLES
+    assert _cycles(graph) == set()

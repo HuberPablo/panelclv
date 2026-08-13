@@ -20,11 +20,10 @@ Run:  pytest -q tests/test_ar_features.py
 import numpy as np
 import pytest
 
+from panelclv.configs.ar_feature_names import parse_ar_feature, validate_ar_features
 from panelclv.data_preparation.ar_features import (
     ARFeatureState,
     compute_ar_feature_columns,
-    parse_ar_feature,
-    validate_ar_features,
 )
 
 NEW_FEATURES = [

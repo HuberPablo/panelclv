@@ -86,9 +86,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-# One "year" of the weekly panel is 52 weeks, matching the real panels' week 0..51
-# index and `add_period_start`'s weekly anchor (Jan 1 + week * 7 days).
-WEEKS_PER_YEAR = 52
+from panelclv.data_preparation.period_calendar import WEEKS_PER_YEAR, year_and_week
 
 # Schema every synthetic panel is written in — recorded in each config.json so a
 # reader knows exactly how to feed it to `prepare_dataset` / `PanelConfig`.
@@ -239,21 +237,22 @@ def simulate_pareto_nbd_panel(
     # Recurring within-year multiplier (all-ones when seasonality is off), applied
     # by week-of-year so the pattern repeats each year over the whole panel.
     season = seasonal_weekly_multiplier(seasonal_peaks, seasonal_amplitude, seasonal_width)
-    woy = np.arange(W) % WEEKS_PER_YEAR                   # (W,) week-of-year 0..51
+    # The flat week counter unpacked into the (year, week-of-year) layout the panel is
+    # written in — one call, so the seasonal multiplier below and the `week` column are
+    # indexed by the same week-of-year rather than by two copies of the same arithmetic.
+    week_idx = np.arange(W)                               # (W,) flat 0-based week
+    year, woy = year_and_week(week_idx, start_year)       # (W,) each; woy is 0..51
     counts = rng.poisson(lam[:, None] * alive_frac * season[woy][None, :])  # (N, W)
     if birth_purchase:
         counts[:, 0] += 1                                # week-0 acquisition, every customer
 
     # --- 4. Assemble the long panel in (year, week) layout --------------------
     ids = np.arange(1, N + 1)
-    week_idx = np.arange(W)
-    year = start_year + week_idx // WEEKS_PER_YEAR       # (W,) calendar year per week
-    week = week_idx % WEEKS_PER_YEAR                     # (W,) week-of-year 0..51
 
     panel = pd.DataFrame({
         id_col: np.repeat(ids, W),                       # customer block-repeated
         "year": np.tile(year, N),
-        "week": np.tile(week, N),
+        "week": np.tile(woy, N),
         target_col: counts.reshape(-1).astype(np.int64),
     })
 

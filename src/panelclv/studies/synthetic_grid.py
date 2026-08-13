@@ -49,11 +49,11 @@ import numpy as np
 import pandas as pd
 
 from panelclv.data_preparation.pareto_simulation import (
-    WEEKS_PER_YEAR,
     list_pnbd_datasets,
     load_pnbd_dataset,
     seasonal_weekly_multiplier,
 )
+from panelclv.data_preparation.period_calendar import flat_week_index, year_and_week
 from panelclv.predictions import load_predictions_from_csv
 
 from . import layout
@@ -227,21 +227,21 @@ def _holdout_season(dataset: _Dataset, weeks: np.ndarray) -> np.ndarray:
         config.get("seasonal_amplitude", 0.0),
         config.get("seasonal_width", 1.0),
     )
-    return season_year[weeks % WEEKS_PER_YEAR]
+    _, woy = year_and_week(weeks, int(config["start_year"]))   # week-of-year 0..51
+    return season_year[woy]
 
 
 def _holdout_rows(dataset: _Dataset, weeks: np.ndarray) -> pd.DataFrame:
     """The panel rows falling in ``weeks``, tagged with their absolute week index.
 
-    The panel carries ``(year, week-of-year)``; the generator rolled the year over
-    every ``WEEKS_PER_YEAR`` weeks from ``start_year``, so this inverts that back to
-    the flat week index the forecast columns are on.
+    The panel carries ``(year, week-of-year)``; the generator rolled the year over at
+    the package's week convention (``period_calendar``) from ``start_year``, so this
+    inverts that back to the flat week index the forecast columns are on.
     """
     panel = dataset.panel
     year_col, week_col = dataset.time_cols
-    week_index = (
-        (panel[year_col] - int(dataset.config["start_year"])) * WEEKS_PER_YEAR
-        + panel[week_col]
+    week_index = flat_week_index(
+        panel[year_col], panel[week_col], int(dataset.config["start_year"])
     )
     return panel.assign(week_index=week_index).loc[week_index.isin(weeks)]
 

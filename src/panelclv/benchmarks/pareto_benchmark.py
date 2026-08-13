@@ -69,7 +69,14 @@ from scipy.special import gammaln
 # The one on-disk prediction layout, shared with the neural rollouts so a saved
 # Pareto/NBD forecast reads back through exactly the same reader (ADR-0002: the
 # prediction-I/O leaf names nothing above it, so this arrow points down).
-from panelclv.predictions import save_predictions_to_csv
+from panelclv.predictions import DEFAULT_ID_COL, save_predictions_to_csv
+
+# The one calendar-to-period conversion table. The fit's sufficient statistics are
+# measured in periods, so the frequency-to-days mapping is shared infrastructure
+# (ADR-0004 freezes the arithmetic that produces a forecast, not where a plumbing
+# constant is read from) rather than a second table living next to this estimator.
+from panelclv.data_preparation.period_calendar import days_per_period
+from panelclv.data_preparation.target_channel import holdout_actuals
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +296,10 @@ def compute_pareto_predictions(
     train_panel: pd.DataFrame,
     holdout_length: int,
     *,
+    # This panel's own column names, as a matched pair — not the package's fallback
+    # spelling (`predictions.DEFAULT_ID_COL`), which names the customer key of a
+    # *written CSV*. Every caller in the package, the tests and the gates passes both
+    # explicitly, so these two only document what a thesis panel looks like.
     id_col: str = "Id",
     target_col: str = "Transactions",
     time_col: str = "period_start",
@@ -372,10 +383,6 @@ def compute_pareto_predictions(
 # build a Pareto/NBD forecast, which is what this file is for.
 
 
-# Calendar days per period, used to fit Pareto/NBD on the right time scale.
-_PERIOD_IN_DAYS: dict[str, float] = {"weekly": 7.0, "monthly": 30.4368, "daily": 1.0}
-
-
 def pareto_from_data(data: dict[str, Any] | None, **fit_kwargs: Any) -> np.ndarray:
     """Fit the Pareto/NBD benchmark on a `prepare_dataset` output.
 
@@ -399,18 +406,12 @@ def pareto_from_data(data: dict[str, Any] | None, **fit_kwargs: Any) -> np.ndarr
             f"data is missing keys {missing} needed for the Pareto/NBD benchmark; "
             f"re-run prepare_dataset (older runs predate id_col/frequency)."
         )
-    period_in_days = _PERIOD_IN_DAYS.get(data["frequency"])
-    if period_in_days is None:
-        raise ValueError(
-            f"cannot map frequency {data['frequency']!r} to a period length; "
-            f"known frequencies: {sorted(_PERIOD_IN_DAYS)}."
-        )
     pareto_pred, _ = compute_pareto_predictions(
         data["train_panel"],
         holdout_length=data["T_HOLD"],
         id_col=data["id_col"],
         target_col=data["target_col"],
-        period_in_days=period_in_days,
+        period_in_days=days_per_period(data["frequency"]),
         customer_ids=data["ids"],
         **fit_kwargs,
     )
@@ -457,8 +458,7 @@ def pareto_forecast(
 
     # True holdout counts for scoring; read straight from the data dict so the
     # actual lines up with the NN forecasts' actual on the same cohort/order.
-    target_idx = list(data["seq_cols"]).index(data["target_col"])
-    actual = np.asarray(data["holdout"])[:, :, target_idx]             # (N, T_HOLD)
+    actual = holdout_actuals(data)                                     # (N, T_HOLD)
 
     result: dict[str, Any] = {
         "prediction_mean": prediction_mean,
@@ -481,7 +481,7 @@ def pareto_forecast(
             prediction_mean,
             run_dir / file_name,
             customer_ids=data.get("ids"),
-            id_col=data.get("id_col", "customer_id"),
+            id_col=data.get("id_col", DEFAULT_ID_COL),
         )
 
     return result

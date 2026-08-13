@@ -26,22 +26,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import optuna
 import pandas as pd
 
 from panelclv.benchmarks import compute_pareto_predictions
+from panelclv.data_preparation.period_calendar import days_per_period
+from panelclv.data_preparation.target_channel import holdout_actuals
 from panelclv.models import compute_forecast_metrics
-from panelclv.predictions import save_predictions_to_csv
+from panelclv.predictions import DEFAULT_ID_COL, save_predictions_to_csv
 from panelclv.registry import rollout_for
 from panelclv.trials import make_data_builder, refit_best_trial
 from panelclv.tuning import run_optuna_study
 
 from .config import StudySuiteConfig, ModelSpec
 from . import layout
-
-# Period length (days) per PanelConfig.frequency, for the Pareto/NBD RFM summary.
-_PERIOD_DAYS = {"daily": 1.0, "weekly": 7.0, "monthly": 30.0}
 
 
 def run_study_suite(config: StudySuiteConfig) -> Path:
@@ -139,7 +137,7 @@ def _run_neural_model(
             forecast["prediction_mean"],
             layout.prediction_path(model_dir, i),
             customer_ids=config.data.get("ids"),
-            id_col=config.data.get("id_col", "customer_id"),
+            id_col=config.data.get("id_col", DEFAULT_ID_COL),
         )
         metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean"])
         rows.append(
@@ -175,10 +173,15 @@ def _run_pareto_model(
     data = config.data
     freq = str(data.get("frequency", "weekly")).lower()
     pareto_kwargs = {
-        "id_col": data.get("id_col", "Id"),
-        "target_col": data.get("target_col", "Transactions"),
+        # The panel's own column names, read with no fallback — the same way
+        # `benchmarks.pareto_from_data` reads them. They are a matched pair: guessing
+        # either one fits the benchmark on a column the panel does not have, or worse,
+        # on the wrong one. `DEFAULT_ID_COL` below is a different thing — the name of
+        # the id column in the CSV this writes, not in the panel it reads.
+        "id_col": data["id_col"],
+        "target_col": data["target_col"],
         "time_col": "period_start",
-        "period_in_days": _PERIOD_DAYS.get(freq, 7.0),
+        "period_in_days": days_per_period(freq),
         "seed": config.base_seed,
         **spec.pareto_kwargs,
     }
@@ -192,12 +195,12 @@ def _run_pareto_model(
         predictions,
         layout.prediction_path(model_dir, 1),
         customer_ids=ids,
-        id_col=data.get("id_col", "customer_id"),
+        id_col=data.get("id_col", DEFAULT_ID_COL),
     )
 
     # predictions are ordered by data["ids"], and data["holdout"] is in the same
     # customer order, so the actuals line up row-for-row with the predictions.
-    actual = np.asarray(data["holdout"])[:, :, int(data["target_idx"])]
+    actual = holdout_actuals(data)
     metrics = compute_forecast_metrics(actual, predictions)
     row = {
         "model": spec.name,

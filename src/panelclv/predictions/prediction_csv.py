@@ -28,6 +28,15 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+# The customer-key column name, written once. A `prepare_dataset` dict names its own
+# id column and every writer passes that through; this is what they fall back to when
+# there is none — a hand-built dict, or a suite tree with no config beside it. It used
+# to be two competing spellings ("customer_id" and "Id") at nine sites, with the study
+# runner reaching for both inside a single function, which is how one archived suite
+# ended up holding `aggregated_*.csv` keyed on `customer_id` next to `Prediction_*.csv`
+# keyed on `Id`.
+DEFAULT_ID_COL = "customer_id"
+
 
 def reduce_to_customer_period(predictions: np.ndarray) -> np.ndarray:
     """Collapse a forecast to a 2-D `(n_customers, T)` array of means.
@@ -57,7 +66,7 @@ def save_predictions_to_csv(
     path: str | Path,
     customer_ids: Sequence | None = None,
     week_offset: int = 0,
-    id_col: str = "customer_id",
+    id_col: str = DEFAULT_ID_COL,
 ) -> Path:
     """Save predictions to a wide CSV: `id_col` + `week_0..week_{T-1}`.
 

@@ -62,6 +62,7 @@ import torch
 # in the registry (ADR-0006). This module searches; it does not enumerate models. The
 # training loop lives in `panelclv.training`. After the subpackage split both are
 # cross-package imports, so they are absolute rather than relative.
+from panelclv.data_preparation.target_channel import target_index
 from panelclv.registry import (
     build_model,
     suggest_param,
@@ -101,6 +102,10 @@ def _validate_training(model_type: str, training: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+# The closure signature `run_optuna_study` calls once per trial (see the module
+# docstring): data_builder(feature_config, batch_size) -> (train_loader, val_loader,
+# metadata). Declared once, here, and imported by `trials.loaders`, which builds one.
+# The loaders are typed `Any` so this module does not have to name torch's DataLoader.
 DataBuilder = Callable[..., tuple[Any, Any, dict[str, Any]]]
 
 
@@ -197,7 +202,7 @@ def select_features(data: dict[str, Any], drop_cols: Sequence[str]) -> dict[str,
 
     keep = [c for c in seq_cols if c not in drop]
     idx = [seq_cols.index(c) for c in keep]            # feature-axis positions to retain
-    target_idx = keep.index(target_col)
+    target_idx = target_index(keep, target_col)   # position on the REDUCED axis
 
     calibration = data["calibration"][:, :, idx]
     holdout = data["holdout"][:, :, idx]

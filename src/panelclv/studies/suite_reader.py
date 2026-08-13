@@ -40,7 +40,15 @@ import pandas as pd
 
 from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation.dynamic_panel_dataset import prepare_dataset
-from panelclv.predictions import load_predictions_from_csv, save_predictions_to_csv
+from panelclv.data_preparation.target_channel import (
+    calibration_counts,
+    holdout_actuals,
+)
+from panelclv.predictions import (
+    DEFAULT_ID_COL,
+    load_predictions_from_csv,
+    save_predictions_to_csv,
+)
 from panelclv.registry import MODEL_TYPES, is_neural
 
 
@@ -101,7 +109,7 @@ def _id_col(root: Path) -> str:
     cfg = _read_suite_config(root) or {}
     pc = cfg.get("panel_config") or {}
     summary = cfg.get("data_summary") or {}
-    return pc.get("id_col") or summary.get("id_col") or "customer_id"
+    return pc.get("id_col") or summary.get("id_col") or DEFAULT_ID_COL
 
 
 # ---------------------------------------------------------------------------
@@ -288,11 +296,11 @@ def describe_dataset(data: dict[str, Any], *, name: str | None = None):
 
     Returns a ``pandas.Series`` of labelled characteristics.
     """
-    ti = int(data["target_idx"])
     ids = np.asarray(data["ids"])
     N = len(ids)
-    calibration = np.asarray(data["calibration"], dtype=np.float64)
-    holdout = np.asarray(data["holdout"], dtype=np.float64)
+    # The target channel of each window, (N, T) — the dataset's own count column.
+    calibration = calibration_counts(data)
+    holdout = holdout_actuals(data)
 
     T_CAL = int(data.get("T_CAL", calibration.shape[1]))
     T_HOLD = int(data.get("T_HOLD", holdout.shape[1]))
@@ -302,8 +310,8 @@ def describe_dataset(data: dict[str, Any], *, name: str | None = None):
 
     # Per (customer, period) integer counts over each window. rint guards the rare
     # float-dtype tensor so exact-count comparisons (== 1) are safe.
-    calib_cells = np.rint(calibration[:, :, ti]).astype(np.int64)   # (N, T_CAL)
-    hold_cells = np.rint(holdout[:, :, ti]).astype(np.int64)        # (N, T_HOLD)
+    calib_cells = np.rint(calibration).astype(np.int64)             # (N, T_CAL)
+    hold_cells = np.rint(holdout).astype(np.int64)                  # (N, T_HOLD)
     calib_counts = calib_cells.sum(axis=1)                          # (N,) per customer
     hold_counts = hold_cells.sum(axis=1)
     total_counts = calib_counts + hold_counts                      # "overall" per customer

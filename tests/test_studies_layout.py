@@ -99,7 +99,9 @@ def test_write_json_roundtrip(tmp_path):
 
 def _data_stub():
     return {"ids": [1], "holdout": [[[0]]], "target_idx": 0,
-            "train_panel": object(), "T_HOLD": 1}
+            "train_panel": object(), "T_HOLD": 1,
+            # The panel's column names — the Pareto baseline fits on them directly.
+            "id_col": "Id", "target_col": "Transactions"}
 
 
 def test_validate_ok(tmp_path):

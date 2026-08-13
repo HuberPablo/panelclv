@@ -67,6 +67,13 @@ TRAINING_END = "1995-12-31"
 HOLDOUT_START = "1996-01-01"
 HOLDOUT_END = "1998-12-31"
 
+# The notebook's own week grid, re-implemented here rather than imported from
+# `panelclv.data_preparation.period_calendar`, and deliberately so — note it is not even
+# the package's convention: this is `dayofyear // 7` (week 0 holds six days), the package
+# uses `(dayofyear - 1) // 7`. Two reasons to keep it. A reproduction has to run the grid
+# it reproduces, and a gate that imports the code it gates stops being a gate — a future
+# edit to the shared convention would move both the benchmark and this check together and
+# still land in the band.
 WEEKS_PER_YEAR = 52
 VALIDATION_SPLIT = 0.1
 BATCH_SIZE_TRAIN = 32
@@ -154,6 +161,11 @@ def build_banking_dataset(csv_path: Path, seed: int = 0) -> dict:
         "holdout": holdout,
         "seq_cols": ["week", "transaction"],
         "target_col": "transaction",
+        # Where the count channel sits on the feature axis. `prepare_dataset` records
+        # this for a real panel and the shared simulator reads it; this dict is built
+        # by hand (see the header — the gate reproduces the notebook's own grid), so it
+        # states the same thing itself. 1, matching the stack order above.
+        "target_idx": 1,
         "embedded_cols": {"week": WEEKS_PER_YEAR, "transaction": max_trans},
         "ids": cohort,
         "id_col": "account_id",

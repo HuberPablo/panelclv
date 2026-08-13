@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from panelclv.data_preparation.target_channel import holdout_actuals
 from panelclv.evaluation import (
     CUSTOMER_GROUPS,
     assign_customer_groups,
@@ -248,7 +249,7 @@ def _study_metrics_from_data(
     """
     # Holdout actuals as (N, T_HOLD): the target channel of the (N, T, F) holdout tensor,
     # in the cohort's own order — the same order the prediction CSVs are saved in.
-    actual = np.asarray(data["holdout"], dtype=np.float64)[:, :, int(data["target_idx"])]
+    actual = holdout_actuals(data)
     ref_ids = np.asarray(data["ids"])
 
     # Score each (model, study) forecast on its own — one row per study. Alignment is

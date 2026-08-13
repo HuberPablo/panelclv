@@ -18,6 +18,10 @@ import numpy as np
 from matplotlib.patches import Patch
 
 from panelclv.benchmarks import pareto_forecast
+from panelclv.data_preparation.target_channel import (
+    calibration_counts,
+    holdout_actuals,
+)
 from panelclv.evaluation import (
     CUSTOMER_GROUPS,
     assign_customer_groups,
@@ -45,20 +49,18 @@ def _aggregate_actuals(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Sum the target channel across customers → (train_curve, holdout_curve).
 
-    ``calibration``/``holdout`` are ``(N, T, F)``; ``target_idx`` is the count
-    channel. Summing over customers gives the weekly-aggregate curves the plot
-    overlays: ``(T_CAL,)`` for training and ``(T_HOLD,)`` for holdout. If ``row_idx``
-    is given, only those customer rows are summed (a group / customer-id subset).
+    The count channel of the ``(N, T, F)`` calibration/holdout tensors, read through
+    ``data_preparation.target_channel``. Summing over customers gives the
+    weekly-aggregate curves the plot overlays: ``(T_CAL,)`` for training and
+    ``(T_HOLD,)`` for holdout. If ``row_idx`` is given, only those customer rows are
+    summed (a group / customer-id subset).
     """
-    ti = int(data["target_idx"])
-    calibration = np.asarray(data["calibration"], dtype=np.float64)
-    holdout = np.asarray(data["holdout"], dtype=np.float64)
+    calibration = calibration_counts(data)                 # (N, T_CAL)
+    holdout = holdout_actuals(data)                        # (N, T_HOLD)
     if row_idx is not None:
         calibration = calibration[row_idx]
         holdout = holdout[row_idx]
-    train_curve = calibration[:, :, ti].sum(axis=0)
-    holdout_curve = holdout[:, :, ti].sum(axis=0)
-    return train_curve, holdout_curve
+    return calibration.sum(axis=0), holdout.sum(axis=0)
 
 
 # ---------------------------------------------------------------------------

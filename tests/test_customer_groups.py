@@ -33,6 +33,9 @@ def _data():
         "ids": IDS,
         "seq_cols": ["transactions"],
         "target_col": "transactions",
+        # `prepare_dataset` records where the target sits on the feature axis, and
+        # every consumer reads that key rather than working it out again.
+        "target_idx": 0,
     }
 
 

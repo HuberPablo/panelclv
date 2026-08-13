@@ -53,60 +53,19 @@ so:
 Counts are treated as non-negative integers (the multinomial class indices), so
 the cumulative state is integer-valued and the two compute paths agree exactly.
 
-Standard library + numpy only.
+The *names* above are not defined here: `PanelConfig` has to validate them at
+construction and sits below this subpackage, so the grammar lives in
+`configs.ar_feature_names` and this module imports `parse_ar_feature` from it. That
+module is standard-library-only, so this one stays numpy-plus-stdlib as before.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Sequence
 
 import numpy as np
 
-_RECENCY = "period_since_last_transaction"
-_HAS = "has_transacted_before"
-_CUM_TXN = "cumulative_transactions"
-_CUM_CNT = "cumulative_count"
-_TENURE = "period_since_first_transaction"
-_RATE = "transaction_rate"
-_ACTIVE_RE = re.compile(r"^active_in_last_(\d+)_periods$")
-
-
-def parse_ar_feature(name: str) -> tuple[str, int | None]:
-    """Validate one AR-feature name → (kind, K or None).
-
-    kind is one of: 'recency', 'has', 'active', 'cum_txn', 'cum_cnt',
-    'tenure', 'rate'. Only 'active' carries a window K; the rest return None.
-    """
-    if name == _RECENCY:
-        return ("recency", None)
-    if name == _HAS:
-        return ("has", None)
-    if name == _CUM_TXN:
-        return ("cum_txn", None)
-    if name == _CUM_CNT:
-        return ("cum_cnt", None)
-    if name == _TENURE:
-        return ("tenure", None)
-    if name == _RATE:
-        return ("rate", None)
-    m = _ACTIVE_RE.match(name)
-    if m:
-        k = int(m.group(1))
-        if k < 1:
-            raise ValueError(f"active window must be >= 1 in {name!r}")
-        return ("active", k)
-    raise ValueError(
-        f"unknown ar feature {name!r}; supported: {_RECENCY!r}, {_HAS!r}, "
-        f"{_CUM_TXN!r}, {_CUM_CNT!r}, {_TENURE!r}, {_RATE!r}, "
-        "'active_in_last_<K>_periods'"
-    )
-
-
-def validate_ar_features(names: Sequence[str]) -> None:
-    """Raise ValueError if any name is not a supported AR feature."""
-    for n in names:
-        parse_ar_feature(n)
+from panelclv.configs.ar_feature_names import parse_ar_feature, validate_ar_features
 
 
 def _base_states(target_2d: np.ndarray) -> dict[str, np.ndarray]:

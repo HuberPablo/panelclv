@@ -47,7 +47,8 @@ import numpy as np
 import torch
 
 from panelclv.data_preparation.ar_features import ARFeatureState
-from panelclv.predictions import save_predictions_to_csv
+from panelclv.data_preparation.target_channel import holdout_actuals
+from panelclv.predictions import DEFAULT_ID_COL, save_predictions_to_csv
 
 
 # ---------------------------------------------------------------------------
@@ -64,16 +65,6 @@ def _as_tensor(array, device: str | torch.device | None = None) -> torch.Tensor:
     if device is not None:
         t = t.to(device)
     return t
-
-
-def _get_target_idx(seq_cols: Sequence[str], target_col: str) -> int:
-    """Position of `target_col` in `seq_cols` — clear error if absent."""
-    seq_cols = list(seq_cols)
-    if target_col not in seq_cols:
-        raise ValueError(
-            f"target_col {target_col!r} not in seq_cols={seq_cols}"
-        )
-    return seq_cols.index(target_col)
 
 
 def _device_of(model: torch.nn.Module) -> torch.device:
@@ -93,7 +84,7 @@ def simulate_recurrent_path(
     calibration,
     holdout,
     seq_cols: Sequence[str],
-    target_col: str = "Transactions",
+    target_idx: int,
     device: str | torch.device | None = None,
     ar_features: Sequence[str] = (),
     covariate_stats: dict[str, tuple[float, float]] | None = None,
@@ -124,12 +115,15 @@ def simulate_recurrent_path(
     that no shape check can catch. Columns absent from the map (an AR feature the
     caller chose to embed, or a dict from an older run) pass through unscaled.
 
+    `target_idx` is the count channel's position on the feature axis, handed down from
+    the dataset that recorded it rather than worked out here — so the channel this
+    overwrites with each sample is provably the one the forecast is scored on.
+
     Returns
     -------
     sampled_path : ndarray (N, T_HOLD)
         Sampled class indices for holdout steps 0 .. T_HOLD - 1, on CPU.
     """
-    target_idx = _get_target_idx(seq_cols, target_col)
     if device is None:
         device = _device_of(model)
     model.to(device).eval()
@@ -194,7 +188,7 @@ def simulate_attention_path(
     calibration,
     holdout,
     seq_cols: Sequence[str],
-    target_col: str = "Transactions",
+    target_idx: int,
     device: str | torch.device | None = None,
     ar_features: Sequence[str] = (),
     covariate_stats: dict[str, tuple[float, float]] | None = None,
@@ -222,12 +216,15 @@ def simulate_attention_path(
     The model is called with `only_last=True` so just the final-position logits
     are materialised, and its returned state is ignored (the Transformer has none).
 
+    `target_idx` is the count channel's position on the feature axis, handed down from
+    the dataset that recorded it rather than worked out here — so the channel this
+    overwrites with each sample is provably the one the forecast is scored on.
+
     Returns
     -------
     sampled_path : ndarray (N, T_HOLD)
         Sampled class indices for holdout steps 0 .. T_HOLD - 1, on CPU.
     """
-    target_idx = _get_target_idx(seq_cols, target_col)
     if device is None:
         device = _device_of(model)
     model.to(device).eval()
@@ -336,7 +333,7 @@ def _save_predictions_run(
         prediction_mean,
         run_dir / file_name,
         customer_ids=data.get("ids"),
-        id_col=data.get("id_col", "customer_id"),
+        id_col=data.get("id_col", DEFAULT_ID_COL),
     )
 
 
@@ -346,7 +343,6 @@ def _run_monte_carlo(
     simulate_path: Callable[..., np.ndarray],
     *,
     n_simulations: int,
-    target_col: str | None,
     device: str | torch.device | None,
     return_simulations: bool,
     seed: int | None,
@@ -363,10 +359,11 @@ def _run_monte_carlo(
     the actuals, and the return contract — so the LSTM and Transformer entry
     points cannot drift apart. The only per-model piece is `simulate_path`.
     """
+    # The target column and its position on the feature axis are the dataset's own
+    # record of them, never re-derived here — see `data_preparation.target_channel`.
     seq_cols = list(data["seq_cols"])
-    if target_col is None:
-        target_col = data["target_col"]
-    target_idx = _get_target_idx(seq_cols, target_col)
+    target_col = data["target_col"]
+    target_idx = int(data["target_idx"])
 
     if device is None:
         device = _device_of(model)
@@ -395,7 +392,7 @@ def _run_monte_carlo(
             calibration=calib_tensor,
             holdout=holdout_tensor,
             seq_cols=seq_cols,
-            target_col=target_col,
+            target_idx=target_idx,
             device=device,
             ar_features=ar_features,
             covariate_stats=covariate_stats,
@@ -403,7 +400,7 @@ def _run_monte_carlo(
     simulations = np.stack(sims, axis=0)                       # (S, N, T_HOLD)
     prediction_mean = simulations.mean(axis=0)                 # (N, T_HOLD)
 
-    actual = np.asarray(data["holdout"])[:, :, target_idx]     # (N, T_HOLD)
+    actual = holdout_actuals(data)                             # (N, T_HOLD)
 
     result: dict[str, Any] = {
         "prediction_mean": prediction_mean,
@@ -442,7 +439,6 @@ def forecast_recurrent(
     model: torch.nn.Module,
     data: dict[str, Any],
     n_simulations: int = 30,
-    target_col: str | None = None,
     device: str | torch.device | None = None,
     return_simulations: bool = True,
     seed: int | None = None,
@@ -486,7 +482,6 @@ def forecast_recurrent(
         data,
         simulate_recurrent_path,
         n_simulations=n_simulations,
-        target_col=target_col,
         device=device,
         return_simulations=return_simulations,
         seed=seed,
@@ -502,7 +497,6 @@ def forecast_attention(
     model: torch.nn.Module,
     data: dict[str, Any],
     n_simulations: int = 30,
-    target_col: str | None = None,
     device: str | torch.device | None = None,
     return_simulations: bool = True,
     seed: int | None = None,
@@ -526,7 +520,6 @@ def forecast_attention(
         data,
         simulate_attention_path,
         n_simulations=n_simulations,
-        target_col=target_col,
         device=device,
         return_simulations=return_simulations,
         seed=seed,

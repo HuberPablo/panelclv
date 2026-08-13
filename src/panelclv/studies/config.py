@@ -34,7 +34,13 @@ from panelclv.registry import MODEL_TYPES, is_neural
 # Keys the runner reads off the shared ``prepare_dataset`` dict. Checked up front
 # so a dict that did not come from ``prepare_dataset`` fails clearly rather than
 # midway through the first study.
-REQUIRED_DATA_KEYS = ("ids", "holdout", "target_idx", "train_panel", "T_HOLD")
+REQUIRED_DATA_KEYS = (
+    "ids", "holdout", "target_idx", "train_panel", "T_HOLD",
+    # The panel's own column names. The Pareto/NBD baseline fits on them
+    # directly and guessing either would fit the wrong column, so a suite that
+    # lacks them has to fail here rather than after writing its config.json.
+    "id_col", "target_col",
+)
 
 
 @dataclass

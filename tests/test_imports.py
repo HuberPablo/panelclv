@@ -14,26 +14,34 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Every importable subpackage created by the altitude split.
-SUBPACKAGES = [
-    "panelclv",
-    "panelclv.models",
-    "panelclv.registry",
-    "panelclv.training",
-    "panelclv.tuning",
-    "panelclv.evaluation",
-    "panelclv.predictions",
-    "panelclv.benchmarks",
-    "panelclv.trials",
-    "panelclv.data_preparation",
-    "panelclv.configs",
-]
+SRC = Path(__file__).resolve().parents[1] / "src" / "panelclv"
+
+# Every subpackage the altitude split created, read off the tree rather than listed.
+# This used to be a hand-written list, and it had already dropped `studies` — the same
+# "one set written out N times" drift the root docstring and the time-flag tables had.
+SUBPACKAGE_NAMES = sorted(
+    d.name for d in SRC.iterdir() if d.is_dir() and (d / "__init__.py").exists()
+)
+SUBPACKAGES = ["panelclv"] + [f"panelclv.{name}" for name in SUBPACKAGE_NAMES]
 
 
 @pytest.mark.parametrize("module", SUBPACKAGES)
 def test_subpackage_imports(module):
     """Each subpackage imports without error."""
     importlib.import_module(module)
+
+
+def test_root_docstring_names_every_subpackage():
+    """`panelclv/__init__.py` is the package's map, so it has to be a complete one.
+
+    It is the first thing a reader opens and the only place the altitude split is
+    described end to end; a subpackage missing from it is invisible to anyone who has
+    not gone looking in the tree. It had drifted before — nine folders, eight listed.
+    """
+    import panelclv
+
+    missing = [name for name in SUBPACKAGE_NAMES if f"panelclv.{name}" not in panelclv.__doc__]
+    assert not missing, f"root docstring does not name: {missing}"
 
 
 def test_public_api_resolves_from_new_homes():

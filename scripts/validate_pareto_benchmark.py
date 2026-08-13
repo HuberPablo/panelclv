@@ -26,6 +26,10 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from panelclv.benchmarks import compute_pareto_predictions  # noqa: E402
 
+# This script's own copy of the package's period length, and it stays a copy on
+# purpose. A gate that imports the code it gates stops being a gate: if this read
+# `period_calendar.days_per_period`, a future edit to that table would move both the
+# benchmark and the check that is supposed to catch it, in lockstep, and still pass.
 PERIOD_DAYS = 7.0
 T_CAL_W = 78          # 1.5y calibration
 H = 26               # 26w holdout

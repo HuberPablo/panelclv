@@ -29,12 +29,14 @@ What a PanelConfig declares (and how prepare_dataset consumes it)
 ----------------------------------------------------------------
 Physical layout (→ `.data_config`): `id_col`, `target_col`, `frequency`
     ∈ {weekly, monthly, daily}, `time_cols=[year, period]` (weekly/monthly) or
-    `date_col` (daily), `periods_per_year` (week sin/cos divisor, default 52),
+    `date_col` (daily), `periods_per_year` (weekly week sin/cos divisor, default 52),
     `training_start/end`, `holdout_start/end`, optional `clip_target_upper`
     (train-only clip) and `require_calibration_activity` (cohort filter, default on).
-Calendar toggles (→ `.time_features`): `add_year_idx`, `add_week_sin_cos`,
-    `add_month_sin_cos`, `add_dayofyear_sin_cos`. A column is created only when
-    its flag is on AND the frequency supports it, else a clear error is raised.
+Calendar toggles (→ `.time_features`): the keys of
+    `configs.panel_config.TIME_FEATURE_FLAGS`, the one table saying which flags exist,
+    which frequencies each can be built on and which columns each writes. A column is
+    created only when its flag is on AND the frequency supports it, else a clear error
+    is raised.
 Feature roles (→ `.schema`) — TFT-style; ONLY listed columns enter the tensor:
     `target` (exactly one), `time` (cyclical calendar), `known_future_…`
     (values known per step in advance — embeddings may be sized over both
@@ -73,11 +75,19 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from panelclv.configs.panel_config import PanelConfig, normalize_embedded_cols
-from panelclv.data_preparation.ar_features import (
-    compute_ar_feature_columns,
-    validate_ar_features,
+from panelclv.configs.ar_feature_names import validate_ar_features
+from panelclv.configs.panel_config import (
+    TIME_FEATURE_FLAGS,
+    PanelConfig,
+    normalize_embedded_cols,
 )
+from panelclv.data_preparation.ar_features import compute_ar_feature_columns
+from panelclv.data_preparation.period_calendar import (
+    WEEKS_PER_YEAR,
+    week_of_year,
+    week_start,
+)
+from panelclv.data_preparation.target_channel import target_index
 
 
 # ---------------------------------------------------------------------------
@@ -251,13 +261,35 @@ def add_time_features(
 ) -> pd.DataFrame:
     """Add only the engineered calendar columns whose flag is True.
 
-    Raises a clear error if a requested feature is incompatible with the
-    declared frequency (e.g. asking for `add_dayofyear_sin_cos` on monthly
-    data).
+    Which flags exist, which frequencies each can be built on, and which columns each
+    writes are not decided here: they are `configs.panel_config.TIME_FEATURE_FLAGS`,
+    the one table `PanelConfig` also validates and assigns roles from. This function
+    supplies the arithmetic and nothing else, so a flag cannot be producible here and
+    unknown there.
+
+    Raises a clear error if a requested feature is incompatible with the declared
+    frequency (e.g. asking for `add_dayofyear_sin_cos` on monthly data).
     """
     date, year_col, period_col = _resolve_time_index(
         panel, frequency, time_cols, date_col
     )
+
+    # One compatibility check for every flag, read off the table. `PanelConfig` drops
+    # incompatible flags with a warning before it gets here; a caller passing the dict
+    # by hand gets this error instead of a KeyError deep in the arithmetic below.
+    for flag, on in time_features.items():
+        spec = TIME_FEATURE_FLAGS.get(flag)
+        if spec is None:
+            raise ValueError(
+                f"unknown time feature {flag!r}; "
+                f"valid keys are {list(TIME_FEATURE_FLAGS)}"
+            )
+        if on and frequency not in spec.frequencies:
+            producible = " or ".join(sorted(spec.frequencies))
+            raise ValueError(
+                f"{flag} requires {producible} frequency, got {frequency!r}"
+            )
+
     # year_series feeds add_year_idx; it comes from the date (daily) or the
     # year column (weekly/monthly).
     year_series = date.dt.year if date is not None else panel[year_col].astype(np.int64)
@@ -270,34 +302,28 @@ def add_time_features(
             wk = panel[period_col].astype(np.int64)
             panel["week_sin"] = np.sin(2 * np.pi * wk / periods_per_year)
             panel["week_cos"] = np.cos(2 * np.pi * wk / periods_per_year)
-        elif frequency == "daily":
-            wk = date.dt.isocalendar().week.astype(np.int64) - 1
-            panel["week_sin"] = np.sin(2 * np.pi * wk / 52)
-            panel["week_cos"] = np.cos(2 * np.pi * wk / 52)
-        else:
-            raise ValueError(
-                f"add_week_sin_cos requires daily or weekly frequency, got {frequency!r}"
-            )
+        else:  # daily
+            # A daily panel has no week column, so the week-of-year is read off the
+            # date under the package's one week convention (`period_calendar`). Its
+            # cycle is WEEKS_PER_YEAR weeks, NOT `periods_per_year` — on a daily panel
+            # that field counts days (365), and dividing a week index by it would put
+            # the whole year inside a seventh of the sine's period.
+            wk = week_of_year(date)
+            panel["week_sin"] = np.sin(2 * np.pi * wk / WEEKS_PER_YEAR)
+            panel["week_cos"] = np.cos(2 * np.pi * wk / WEEKS_PER_YEAR)
 
     if time_features.get("add_month_sin_cos"):
         if frequency == "monthly":
             m0 = panel[period_col].astype(np.int64) - 1
-        elif frequency == "daily":
+        else:  # daily
             m0 = date.dt.month.astype(np.int64) - 1
-        else:
-            raise ValueError(
-                f"add_month_sin_cos requires daily or monthly frequency, got {frequency!r}"
-            )
         panel["month_sin"] = np.sin(2 * np.pi * m0 / 12)
         panel["month_cos"] = np.cos(2 * np.pi * m0 / 12)
 
     if time_features.get("add_dayofyear_sin_cos"):
-        if frequency != "daily":
-            raise ValueError(
-                f"add_dayofyear_sin_cos requires daily frequency, got {frequency!r}"
-            )
+        # Day 1 maps to angle 0 and day 366 back onto day 1 — the leap day shares
+        # January 1st's position on the cycle, which is where it belongs.
         doy = date.dt.dayofyear.astype(np.int64)
-        panel["dayofyear"] = doy
         panel["day_sin"] = np.sin(2 * np.pi * (doy - 1) / 365)
         panel["day_cos"] = np.cos(2 * np.pi * (doy - 1) / 365)
 
@@ -323,10 +349,7 @@ def add_period_start(
     if date is not None:  # daily
         panel["period_start"] = date
     elif frequency == "weekly":
-        panel["period_start"] = (
-            pd.to_datetime(panel[year_col].astype(str) + "-01-01")
-            + pd.to_timedelta(panel[period_col].astype(np.int64) * 7, unit="D")
-        )
+        panel["period_start"] = week_start(panel[year_col], panel[period_col])
     else:  # monthly
         panel["period_start"] = pd.to_datetime(
             dict(year=panel[year_col], month=panel[period_col], day=1)
@@ -721,7 +744,9 @@ def prepare_dataset(
         schema["ar_features"] = list(ar_features)
 
     seq_cols = get_seq_cols(schema)
-    target_idx = seq_cols.index(target_col)
+    # The one derivation, made here and recorded in the returned dict as `target_idx`.
+    # Every consumer reads that key; nothing downstream works this out again.
+    target_idx = target_index(seq_cols, target_col)
 
     # 4) Validate columns exist and are numeric.
     validate_columns(panel, target_col, seq_cols, id_col)

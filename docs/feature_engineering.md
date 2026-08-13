@@ -113,12 +113,28 @@ Calendar features are the cheapest genuinely-known-future signal available, and 
 family the package *engineers from scratch*. They are **opt-in**: omitting
 `time_features` engineers nothing.
 
+This table is not the source: `configs/panel_config.py`'s `TIME_FEATURE_FLAGS` is, and
+`add_time_features` builds against it, so the columns and frequencies below are read off
+one declaration rather than restated in three.
+
 | Flag | Columns created | Formula | Valid frequencies |
 | --- | --- | --- | --- |
 | `add_year_idx` | `year_idx` | `year − year(training_start)` | weekly, monthly, daily |
-| `add_week_sin_cos` | `week_sin`, `week_cos` | `sin/cos(2π·w / periods_per_year)` | weekly, daily |
+| `add_week_sin_cos` | `week_sin`, `week_cos` | `sin/cos(2π·w / periods_per_year)` weekly, `sin/cos(2π·w / 52)` daily | weekly, daily |
 | `add_month_sin_cos` | `month_sin`, `month_cos` | `sin/cos(2π·(m−1) / 12)` | monthly, daily |
-| `add_dayofyear_sin_cos` | `dayofyear`, `day_sin`, `day_cos` | `sin/cos(2π·(doy−1) / 365)` | daily |
+| `add_dayofyear_sin_cos` | `day_sin`, `day_cos` | `sin/cos(2π·(doy−1) / 365)` | daily |
+
+**Where `w` comes from, and why the daily divisor is 52 rather than
+`periods_per_year`.** A weekly panel carries its own `week` column and the divisor is the
+declared `periods_per_year` (52 by convention). A daily panel has no week column, so the
+week-of-year is read off the date by the package's single week convention
+(`data_preparation/period_calendar.py`): a year is **52 weeks of seven days, numbered
+0..51**, week `w` covering days-of-year `7w+1 .. 7w+7`, with the trailing day or two of
+the calendar year folded back into week 51. The divisor there is 52 because that is how
+many weeks the cycle has — on a daily panel `periods_per_year` counts *days* (365), and
+using it would compress the year into a seventh of the sine's period. This is deliberately
+not ISO 8601: ISO gives some years a 53rd week, which aliases exactly onto week 0 under a
+52-week sine and would encode New Year's Eve as New Year's Day.
 
 **Why sin/cos rather than the raw index.** A raw week number is a discontinuous
 encoding of a circular quantity: weeks 52 and 1 are adjacent in the world but maximally
@@ -144,7 +160,8 @@ rollout-based selection metric exists partly to catch exactly this.
 **`period_start`.** Independently of the flags, the pipeline adds a single `period_start`
 Timestamp so both windows are sliced by one uniform rule (weekly: `Jan-1 of year + 7·week`
 days; monthly: first of month; daily: the date itself). It is a slicing anchor, not a
-model feature.
+model feature. The weekly rule is the same convention `week_sin`/`week_cos` read, and both
+come from `period_calendar` — the anchor and the feature cannot drift apart.
 
 ---
 

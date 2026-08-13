@@ -444,7 +444,7 @@ metrics = compute_forecast_metrics(forecast["actual"], forecast["prediction_mean
 
 ```
 prediction_mean  (23, 25) float32     mean over simulated paths
-actual           (23, 25) float32     data["holdout"][:, :, target_idx]
+actual           (23, 25) float64     the holdout target channel (target_channel.holdout_actuals)
 simulations      (8, 23, 25)          only when return_simulations=True
 ```
 
@@ -856,8 +856,9 @@ Differences worth knowing:
 - **`Optuna_Studies/` is not created** (`model_dirs(..., make_optuna=False)`).
 - **Expectations, not samples.** It does not simulate paths.
 - **Same cohort, same actuals, same scorer.** Actuals come from
-  `data["holdout"][:, :, target_idx]` in the same customer order, and metrics go
-  through `compute_forecast_metrics`. That is what makes the comparison fair — and why
+  `data_preparation.target_channel.holdout_actuals(data)` — the one read of the count
+  channel — in the same customer order, and metrics go through
+  `compute_forecast_metrics`. That is what makes the comparison fair — and why
   `require_calibration_activity` matters.
 
 `scripts/validate_pareto_benchmark.py` checks the pure-Python implementation against

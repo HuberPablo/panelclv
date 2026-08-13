@@ -83,8 +83,9 @@ The `.data_config` and `.schema` properties expose the dict forms the existing
 `prepare_dataset` internals consume; the embedding map is read straight off the
 `.embedded_cols` field (normalized to `{col: int | "auto"}` by `prepare_dataset`).
 
-Depends only on pandas (to parse the window dates) plus the in-package
-`ar_features` validator — no other third-party libraries.
+Depends only on pandas (to parse the window dates) plus the sibling
+`ar_feature_names` grammar — no other third-party libraries, and nothing from a
+subpackage above this one.
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
-from panelclv.data_preparation.ar_features import validate_ar_features
+from panelclv.configs.ar_feature_names import validate_ar_features
 
 
 # ---------------------------------------------------------------------------
@@ -104,31 +105,51 @@ from panelclv.data_preparation.ar_features import validate_ar_features
 
 _VALID_FREQUENCIES: tuple[str, ...] = ("weekly", "monthly", "daily")
 _DEFAULT_PERIODS_PER_YEAR: dict[str, int] = {"weekly": 52, "monthly": 12, "daily": 365}
-_KNOWN_TIME_FLAGS: tuple[str, ...] = (
-    "add_year_idx",
-    "add_week_sin_cos",
-    "add_month_sin_cos",
-    "add_dayofyear_sin_cos",
-)
 
-# Which time-feature flags each frequency can actually produce (mirrors
-# Data_preparation.dynamic_panel_dataset.add_time_features).
-_COMPATIBLE_TIME_FLAGS: dict[str, frozenset[str]] = {
-    "weekly": frozenset({"add_year_idx", "add_week_sin_cos"}),
-    "monthly": frozenset({"add_year_idx", "add_month_sin_cos"}),
-    "daily": frozenset(
-        {"add_year_idx", "add_week_sin_cos", "add_month_sin_cos", "add_dayofyear_sin_cos"}
+
+@dataclass(frozen=True)
+class TimeFeatureSpec:
+    """What one engineered-calendar flag is: where it can run, and what it writes.
+
+    `frequencies`  the panel frequencies that carry enough calendar information to
+                   produce it (a weekly panel has no day-of-year).
+    `columns`      every column the flag adds to the panel — the complete list, so a
+                   column that gets created and then never given a role is a
+                   contradiction the table itself shows rather than a silent orphan.
+    `auto_time`    whether those columns are added to the `time` role automatically.
+                   True for the cyclical sin/cos pairs, which are meaningless anywhere
+                   else. False for `year_idx`: it is a trend feature whose role
+                   (usually known_future) is the caller's choice, so it is placed
+                   explicitly.
+    """
+
+    frequencies: frozenset[str]
+    columns: tuple[str, ...]
+    auto_time: bool
+
+
+# The engineered calendar features, written once. This table is the whole statement of
+# "the set of time flags": the legal keys are its keys, the per-frequency compatibility
+# is its `frequencies`, the columns auto-assigned to the `time` role are its `columns`,
+# and `data_preparation.add_time_features` validates against it rather than restating
+# the frequency rules in its own if/elif chain.
+#
+# It used to be three tables plus that chain, and they had drifted: the daily branch
+# also wrote a raw `dayofyear` column that no role table listed, so it rode into the
+# model-ready tensor as a channel nothing read.
+TIME_FEATURE_FLAGS: dict[str, TimeFeatureSpec] = {
+    "add_year_idx": TimeFeatureSpec(
+        frozenset({"weekly", "monthly", "daily"}), ("year_idx",), auto_time=False
     ),
-}
-
-# The cyclical (sin/cos) columns each flag creates — auto-added to the `time`
-# role. `add_year_idx` is intentionally absent: `year_idx` is a trend feature
-# whose role (usually known_future) is the caller's choice, so it is placed
-# explicitly, not auto-assigned.
-_FLAG_TIME_COLUMNS: dict[str, tuple[str, ...]] = {
-    "add_week_sin_cos": ("week_sin", "week_cos"),
-    "add_month_sin_cos": ("month_sin", "month_cos"),
-    "add_dayofyear_sin_cos": ("day_sin", "day_cos"),
+    "add_week_sin_cos": TimeFeatureSpec(
+        frozenset({"weekly", "daily"}), ("week_sin", "week_cos"), auto_time=True
+    ),
+    "add_month_sin_cos": TimeFeatureSpec(
+        frozenset({"monthly", "daily"}), ("month_sin", "month_cos"), auto_time=True
+    ),
+    "add_dayofyear_sin_cos": TimeFeatureSpec(
+        frozenset({"daily"}), ("day_sin", "day_cos"), auto_time=True
+    ),
 }
 
 
@@ -329,11 +350,11 @@ class PanelConfig:
 
         # Reject unknown time-feature flags (catches typos early).
         if self.time_features is not None:
-            unknown = [k for k in self.time_features if k not in _KNOWN_TIME_FLAGS]
+            unknown = [k for k in self.time_features if k not in TIME_FEATURE_FLAGS]
             if unknown:
                 raise ValueError(
                     f"unknown time_features keys: {unknown}; "
-                    f"valid keys are {list(_KNOWN_TIME_FLAGS)}"
+                    f"valid keys are {list(TIME_FEATURE_FLAGS)}"
                 )
 
         # Resolve time features: default per frequency when omitted, and drop
@@ -356,10 +377,9 @@ class PanelConfig:
         """
         if self.time_features is None:
             return {}
-        compatible = _COMPATIBLE_TIME_FLAGS[self.frequency]
         cleaned: dict[str, bool] = {}
         for flag, on in dict(self.time_features).items():
-            if flag in compatible:
+            if self.frequency in TIME_FEATURE_FLAGS[flag].frequencies:
                 cleaned[flag] = bool(on)
             elif on:
                 warnings.warn(
@@ -478,9 +498,10 @@ class PanelConfig:
             | set(self.static)
         )
         for flag, on in self.time_features.items():
-            if not on:
+            spec = TIME_FEATURE_FLAGS[flag]
+            if not on or not spec.auto_time:
                 continue
-            for col in _FLAG_TIME_COLUMNS.get(flag, ()):
+            for col in spec.columns:
                 if col not in assigned:
                     time.append(col)
                     assigned.add(col)

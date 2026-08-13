@@ -12,17 +12,15 @@ know what the temporal split does, this one function is the whole answer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from panelclv.tuning.optuna_tuning import select_features
-
-# The closure signature run_optuna_study expects (see optuna_tuning module docstring):
-# data_builder(feature_config, batch_size) -> (train_loader, val_loader, metadata).
-DataBuilder = Callable[..., "tuple[DataLoader, DataLoader, dict[str, Any]]"]
+# `DataBuilder` is the closure signature `run_optuna_study` expects, so it is declared
+# where that contract is — imported here rather than spelled out a second time.
+from panelclv.tuning.optuna_tuning import DataBuilder, select_features
 
 
 @dataclass(frozen=True)
