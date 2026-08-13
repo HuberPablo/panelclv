@@ -33,8 +33,8 @@ silently untracked.)
 **Current behaviour is pinned, warts included.** Two are deliberate and must not be
 "fixed" here:
 
-- `analysis._id_col` falls back to `"customer_id"` for a suite whose `config.json` carries
-  no `panel_config`, so `aggregate_suite_predictions` writes `aggregated_*.csv` headed
+- `suite_reader._id_col` falls back to `"customer_id"` for a suite whose `config.json`
+  carries no `panel_config`, so `aggregate_suite_predictions` writes `aggregated_*.csv` headed
   `customer_id` next to `Prediction_*.csv` headed `Id`. This has already happened on disk
   (`Studies/cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_10Studies_100_simulations/`).
   `test_legacy_suite_aggregate_uses_the_customer_id_fallback` pins it as-is.
@@ -43,8 +43,8 @@ silently untracked.)
   `test_legacy_suite_has_no_panel_config_to_rebuild_actuals` pins the raise.
 
 **Torch.** `load_predictions_from_csv` is torch-free — it lives in the `panelclv.predictions`
-leaf — but `studies/analysis.py`, which this file drives it through, pulls torch in via the
-model registry. The structural half of this file (tree shape, headers, `PanelConfig`
+leaf — but `studies/suite_reader.py`, which this file drives it through, pulls torch in
+via the model registry. The structural half of this file (tree shape, headers, `PanelConfig`
 round-trip) is written to run without torch; everything that actually loads a prediction is
 marked `needs_torch`.
 
@@ -65,7 +65,7 @@ import pandas as pd
 import pytest
 
 from panelclv.configs.panel_config import PanelConfig
-from panelclv.studies import analysis, layout
+from panelclv.studies import layout, suite_metrics, suite_reader
 
 # --------------------------------------------------------------------------------------
 # Where the real archive lives, and the two skip gates
@@ -118,7 +118,7 @@ RESULTS_LEADING_COLS = [
     "mape_aggregate",
 ]
 # The three metric names the package writes today — `compute_forecast_metrics`' own
-# keys, which `analysis._STUDY_METRIC_COLS` and `pnbd_grid._METRIC_SOURCE` both name.
+# keys, which `suite_metrics._STUDY_METRIC_COLS` and `pnbd_grid._METRIC_SOURCE` both name.
 RESULTS_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
 
 # The one column the archive spells differently: every archived suite was written
@@ -155,7 +155,7 @@ SUITE_CONFIG_KEYS = {
     "data_summary",
 }
 # Keys only the current generation carries. The four legacy electronics suites predate
-# them, which is exactly why `analysis` must not require them.
+# them, which is exactly why the suite reader must not require them.
 SUITE_CONFIG_KEYS_CURRENT = {"overwrite", "keep_only_best_checkpoint", "panel_config"}
 
 DATA_SUMMARY_KEYS = {
@@ -510,15 +510,15 @@ def test_layout_helpers_address_the_fixture_tree(suite):
 
 def test_discover_models_follows_config_order(suite):
     """Model order comes from `config.json`, not the filesystem — plots stay reproducible."""
-    found = analysis._discover_models(suite)
+    found = suite_reader._discover_models(suite)
     assert [name for name, _ in found] == ["LSTM", "ParetoNBD_MLE"]
     assert [d for _, d in found] == [suite / "LSTM", suite / "ParetoNBD_MLE"]
 
 
 def test_deterministic_model_is_read_from_its_model_type(suite):
     """`pareto_nbd` is a single-fit benchmark; the neural family is not."""
-    assert analysis._is_deterministic_model(suite / "ParetoNBD_MLE")
-    assert not analysis._is_deterministic_model(suite / "LSTM")
+    assert suite_reader._is_deterministic_model(suite / "ParetoNBD_MLE")
+    assert not suite_reader._is_deterministic_model(suite / "LSTM")
 
 
 def test_prediction_file_names_and_headers(suite):
@@ -533,7 +533,7 @@ def test_prediction_file_names_and_headers(suite):
             assert lines[0] == expected
             assert len(lines) == 1 + len(FIXTURE_IDS)
     # The sort key is numeric, so Prediction_10 would follow Prediction_2, not precede it.
-    assert analysis._prediction_index(Path("Prediction_10.csv")) == 10
+    assert suite_reader._prediction_index(Path("Prediction_10.csv")) == 10
 
 
 def test_results_csv_column_contract(suite):
@@ -541,9 +541,10 @@ def test_results_csv_column_contract(suite):
     df = pd.read_csv(suite / "results.csv")
     assert list(df.columns) == RESULTS_LEADING_COLS + FIXTURE_RESULTS_PARAM_UNION
     assert all(c.startswith("param_") for c in df.columns[len(RESULTS_LEADING_COLS):])
-    # The three metric names `analysis._STUDY_METRIC_COLS` and `pnbd_grid._METRIC_SOURCE`
+    # The three metric names `suite_metrics._STUDY_METRIC_COLS` and
+    # `pnbd_grid._METRIC_SOURCE`
     # read out of a suite this package wrote.
-    assert analysis._STUDY_METRIC_COLS == RESULTS_METRIC_COLS
+    assert suite_metrics._STUDY_METRIC_COLS == RESULTS_METRIC_COLS
     from panelclv.studies.pnbd_grid import _METRIC_SOURCE
     assert set(_METRIC_SOURCE.values()) <= set(RESULTS_METRIC_COLS)
     # One row per (model, study): two LSTM studies, one benchmark fit.
@@ -562,7 +563,7 @@ def test_model_metrics_csv_is_a_slice_of_results_csv(suite):
 
 
 def test_model_config_json_records_its_type(suite):
-    """The per-model record carries the keys `analysis` and a reader need."""
+    """The per-model record carries the keys the suite reader needs."""
     for name in ("LSTM", "ParetoNBD_MLE"):
         record = json.loads((suite / name / "config.json").read_text())
         assert MODEL_CONFIG_KEYS <= set(record)
@@ -570,7 +571,7 @@ def test_model_config_json_records_its_type(suite):
 
 
 def test_suite_config_json_round_trips_to_a_panel_config(suite):
-    """`config.json` -> `PanelConfig` -> dict is the identity, which `analysis` depends on.
+    """`config.json` -> `PanelConfig` -> dict is the identity, which the reader depends on.
 
     `_actuals_from_panel` rebuilds the dataset from this stored recipe, so an archived
     suite is only readable while `PanelConfig.from_dict` accepts what was written. Asserted
@@ -594,7 +595,7 @@ def test_legacy_suite_config_is_still_discoverable(legacy_suite):
     stored = json.loads((legacy_suite / "config.json").read_text())
     assert SUITE_CONFIG_KEYS <= set(stored)
     assert not (SUITE_CONFIG_KEYS_CURRENT & set(stored))
-    assert [name for name, _ in analysis._discover_models(legacy_suite)] == [
+    assert [name for name, _ in suite_reader._discover_models(legacy_suite)] == [
         "LSTM", "ParetoNBD_MLE",
     ]
 
@@ -605,19 +606,19 @@ def test_id_col_resolution_including_the_legacy_fallback(suite, legacy_suite):
     The fallback is `"customer_id"`, while the prediction files it sits beside are headed
     `"Id"`. Recorded, not corrected: tickets 06/11 rule on it.
     """
-    assert analysis._id_col(suite) == ARCHIVE_ID_COL
-    assert analysis._id_col(legacy_suite) == "customer_id"
+    assert suite_reader._id_col(suite) == ARCHIVE_ID_COL
+    assert suite_reader._id_col(legacy_suite) == "customer_id"
 
 
 # --------------------------------------------------------------------------------------
-# 2. Reading predictions back — needs torch (via studies.analysis)
+# 2. Reading predictions back — needs torch (via studies.suite_reader)
 # --------------------------------------------------------------------------------------
 
 
 @needs_torch
 def test_predictions_load_back_with_ids_and_values(suite):
     """One study's file becomes `(values (N, T_HOLD), ids)` with the ids in cohort order."""
-    values, ids = analysis.load_model_predictions(suite / "LSTM", study=1)
+    values, ids = suite_reader.load_model_predictions(suite / "LSTM", study=1)
     assert values.shape == (len(FIXTURE_IDS), FIXTURE_T_HOLD)
     assert list(ids) == FIXTURE_IDS
     # Exact: the literal text values are binary-representable.
@@ -628,8 +629,8 @@ def test_predictions_load_back_with_ids_and_values(suite):
 @needs_torch
 def test_predictions_average_across_studies(suite):
     """`study=None` means the per-customer, per-period mean over every `Prediction_*.csv`."""
-    one, _ = analysis.load_model_predictions(suite / "LSTM", study=1)
-    mean, ids = analysis.load_model_predictions(suite / "LSTM", study=None)
+    one, _ = suite_reader.load_model_predictions(suite / "LSTM", study=1)
+    mean, ids = suite_reader.load_model_predictions(suite / "LSTM", study=None)
     assert list(ids) == FIXTURE_IDS
     # study 2 == study 1 + 0.25 everywhere, so the mean is exactly + 0.125.
     assert np.array_equal(mean, one + 0.125)
@@ -638,15 +639,15 @@ def test_predictions_average_across_studies(suite):
 @needs_torch
 def test_deterministic_benchmark_ignores_the_requested_study_index(suite):
     """A single-fit benchmark has only `Prediction_1.csv`; any index resolves to it."""
-    first, _ = analysis.load_model_predictions(suite / "ParetoNBD_MLE", study=1)
-    seventh, _ = analysis.load_model_predictions(suite / "ParetoNBD_MLE", study=7)
+    first, _ = suite_reader.load_model_predictions(suite / "ParetoNBD_MLE", study=1)
+    seventh, _ = suite_reader.load_model_predictions(suite / "ParetoNBD_MLE", study=7)
     assert np.array_equal(first, seventh)
 
 
 @needs_torch
 def test_aggregate_writes_one_flat_csv_per_model(suite):
     """`aggregated_<Model>.csv` at the suite root, same wide format, `Id`-headed here."""
-    written = analysis.aggregate_suite_predictions(suite)
+    written = suite_reader.aggregate_suite_predictions(suite)
     assert {p.name for p in written} == {
         "aggregated_LSTM.csv", "aggregated_ParetoNBD_MLE.csv",
     }
@@ -656,7 +657,7 @@ def test_aggregate_writes_one_flat_csv_per_model(suite):
     # It round-trips through the same reader as the per-study files.
     from panelclv.predictions import load_predictions_from_csv
     values, ids = load_predictions_from_csv(suite / "aggregated_LSTM.csv")
-    one, _ = analysis.load_model_predictions(suite / "LSTM", study=1)
+    one, _ = suite_reader.load_model_predictions(suite / "LSTM", study=1)
     assert list(ids) == FIXTURE_IDS
     assert np.allclose(values, one + 0.125)
 
@@ -670,7 +671,7 @@ def test_legacy_suite_aggregate_uses_the_customer_id_fallback(legacy_suite):
     harmless only because `load_predictions_from_csv` sniffs both names. Pinned as current
     behaviour so a fix is a deliberate, visible change.
     """
-    written = analysis.aggregate_suite_predictions(legacy_suite)
+    written = suite_reader.aggregate_suite_predictions(legacy_suite)
     aggregated = next(p for p in written if p.name == "aggregated_LSTM.csv")
     assert aggregated.read_text().splitlines()[0] == prediction_header(
         FIXTURE_T_HOLD, id_col="customer_id"
@@ -719,7 +720,7 @@ def test_fixture_study_metrics_reproduce_results_csv(suite, panel_csv):
     means the archive's two producers still agree — the property audit 04 verified on the
     real suite, asserted here so it runs without the archive.
     """
-    table = analysis.study_metrics(suite, panel_csv)
+    table = suite_metrics.study_metrics(suite, panel_csv)
     assert list(table.index) == ["LSTM", "ParetoNBD_MLE"]
     assert list(table.columns) == RESULTS_METRIC_COLS + ["n_studies"]
     assert list(table["n_studies"]) == [2, 1]
@@ -738,7 +739,7 @@ def test_fixture_study_metrics_reproduce_results_csv(suite, panel_csv):
 
 def test_fixture_panel_rebuilds_the_recorded_cohort(suite, panel_csv):
     """`data_summary` describes the dataset the stored recipe rebuilds. numpy/pandas only."""
-    data = analysis._actuals_from_panel(suite, panel_csv)
+    data = suite_reader._actuals_from_panel(suite, panel_csv)
     summary = FIXTURE_SUITE_CONFIG["data_summary"]
     assert list(data["ids"]) == FIXTURE_IDS
     assert int(data["T_CAL"]) == summary["T_CAL"]
@@ -755,7 +756,7 @@ def test_legacy_suite_has_no_panel_config_to_rebuild_actuals(legacy_suite, panel
     Recorded, not corrected.
     """
     with pytest.raises(ValueError, match="no panel_config"):
-        analysis._actuals_from_panel(legacy_suite, panel_csv)
+        suite_reader._actuals_from_panel(legacy_suite, panel_csv)
 
 
 # --------------------------------------------------------------------------------------
@@ -805,7 +806,7 @@ def test_archived_suite_matches_the_pinned_format():
     assert all(c.startswith("param_") for c in results.columns[n_lead:])
 
     names = [m["name"] for m in stored["models"]]
-    assert [n for n, _ in analysis._discover_models(PINNED_SUITE)] == names
+    assert [n for n, _ in suite_reader._discover_models(PINNED_SUITE)] == names
 
     expected = prediction_header(int(stored["data_summary"]["T_HOLD"]))
     n_customers = int(stored["data_summary"]["n_customers"])
@@ -956,7 +957,7 @@ def test_archived_suite_metrics_reproduce_its_stored_results_csv():
     float reduction order, not from the format.
     """
     stored = pd.read_csv(PINNED_SUITE / "results.csv")
-    table = analysis.study_metrics(PINNED_SUITE, PINNED_PANEL)
+    table = suite_metrics.study_metrics(PINNED_SUITE, PINNED_PANEL)
 
     assert set(table.index) == set(PINNED_SUITE_RESULTS)
     for model, metrics in PINNED_SUITE_RESULTS.items():
@@ -977,16 +978,16 @@ def _print_fixture_metrics(suite: Path, panel_csv: Path) -> None:
     """Print a paste-ready `FIXTURE_METRICS` block (see the module docstring)."""
     from panelclv.models import compute_forecast_metrics
 
-    data = analysis._actuals_from_panel(suite, panel_csv)
+    data = suite_reader._actuals_from_panel(suite, panel_csv)
     actual = np.asarray(data["holdout"], dtype=np.float64)[:, :, int(data["target_idx"])]
     print("\nFIXTURE_METRICS = {")
-    for name, model_dir in analysis._discover_models(suite):
+    for name, model_dir in suite_reader._discover_models(suite):
         for path in sorted(
             (model_dir / "Predictions").glob("Prediction_*.csv"),
-            key=analysis._prediction_index,
+            key=suite_reader._prediction_index,
         ):
-            index = analysis._prediction_index(path)
-            values, _ = analysis.load_model_predictions(model_dir, study=index)
+            index = suite_reader._prediction_index(path)
+            values, _ = suite_reader.load_model_predictions(model_dir, study=index)
             metrics = compute_forecast_metrics(actual, values)
             print(f'    ("{name}", {index}): {{')
             for metric in RESULTS_METRIC_COLS:

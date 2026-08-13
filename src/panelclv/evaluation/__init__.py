@@ -20,6 +20,7 @@ from .plots import (
     metrics_table,
 )
 from .segment_analysis import (
+    CUSTOMER_GROUPS,
     assign_customer_groups,
     group_metrics_table,
     aggregate_bias,
@@ -28,6 +29,7 @@ from .segment_analysis import (
 __all__ = [
     "plot_weekly_aggregated",
     "metrics_table",
+    "CUSTOMER_GROUPS",
     "assign_customer_groups",
     "group_metrics_table",
     "aggregate_bias",

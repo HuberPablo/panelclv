@@ -14,6 +14,10 @@ Groups are derived from each customer's calibration vs holdout activity:
                     calibration frequency (Valendin et al.'s churned customers).
     "Opportunity" : more transactions in holdout than in calibration.
 
+`CUSTOMER_GROUPS` is those predicate names — the group set, defined once by what
+defines the groups. `assign_customer_groups(..., with_other=True)` adds the derived
+`"Other"` catch-all (matched by no predicate) so a table covers the whole cohort.
+
 Inputs
 ------
 - `data` : a `prepare_dataset` output (the `data_best` used for forecasting);
@@ -64,6 +68,12 @@ _GROUP_PREDICATES = {
     "At Risk": _at_risk,
     "Opportunity": _opportunity,
 }
+
+# The customer-group set, written once: a group exists exactly when a predicate defines
+# it, so these keys *are* the set and cannot drift from the definitions. Everything that
+# needs "the groups" — defaults, plots, the suite metrics table — reads this rather than
+# restating the names.
+CUSTOMER_GROUPS = tuple(_GROUP_PREDICATES)
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +128,17 @@ def _load_aligned(path: str | Path, data: dict[str, Any]) -> np.ndarray:
 
 def assign_customer_groups(
     data: dict[str, Any],
-    groups: Sequence[str] = ("At Risk", "Opportunity"),
+    groups: Sequence[str] = CUSTOMER_GROUPS,
+    with_other: bool = False,
 ) -> dict[str, np.ndarray]:
-    """Return {group_name: array of customer ids} for the requested groups."""
+    """Return {group_name: array of customer ids} for the requested groups.
+
+    `groups` defaults to every defined group and can only ever narrow that set.
+    `with_other=True` appends the derived `"Other"` catch-all — every customer matched
+    by none of the requested predicates — so the mapping covers the whole cohort and
+    the group counts sum to N whenever the groups are disjoint (At Risk / Opportunity
+    are). This is the only place the catch-all is computed.
+    """
     calib, hold, _ = _counts(data)
     ctx = {"calib_mean": float(calib.mean())}
     ids = np.asarray(data["ids"])
@@ -132,6 +150,11 @@ def assign_customer_groups(
             )
         mask = np.asarray(_GROUP_PREDICATES[name](calib, hold, ctx), dtype=bool)
         out[name] = ids[mask]
+    if with_other:
+        # Compared as `str` (matching how the metric helpers key ids) and returned in
+        # the cohort's own order.
+        assigned = {str(cid) for group in out.values() for cid in group}
+        out["Other"] = np.asarray([cid for cid in ids if str(cid) not in assigned])
     return out
 
 

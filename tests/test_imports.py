@@ -9,6 +9,7 @@ Run:  pytest -q            (from the repo root, with the package installed)
 """
 
 import importlib
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -321,6 +322,77 @@ def test_model_spec_separates_search_space_from_training():
     fields = {f.name for f in dataclasses.fields(ModelSpec)}
     assert "data_info" not in fields
     assert {"search_space", "training"} <= fields
+
+
+def _calls_t_ppf(source: str) -> bool:
+    """True if the module calls SciPy's `stats.t.ppf` — the Student-t quantile."""
+    import ast
+
+    return any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "ppf"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "t"
+        for node in ast.walk(ast.parse(source))
+    )
+
+
+def test_suite_analysis_is_three_modules_with_one_interval():
+    """`studies/analysis.py` split three ways — issue 09 of the package cleanup.
+
+    Size was not the reason: one 1195-line module is what let a hand-written copy of
+    the customer-group set and a *second* Student-t interval sit in the same file,
+    both found only by audit. The guards are therefore about what the split protects —
+    the old module cannot come back, the three that replaced it exist, and the
+    t-interval has exactly one implementation, which the plot band and the Pareto
+    grid both call.
+    """
+    import panelclv
+    import panelclv.studies as st
+
+    with pytest.raises(ImportError):
+        importlib.import_module("panelclv.studies.analysis")
+    for name in ("suite_reader", "suite_plots", "suite_metrics"):
+        importlib.import_module(f"panelclv.studies.{name}")
+
+    # The public surface is unchanged by the split — notebooks import the subpackage.
+    for name in ("load_model_predictions", "aggregate_suite_predictions",
+                 "plot_suite_forecast", "group_metrics_suite_table", "study_metrics",
+                 "compare_study_metrics", "describe_dataset", "describe_suite_dataset"):
+        assert hasattr(st, name), f"{name} should still resolve from panelclv.studies"
+
+    # One Student-t interval in the package: everything else calls it. Read off the
+    # syntax tree rather than the text, so prose naming the call is not a false hit.
+    src = Path(panelclv.__file__).parent
+    callers = {p.name for p in src.rglob("*.py") if _calls_t_ppf(p.read_text())}
+    assert callers == {"suite_metrics.py"}, \
+        f"the t-interval is implemented in more than one place: {sorted(callers)}"
+
+
+def test_the_suite_modules_defer_no_imports():
+    """The deferrals that claimed to keep the read path torch-free are gone — issue 09.
+
+    They never saved anything: `panelclv.studies` pulls torch at package import, and one
+    of the three deferred `pandas`, which cannot affect torch at all. A function-body
+    import now reads as what it is — a load-order workaround — rather than as a policy
+    these modules follow.
+    """
+    import ast
+
+    import panelclv
+
+    src = Path(panelclv.__file__).parent / "studies"
+    for name in ("suite_reader.py", "suite_plots.py", "suite_metrics.py"):
+        tree = ast.parse((src / name).read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            deferred = [
+                n for n in ast.walk(node)
+                if isinstance(n, (ast.Import, ast.ImportFrom))
+            ]
+            assert not deferred, \
+                f"{name}:{node.name} defers an import into its body"
 
 
 def test_torch_is_not_imported_lazily_anywhere():

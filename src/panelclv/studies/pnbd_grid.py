@@ -37,7 +37,6 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import stats
 
 from panelclv.data_preparation.pareto_simulation import (
     list_pnbd_datasets,
@@ -45,6 +44,8 @@ from panelclv.data_preparation.pareto_simulation import (
     _seasonal_weekly_multiplier,
     WEEKS_PER_YEAR,
 )
+
+from .suite_metrics import t_interval_half_width
 
 # Metric name (as we expose it) -> column name in each suite's results.csv. The
 # aggregate MAPE is stored under the scoring authority's own key; we surface it as
@@ -487,17 +488,19 @@ def dead_volume_leakage_grid(
 
 
 def _mean_ci(values: np.ndarray, ci: float) -> dict:
-    """Mean + Student-t confidence interval on the mean over a group's replicates."""
+    """Mean + Student-t confidence interval on the mean over a group's replicates.
+
+    The interval itself is `suite_metrics.t_interval_half_width` — the package's one
+    implementation — so a grid cell's CI and the suite tables' are the same arithmetic.
+    A single-study model (e.g. the Pareto/NBD baseline) has no spread, so it reports
+    `NaN` for the std and both bounds.
+    """
     x = np.asarray(values, dtype=float)
     x = x[~np.isnan(x)]
     n = int(x.size)
     mean = float(x.mean()) if n else float("nan")
-    if n < 2:
-        # A single-study model (e.g. Pareto/NBD baseline) has no spread to report.
-        return {"mean": mean, "std": float("nan"), "n": n,
-                "ci_low": float("nan"), "ci_high": float("nan")}
-    std = float(x.std(ddof=1))
-    half = float(stats.t.ppf(0.5 + ci / 2.0, n - 1) * std / np.sqrt(n))
+    std = float(x.std(ddof=1)) if n > 1 else float("nan")
+    half = float(t_interval_half_width(std, n, ci))
     return {"mean": mean, "std": std, "n": n, "ci_low": mean - half, "ci_high": mean + half}
 
 

@@ -279,7 +279,7 @@ def test_read_side_agrees_on_which_types_run_per_study(model_type, tmp_path):
     `Prediction_1.csv` and the benchmark's across-study spread silently collapsed to
     one study. Nothing crashed — the reported distribution was just wrong.
     """
-    from panelclv.studies.analysis import _is_deterministic_model
+    from panelclv.studies.suite_reader import _is_deterministic_model
 
     model_dir = tmp_path / "SomeModel"
     model_dir.mkdir()

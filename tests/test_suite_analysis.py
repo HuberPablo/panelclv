@@ -1,11 +1,15 @@
-"""Tests for the study-suite read/aggregate/plot layer (`studies.analysis`).
+"""Tests for the suite analysis surface (`suite_reader` / `suite_plots` / `suite_metrics`).
 
 These build a tiny fake suite tree on disk (a couple of hand-made
 ``Prediction_*.csv`` per model) and exercise the averaging, the aggregated-CSV
 output, the alignment guards, and the plot entry point. They use the ``data=``
 escape hatch for plotting so no real panel / ``prepare_dataset`` run is needed.
 
-Run:  pytest -q tests/test_studies_analysis.py
+The actuals rebuild is monkeypatched on the module that *calls* it, not the one that
+defines it: `suite_reader._actuals_from_panel` is imported by name into its callers,
+so patching the definition site would leave those bindings pointing at the original.
+
+Run:  pytest -q tests/test_suite_analysis.py
 """
 
 import json
@@ -178,6 +182,57 @@ def test_plot_requires_exactly_one_source(suite):
         plot_suite_forecast(root, panel_path="x.csv", data=_fake_data())
 
 
+# --- the one Student-t interval ----------------------------------------------
+
+
+def test_t_interval_half_width_is_the_textbook_formula():
+    """`t_(1-a/2, n-1) · s/√n`, checked against SciPy directly."""
+    from scipy import stats as sstats
+
+    from panelclv.studies.suite_metrics import t_interval_half_width
+
+    values = np.array([1.0, 2.0, 4.0, 8.0])
+    n, std = len(values), values.std(ddof=1)
+    expected = sstats.t.ppf(0.975, n - 1) * std / np.sqrt(n)
+    assert t_interval_half_width(std, n, 0.95) == pytest.approx(expected)
+
+
+def test_t_interval_half_width_has_no_spread_below_two_samples():
+    """A deterministic benchmark is a single fit: NaN, not an error."""
+    from panelclv.studies.suite_metrics import t_interval_half_width
+
+    assert np.isnan(t_interval_half_width(0.0, 1, 0.95))
+    assert np.isnan(t_interval_half_width(np.array([1.0, 2.0]), 1, 0.95)).all()
+
+
+def test_plot_band_is_that_same_interval(suite):
+    """The band a plot shades is the interval a table prints — one implementation.
+
+    `_across_study_band` sums each study's forecast over the cohort and summarises the
+    spread of those curves; asserting it against `t_interval_half_width` applied to the
+    same curves is what pins the plot and the metrics table to the same arithmetic.
+    """
+    from panelclv.studies.suite_metrics import t_interval_half_width
+    from panelclv.studies.suite_plots import _across_study_band
+
+    root, a1, a2, _ = suite
+    mean, low, high, n = _across_study_band(root / "ModelA", None, 0.95)
+
+    curves = np.stack([a1.sum(axis=0), a2.sum(axis=0)])          # (2 studies, T)
+    half = t_interval_half_width(curves.std(axis=0, ddof=1), 2, 0.95)
+    assert n == 2
+    assert np.allclose(mean, curves.mean(axis=0))
+    assert np.allclose(low, curves.mean(axis=0) - half)
+    assert np.allclose(high, curves.mean(axis=0) + half)
+
+
+def test_no_band_for_a_single_study_model(suite):
+    from panelclv.studies.suite_plots import _across_study_band
+
+    root, *_ = suite
+    assert _across_study_band(root / "ModelB", None, 0.95) is None
+
+
 # --- study_metrics (whole-cohort metrics, with SD / CI / display) -------------
 
 METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
@@ -191,10 +246,10 @@ def patched_actuals(suite, monkeypatch):
     are then scored against ``_fake_data()``'s holdout (all 2.0, so no zero-denominator
     NaNs in bias/MAPE). Returns ``(suite_tuple, actual_2d)``.
     """
-    from panelclv.studies import analysis
+    from panelclv.studies import suite_metrics
 
     data = _fake_data()
-    monkeypatch.setattr(analysis, "_actuals_from_panel", lambda root, panel_path: data)
+    monkeypatch.setattr(suite_metrics, "_actuals_from_panel", lambda root, panel_path: data)
     actual = data["holdout"][:, :, data["target_idx"]]      # (N, T) the metric fn sees
     return suite, actual
 
@@ -296,18 +351,57 @@ def test_study_metrics_display_needs_a_spread_flag(patched_actuals):
         study_metrics(root, "x", display=True)
 
 
+# --- group_metrics_suite_table (metrics per customer segment) -----------------
+
+
+def _grouped_data():
+    """A cohort with one customer in each group, so no group block is empty.
+
+    Calibration counts `[3, 0, 1]` (mean 1.33) and holdout counts `[0, 0, 2]`, which put
+    customer 10 in At Risk (inactive in holdout, above-average calibration), customer 30
+    in Opportunity (more in holdout than calibration) and customer 20 in neither.
+    """
+    calibration = np.array([[1, 1, 1], [0, 0, 0], [1, 0, 0]], dtype=float)[:, :, None]
+    holdout = np.array([[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 0, 0]], dtype=float)[:, :, None]
+    return {
+        "calibration": calibration,
+        "holdout": holdout,
+        "ids": IDS,
+        "seq_cols": ["transactions"],
+        "target_col": "transactions",
+        "target_idx": 0,
+    }
+
+
+def test_group_table_covers_the_whole_cohort(suite):
+    """Every defined group plus the derived catch-all, so the counts sum to N."""
+    from panelclv.evaluation import CUSTOMER_GROUPS
+    from panelclv.studies import group_metrics_suite_table
+
+    root, *_ = suite
+    table = group_metrics_suite_table(root, data=_grouped_data(), study=1)
+
+    groups = set(table.index.get_level_values("group"))
+    assert groups == set(CUSTOMER_GROUPS) | {"Other"}
+    # One row per (group, model); the per-group customer counts partition the cohort.
+    per_group = table.xs("ModelA", level="model")["n_customers"]
+    assert per_group.sum() == N
+
+
 # --- compare_study_metrics (several suites, one panel) ------------------------
 
 
 @pytest.fixture
 def two_suites(tmp_path, monkeypatch):
     """Two consistent suites (same holdout) with actuals rebuild monkeypatched away."""
-    from panelclv.studies import analysis
+    from panelclv.studies import suite_metrics
 
     root_a, root_b = tmp_path / "A", tmp_path / "B"
     _make_suite(root_a)
     _make_suite(root_b)
-    monkeypatch.setattr(analysis, "_actuals_from_panel", lambda root, panel_path: _fake_data())
+    monkeypatch.setattr(
+        suite_metrics, "_actuals_from_panel", lambda root, panel_path: _fake_data()
+    )
     return root_a, root_b
 
 
@@ -348,7 +442,7 @@ def test_compare_rejects_empty():
 
 
 def test_compare_warns_on_mismatched_holdout(tmp_path, monkeypatch):
-    from panelclv.studies import analysis
+    from panelclv.studies import suite_metrics
 
     root_a, root_b = tmp_path / "A", tmp_path / "B"
     _make_suite(root_a, t=T)          # 4-week holdout
@@ -357,7 +451,7 @@ def test_compare_warns_on_mismatched_holdout(tmp_path, monkeypatch):
     # Return actuals matching each suite's own forecast width, so the only inconsistency is
     # the across-suite holdout mismatch the warning is meant to catch.
     monkeypatch.setattr(
-        analysis, "_actuals_from_panel",
+        suite_metrics, "_actuals_from_panel",
         lambda root, panel_path: _fake_data(T if root.name == "A" else T + 2),
     )
     with pytest.warns(UserWarning, match="holdout length"):

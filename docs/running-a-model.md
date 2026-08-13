@@ -74,7 +74,7 @@ flowchart TD
         end
         SS["run_study_suite<br/>n_studies_per_model × Optuna study"]
         AR["Studies/&lt;name&gt;/ archive<br/>studies/layout.py"]
-        AN["studies/analysis.py<br/>read back, score, plot"]
+        AN["studies/suite_reader.py + suite_metrics.py<br/>+ suite_plots.py<br/>read back, score, plot"]
         SS -.->|"drives"| A2
         SS --> AR --> AN
     end
@@ -673,7 +673,7 @@ the **single scoring authority** (`CLAUDE.md`). Both arrays are `(N, T_HOLD)`.
 `mape_aggregate` is deliberately not per-customer MAPE: at customer level most
 holdout periods are zero and the denominator explodes.
 
-Everything delegates here — `studies/runner.py`, `studies/analysis.py` →
+Everything delegates here — `studies/runner.py`, `studies/suite_metrics.py` →
 `study_metrics`, `evaluation/plots.py` → `metrics_table`,
 `evaluation/segment_analysis.py`. That is why tables, plots and archived results
 agree to the last decimal. There is no exception: these three numbers are computed in
@@ -766,18 +766,23 @@ Studies/<study_name>/
 `create_suite_root` refuses an existing folder unless `overwrite=True` — silently
 writing into a previous suite would mix results.
 
-`studies/analysis.py` reads this back, discovering models and studies from the tree
-rather than being told:
+Three modules read this back, discovering models and studies from the tree rather than
+being told. They are named for what they do, and everything below is exported from
+`panelclv.studies`, so a caller imports the subpackage and never the module:
 
-| function | does |
-|---|---|
-| `load_model_predictions` | one model's prediction CSVs → arrays |
-| `aggregate_suite_predictions` | mean across studies → `aggregated_<Model>.csv` |
-| `study_metrics` | **re-scores stored CSVs** through `compute_forecast_metrics` |
-| `compare_study_metrics` | models side by side |
-| `group_metrics_suite_table` | metrics by customer segment |
-| `plot_suite_forecast` | actual vs predicted, with an across-study band |
-| `describe_dataset`, `describe_suite_dataset` | panel summaries |
+| module | function | does |
+|---|---|---|
+| `suite_reader.py` | `load_model_predictions` | one model's prediction CSVs → arrays |
+| | `aggregate_suite_predictions` | mean across studies → `aggregated_<Model>.csv` |
+| | `describe_dataset`, `describe_suite_dataset` | panel summaries |
+| `suite_metrics.py` | `study_metrics` | **re-scores stored CSVs** through `compute_forecast_metrics` |
+| | `compare_study_metrics` | models side by side |
+| | `group_metrics_suite_table` | metrics by customer segment |
+| `suite_plots.py` | `plot_suite_forecast` | actual vs predicted, with an across-study band |
+
+The across-study band and the `ci_low` / `ci_high` columns are the same Student-t
+interval — `suite_metrics.t_interval_half_width`, the package's only implementation,
+which the Pareto grid's per-cell interval also calls.
 
 `study_metrics` re-scoring from the CSVs rather than trusting `metrics.csv` is what
 makes the archive self-checking: the reported number can always be regenerated from
