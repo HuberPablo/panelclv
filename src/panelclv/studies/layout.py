@@ -81,7 +81,7 @@ def prediction_path(model_dir: Path, index: int) -> Path:
 def jsonify(obj: Any) -> Any:
     """Recursively coerce an object into something ``json.dump`` can handle.
 
-    The suite/model records contain the ``data_info`` dict, ``seq_cols`` lists,
+    The suite/model records contain the ``search_space`` dict, ``seq_cols`` lists,
     nested feature tuples and the occasional ``Path`` / numpy scalar. Sets become
     sorted lists, tuples become lists, ``Path`` becomes ``str``, numpy scalars
     become their Python counterparts, and anything still unknown falls back to

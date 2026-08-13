@@ -18,7 +18,7 @@ Typical use (see ``scripts/run_studies.py`` for a full example)::
         n_studies_per_model=5,
         models=[
             ModelSpec(name="LSTM", model_type="lstm", n_trials=30,
-                      data_info={"n_epochs": 150, "patience": 7}),
+                      training={"n_epochs": 150, "patience": 7}),
             ModelSpec(name="ParetoNBD", model_type="pareto_nbd"),
         ],
     )

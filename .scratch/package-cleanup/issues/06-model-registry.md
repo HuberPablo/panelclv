@@ -8,7 +8,7 @@ stops being expressible.
 
 **Blocked by:** 02, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
 Source: `.scratch/package-simplification/issues/06-target-architecture.md` (decisions 4, 5,
 Q13, Q16), `07-collapse-invariants.md` (decisions 1, 5), `08-reconcile-adrs-and-vocabulary.md`,
@@ -94,13 +94,13 @@ The registration test is rewritten from three-list membership to one-table check
 **not** simply get deleted — its per-type class assertions guard a dispatch-fallthrough bug
 it was built for, and that risk survives the registry.
 
-- [ ] One registry table in its own subpackage; suggestion functions moved into it
-- [ ] Valid types derive from its keys; neural is a derived predicate, not a list
-- [ ] Pareto/NBD has a declarative entry; the runner's two paths stay separate
-- [ ] Entries hold direct references; no lazy indirection
-- [ ] Model spec carries search space and training as separate fields; validator shrunk
-- [ ] Torch-free machinery and its two `CLAUDE.md` lines removed; the two unrelated lazy imports untouched
-- [ ] ADR-0006 present, copied verbatim from ticket 08
-- [ ] `CLAUDE.md` Edits 1, 2 and 3 applied verbatim from ticket 07; invariants heading left standing
-- [ ] Registration test rewritten, per-type class assertions kept
-- [ ] Golden test green at rel=1e-6; notebook API test green
+- [x] One registry table in its own subpackage; suggestion functions moved into it
+- [x] Valid types derive from its keys; neural is a derived predicate, not a list
+- [x] Pareto/NBD has a declarative entry; the runner's two paths stay separate
+- [x] Entries hold direct references; no lazy indirection
+- [x] Model spec carries search space and training as separate fields; validator shrunk
+- [x] Torch-free machinery and its two `CLAUDE.md` lines removed; the two unrelated lazy imports untouched
+- [x] ADR-0006 present, copied verbatim from ticket 08
+- [x] `CLAUDE.md` Edits 1, 2 and 3 applied verbatim from ticket 07; invariants heading left standing
+- [x] Registration test rewritten, per-type class assertions kept
+- [x] Golden test green at rel=1e-6; notebook API test green

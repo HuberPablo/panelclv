@@ -37,7 +37,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import NEURAL_MODEL_TYPES
+from panelclv.registry import MODEL_TYPES, is_neural
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +111,10 @@ def _prediction_index(path: Path) -> int:
     return int(m.group(1)) if m else -1
 
 
-# Which families the runner runs per study (one Prediction_i.csv each) is decided by
-# ``NEURAL_MODEL_TYPES``, imported rather than restated: a local copy is a fourth
-# model-type list to keep in step with ``config``/``runner``/``optuna_tuning``, and a
-# stale one misreads a whole model's archive as a single deterministic fit.
+# Which families the runner runs per study (one Prediction_i.csv each) is read off the
+# registry rather than restated here: a local copy of the neural list is exactly what
+# drifted once, and a stale one misreads a whole model's archive as a single
+# deterministic fit (ADR-0006).
 
 
 def _is_deterministic_model(model_dir: Path) -> bool:
@@ -124,7 +124,13 @@ def _is_deterministic_model(model_dir: Path) -> bool:
         return False
     with open(cfg_path) as f:
         mt = json.load(f).get("model_type")
-    return mt is not None and mt not in NEURAL_MODEL_TYPES
+    if mt is None:
+        return False
+    # An archive may name a model type this build no longer registers; the reader's
+    # job is to locate files, so an unknown type reads as a single fit rather than
+    # refusing to read the folder at all.
+    runs_once_per_study = mt in MODEL_TYPES and is_neural(mt)
+    return not runs_once_per_study
 
 
 def load_model_predictions(

@@ -3,7 +3,8 @@
 Runs ``n_studies_per_model`` independent Optuna studies for each model over one
 shared dataset and archives everything under ``Studies/<study_name>/``. The config
 below is the same set of arguments you already pass to ``run_optuna_study``, so
-there is nothing new to learn — paste your ``data_info`` blocks verbatim.
+there is nothing new to learn — paste your ``search_space`` / ``training`` blocks
+verbatim.
 
 Usage:
     1. Edit ``load_panel()`` to read your panel CSV.
@@ -44,27 +45,29 @@ def load_panel() -> pd.DataFrame:
 def build_models() -> list[ModelSpec]:
     """The two neural search spaces (passed verbatim to run_optuna_study) + Pareto.
 
-    The sets / tuples in ``data_info`` ARE the search space (a ``{...}`` set is a
-    categorical choice, a ``(lo, hi, "log"|"int")`` tuple is a range). The suite
-    assigns ``study_name`` / ``summary_dir`` / ``storage`` / ``checkpoint_dir`` /
-    seed per study, so those are intentionally omitted here.
+    The sets / tuples in ``search_space`` override the range each model's registry
+    entry declares for that hyperparameter (a ``{...}`` set is a categorical choice,
+    a ``(lo, hi, "log"|"int")`` tuple is a range); anything left out keeps the
+    entry's own range. ``training`` holds what is not searched. The suite assigns
+    ``study_name`` / ``summary_dir`` / ``storage`` / ``checkpoint_dir`` / seed per
+    study, so those are intentionally omitted here.
     """
     lstm = ModelSpec(
         name="LSTM",
         model_type="lstm",
         n_trials=100,
-        data_info={
-            "n_epochs":        {100},
-            "patience":        {5, 7, 9},
+        search_space={
             "batch_size":      {64, 128, 256},
-
-            # Hyperparameters
             "learning_rate":   (1e-4, 1e-2, "log"),
             "embedding_dim":   {64, 128, 256},
             "lstm_hidden_size": {32, 64, 128},
             "dense_units":     {32, 64, 128},
             "dropout":         {0.0, 0.2, 0.4},
-
+        },
+        training={
+            # n_epochs / patience are training control, but may still carry a spec.
+            "n_epochs":  {100},
+            "patience":  {5, 7, 9},
             "verbose":   False,
             "loss_type": LOSS_TYPE,
             # "class_weights": class_weights,  # used by 'weighted_ce' / 'focal'
@@ -75,11 +78,7 @@ def build_models() -> list[ModelSpec]:
         name="Transformer",
         model_type="transformer",
         n_trials=100,
-        data_info={
-            "n_epochs":  100,
-            "patience":  7,
-            "loss_type": LOSS_TYPE,
-
+        search_space={
             "batch_size":         {64, 128, 256},
             "d_model":            {32, 64, 128},
             "nhead":              {2, 4, 8},
@@ -88,6 +87,11 @@ def build_models() -> list[ModelSpec]:
 
             "learning_rate": (1e-4, 3e-3, "log"),
             "weight_decay":  (1e-6, 1e-2, "log"),
+        },
+        training={
+            "n_epochs":  100,
+            "patience":  7,
+            "loss_type": LOSS_TYPE,
         },
     )
 

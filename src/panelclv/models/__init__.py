@@ -13,6 +13,7 @@ draws the simulator.
 
 The surrounding concerns each have their own sibling subpackage under ``panelclv``:
 
+- ``panelclv.registry``    — the table declaring which of these models exist.
 - ``panelclv.training``    — the training loop (``fit_model``, ...).
 - ``panelclv.tuning``      — Optuna architecture / covariate-subset search.
 - ``panelclv.evaluation``  — metrics, plotting, forecast diagnostics, prediction CSV I/O.

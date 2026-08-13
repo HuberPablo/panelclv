@@ -15,9 +15,9 @@ It holds two things a reader should not expect to find elsewhere:
 - ``refit`` — the warm-start fine-tune over the full calibration window that produces
   every forecast in this package (ADR-0008).
 
-It sits at the top of the dependency stack and imports from ``panelclv.tuning`` and
-``panelclv.training`` — never ``panelclv.models``, which it reaches only through the
-tuning registry's builders.
+It sits at the top of the dependency stack and imports from ``panelclv.tuning``,
+``panelclv.training`` and ``panelclv.registry`` — never ``panelclv.models``, which it
+reaches only through the registry's builders (ADR-0006).
 """
 
 from .loaders import (

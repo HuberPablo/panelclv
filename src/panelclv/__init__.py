@@ -9,12 +9,15 @@ a single concern:
 - ``panelclv.models`` — model definitions only: the LSTM/Transformer architectures,
   their loss functions, and the autoregressive Monte Carlo simulator (the model's
   forecast mechanism).
+- ``panelclv.registry`` — the one table declaring every model: its search space, its
+  builder and the rollout it forecasts through (ADR-0006).
 - ``panelclv.training`` — the training loop (``fit_model`` and friends).
 - ``panelclv.tuning`` — Optuna architecture / covariate-subset search.
 - ``panelclv.evaluation`` — metrics, plotting, forecast diagnostics, prediction CSV I/O.
 - ``panelclv.benchmarks`` — the non-neural Pareto/NBD comparator (hierarchical Bayes).
 - ``panelclv.trials`` — assembling and refitting one trial (the ADR-0001 split,
   the ADR-0008 refit).
+- ``panelclv.studies`` — running many studies across many models, and archiving them.
 - ``panelclv.data_preparation`` — panel/dataset construction and the leak-free
   autoregressive feature engineering used by the simulator.
 - ``panelclv.configs`` — schema-driven input/transformation specs and the
@@ -22,7 +25,7 @@ a single concern:
 
 Submodules are imported explicitly (e.g. ``from panelclv.tuning import
 run_optuna_study``) rather than eagerly here, so importing ``panelclv`` itself
-stays cheap and does not pull in torch until a model module is actually used.
+stays cheap.
 """
 
 __version__ = "0.1.0"

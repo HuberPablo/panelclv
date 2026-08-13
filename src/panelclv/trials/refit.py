@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+# Models are built through the registry rather than constructed here, so this module
+# never has to know which architectures exist (ADR-0006).
+from panelclv.registry import build_model
 from panelclv.training.training_utils import refit_full_calibration
-# Models are built through the tuning registry rather than constructed here, so this
-# module never has to know which architectures exist.
 from panelclv.tuning.optuna_tuning import (
     select_features_for_trial,
     _build_inference_model_for,
-    _build_model_for,
 )
 
 from .loaders import refit_loader
@@ -77,8 +77,8 @@ def build_inference_from_trial(
         target_col=data_best["target_col"],
     )
 
-    # Same registry the training path builds through, so the inference model always
-    # matches the trained one it will load a state_dict from.
+    # Built from the same params the training path used, so the rollout model matches
+    # the trained one it will load a state_dict from.
     inference_model, _ = _build_inference_model_for(family, params, common)
 
     state = torch.load(checkpoint_path, map_location="cpu")
@@ -148,10 +148,10 @@ def refit_best_trial(
         "target_col":    data_best["target_col"],
         "seq_len":       data_best["samples"].shape[1],
     }
-    # Built through the tuning registry, so a model type reaches refit only if it is
-    # wired everywhere else too — and an unregistered one raises here rather than
-    # silently refitting another architecture.
-    model: torch.nn.Module = _build_model_for(family, params, train_recipe)
+    # Built through the registry, so a model type reaches refit only if it is wired
+    # everywhere else too — and an unregistered one raises here rather than silently
+    # refitting another architecture.
+    model: torch.nn.Module = build_model(family, params, train_recipe)
 
     result = refit_full_calibration(
         model,

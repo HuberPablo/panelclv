@@ -7,10 +7,10 @@ study, forecasts it, and archives everything under ``Studies/<study_name>/`` (se
 tree). The user only writes two dataclasses:
 
 - ``ModelSpec`` — one per model: the same arguments already passed to
-  ``run_optuna_study`` (``model_type``, the ``data_info`` training-knobs dict,
-  ``n_trials``), plus ``pareto_kwargs`` for the non-Optuna Pareto/NBD baseline.
-  The hyperparameter/feature search space lives inside ``run_optuna_study`` /
-  ``make_data_builder``, so it is intentionally NOT restated here.
+  ``run_optuna_study`` (``model_type``, the ``search_space`` overrides, the
+  ``training`` knobs, ``n_trials``), plus ``pareto_kwargs`` for the non-Optuna
+  Pareto/NBD baseline. Anything a spec leaves out of ``search_space`` keeps the
+  range the model's registry entry declares.
 - ``StudySuiteConfig`` — the suite-wide settings: where to write, how many studies
   per model, and the single shared ``prepare_dataset`` dict (``data``) used by
   every model.
@@ -25,10 +25,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Recognised model families. The neural families go through Optuna; the
-# Pareto/NBD baseline is a single deterministic fit (no tuning, one prediction).
-NEURAL_MODEL_TYPES = ("lstm", "transformer", "valendin_lstm")
-VALID_MODEL_TYPES = NEURAL_MODEL_TYPES + ("pareto_nbd",)
+# Which model families exist is the registry's business, not this file's: the suite
+# accepts exactly the types declared there (ADR-0006). Neural ones go through Optuna;
+# a non-neural entry (Pareto/NBD) is a single deterministic fit — no tuning, one
+# prediction — which ``is_neural`` reads off the entry rather than a second list.
+from panelclv.registry import MODEL_TYPES, is_neural
 
 # Keys the runner reads off the shared ``prepare_dataset`` dict. Checked up front
 # so a dict that did not come from ``prepare_dataset`` fails clearly rather than
@@ -45,14 +46,22 @@ class ModelSpec:
     name
         Folder name for this model under the study root (e.g. ``"LSTM"``).
     model_type
-        ``"lstm"``, ``"transformer"``, ``"valendin_lstm"`` (Optuna-tuned) or
-        ``"pareto_nbd"`` (baseline). ``"valendin_lstm"`` is the frozen published
-        benchmark: its architecture is fixed, so only training hyperparameters
-        (learning rate, weight decay, batch size) are searched.
-    data_info
-        The training-knobs dict from the README quickstart (``n_epochs``,
-        ``patience``, ``loss_type``, …). Ignored for ``pareto_nbd``. The runner
-        adds ``seed`` and ``checkpoint_dir`` per study; do not set them here.
+        Any key of the model registry: ``"lstm"``, ``"transformer"``,
+        ``"valendin_lstm"`` (Optuna-tuned) or ``"pareto_nbd"`` (baseline).
+        ``"valendin_lstm"`` is the frozen published benchmark: its architecture is
+        fixed, so only training hyperparameters (learning rate, weight decay, batch
+        size) are searched.
+    search_space
+        Per-hyperparameter overrides of the registry entry's default range, in the
+        ``registry.suggest_param`` mini-language (a ``{...}`` set is a categorical, a
+        ``(lo, hi, "log"|"int")`` tuple a range, a scalar is pinned). Omitted
+        parameters keep the entry's own range; a key the model does not have raises.
+        Ignored for ``pareto_nbd``.
+    training
+        The controls that are not searched: ``n_epochs``, ``patience``,
+        ``loss_type``, ``class_weights``, ``focal_gamma``, ``grad_clip``,
+        ``verbose``, ``log_wandb``. Ignored for ``pareto_nbd``. The runner adds
+        ``seed`` and ``checkpoint_dir`` per study; do not set them here.
     n_trials
         Optuna trials per study. Ignored for ``pareto_nbd``.
     pareto_kwargs
@@ -64,7 +73,8 @@ class ModelSpec:
 
     name: str
     model_type: str
-    data_info: dict[str, Any] = field(default_factory=dict)
+    search_space: dict[str, Any] = field(default_factory=dict)
+    training: dict[str, Any] = field(default_factory=dict)
     n_trials: int = 50
     pareto_kwargs: dict[str, Any] = field(default_factory=dict)
 
@@ -74,7 +84,8 @@ class ModelSpec:
 
     @property
     def is_neural(self) -> bool:
-        return self.model_type in NEURAL_MODEL_TYPES
+        """Whether this model trains, read off its registry entry (ADR-0006)."""
+        return is_neural(self.model_type)
 
 
 @dataclass
@@ -144,9 +155,9 @@ class StudySuiteConfig:
             raise ValueError(f"ModelSpec names must be unique; duplicates: {dupes}")
 
         for m in self.models:
-            if m.model_type not in VALID_MODEL_TYPES:
+            if m.model_type not in MODEL_TYPES:
                 raise ValueError(
-                    f"model {m.name!r}: model_type must be one of {VALID_MODEL_TYPES}, "
+                    f"model {m.name!r}: model_type must be one of {MODEL_TYPES}, "
                     f"got {m.model_type!r}"
                 )
 

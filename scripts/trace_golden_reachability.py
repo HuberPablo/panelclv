@@ -18,8 +18,7 @@ look like dead code:
 All four are imported verbatim from `tests/test_golden_end_to_end.py`, which pins their
 outcomes — so what this script traces is exactly what the suite asserts. That import also
 pulls in the package before tracing starts, so anything that runs at *import* time is
-outside the trace: `benchmarks.__getattr__`, the lazy-torch hook, is the one symbol this
-costs, and it is private.
+outside the trace.
 
 **Reached is proof of life. Unreached is not proof of death.** These scenarios are a
 single small synthetic panel with no covariates, no Optuna search, no study suite and no

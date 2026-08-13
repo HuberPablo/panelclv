@@ -7,7 +7,7 @@ config and calls the existing pieces:
         -> make_data_builder                 (panelclv.trials)
         -> run_optuna_study                  (panelclv.tuning)
         -> refit_best_trial                  (panelclv.trials)
-        -> mc_forecast / mc_forecast_transformer         (panelclv.models)
+        -> the rollout its registry entry declares       (panelclv.registry)
         -> save_predictions_to_csv           (panelclv.evaluation)
         -> compute_forecast_metrics          (panelclv.models)
 
@@ -32,23 +32,13 @@ import pandas as pd
 
 from panelclv.benchmarks import compute_pareto_predictions
 from panelclv.evaluation.plot_utils import save_predictions_to_csv
-from panelclv.models import compute_forecast_metrics, mc_forecast, mc_forecast_transformer
+from panelclv.models import compute_forecast_metrics
+from panelclv.registry import rollout_for
 from panelclv.trials import make_data_builder, refit_best_trial
 from panelclv.tuning import run_optuna_study
 
 from .config import StudySuiteConfig, ModelSpec
 from . import layout
-
-# Map the LSTM/Transformer family to its Monte Carlo forecaster (the two rollouts
-# differ because the architectures carry history differently — see
-# monte_carlo_forecasting.py).
-# The Valendin benchmark is a stateful LSTM, so it rolls out through the same
-# simulator as our own LSTM — only the architecture differs.
-_FORECASTERS = {
-    "lstm": mc_forecast,
-    "transformer": mc_forecast_transformer,
-    "valendin_lstm": mc_forecast,
-}
 
 # Period length (days) per PanelConfig.frequency, for the Pareto/NBD RFM summary.
 _PERIOD_DAYS = {"daily": 1.0, "weekly": 7.0, "monthly": 30.0}
@@ -89,7 +79,10 @@ def _run_neural_model(
     model_dir = dirs["model_dir"]
     layout.write_json(model_dir / "config.json", _model_record(spec, config))
 
-    forecaster = _FORECASTERS[spec.model_type]
+    # Which Monte Carlo simulator this architecture must roll out through is declared
+    # by its registry entry (ADR-0006), not chosen here: the two rollouts carry history
+    # differently, and the wrong pairing produces a wrong forecast rather than an error.
+    forecaster = rollout_for(spec.model_type)
     rows: list[dict[str, Any]] = []
 
     for i in range(1, config.n_studies_per_model + 1):
@@ -98,17 +91,19 @@ def _run_neural_model(
         sdir.mkdir(parents=True, exist_ok=True)
 
         # The runner owns seed + checkpoint_dir (per study) so studies never share
-        # weights; everything else is the user's data_info verbatim. A fresh
-        # TPESampler(seed) makes the X studies genuine independent replications.
-        data_info = {
-            **spec.data_info,
+        # weights; every other training knob is the user's verbatim, and the search
+        # space is theirs untouched. A fresh TPESampler(seed) makes the X studies
+        # genuine independent replications.
+        training = {
+            **spec.training,
             "seed": seed,
             "checkpoint_dir": str(sdir / "checkpoints"),
         }
         study = run_optuna_study(
             model_type=spec.model_type,
             data_builder=make_data_builder(config.data),
-            data_info=data_info,
+            search_space=spec.search_space,
+            training=training,
             n_trials=spec.n_trials,
             device=config.device,
             study_name=f"study_{i:02d}",
@@ -245,7 +240,8 @@ def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
                 "name": m.name,
                 "model_type": m.model_type,
                 "n_trials": m.n_trials,
-                "data_info": m.data_info,
+                "search_space": m.search_space,
+                "training": m.training,
                 "pareto_kwargs": m.pareto_kwargs,
             }
             for m in config.models
@@ -273,7 +269,8 @@ def _model_record(spec: ModelSpec, config: StudySuiteConfig) -> dict[str, Any]:
     }
     if spec.is_neural:
         record["n_trials"] = spec.n_trials
-        record["data_info"] = spec.data_info
+        record["search_space"] = spec.search_space
+        record["training"] = spec.training
         record["refit_kwargs"] = config.refit_kwargs
         record["seeds"] = [
             config.base_seed + i for i in range(1, config.n_studies_per_model + 1)

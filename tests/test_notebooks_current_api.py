@@ -63,6 +63,12 @@ RETIRED = [
     (r"panelclv\.experiments", "the subpackage is `panelclv.trials`"),
     (r"make_loaders", "the temporal split is `trials.split_calibration`"),
     (r"make_refit_loader", "it is `trials.refit_loader`"),
+    # Retired by the package cleanup, issue 06: one registry entry per model.
+    (r"data_info",
+     "the search-space overrides and the training controls are two fields: "
+     "`search_space` and `training`"),
+    (r"VALID_MODEL_TYPES|NEURAL_MODEL_TYPES",
+     "the model types are the registry table's keys, and neural is `is_neural`"),
 ]
 
 

@@ -395,7 +395,7 @@ Paired with a tuning run that is allowed to question the risky channels:
 study = run_optuna_study(
     model_type="lstm",
     data_builder=make_data_builder(data_full),
-    data_info={...},
+    search_space={...},
     removable_features=[("week_sin", "week_cos"), "year_idx",
                         "Gender", "Income", "transaction_rate"],
     n_trials=40,

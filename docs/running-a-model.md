@@ -460,12 +460,14 @@ happens once per trial, with the hyperparameters *and the feature set* varying.
 study = run_optuna_study(
     model_type="lstm",
     data_builder=make_data_builder(data_full),
-    data_info={
-        "n_epochs": 2, "patience": 2, "checkpoint_dir": tmp, "seed": 42,
-        "loss_type": "cross_entropy",
+    search_space={
         "embedding_dim": {8}, "lstm_hidden_size": {8}, "dense_units": {8},
         "dropout": {0.0}, "learning_rate": (1e-3, 1e-2, "log"),
         "weight_decay": 0.0, "batch_size": {8},
+    },
+    training={
+        "n_epochs": 2, "patience": 2, "checkpoint_dir": tmp, "seed": 42,
+        "loss_type": "cross_entropy",
     },
     n_trials=2, device="cpu",
     study_name="probe", append_timestamp=False, summary_dir=tmp,
@@ -473,10 +475,11 @@ study = run_optuna_study(
 )
 ```
 
-### 5.1 `data_info` is the search space
+### 5.1 `search_space` and `training`
 
-One dict carries both the search space and the training controls, in a small spec
-language read by `_suggest_param`:
+Two dicts, because they are two things. `search_space` overrides what the model
+searches; `training` carries the controls that are not searched. Both read the same
+small spec language, `registry.suggest_param`:
 
 | spec | meaning |
 |---|---|
@@ -488,11 +491,13 @@ language read by `_suggest_param`:
 | `(0.0, 0.4, 0.1)` | float on a step grid |
 | `0.0` scalar | **fixed** — no trial parameter registered |
 
-Anything not supplied falls back per-key to `LSTM_SEARCH_DEFAULTS`. Keys are
-validated up front by `validate_data_info` against the model's search defaults plus a
-whitelist of non-search keys (`n_epochs`, `patience`, `checkpoint_dir`, `verbose`,
-`loss_type`, `class_weights`, `focal_gamma`, `grad_clip`, `log_wandb`, `seed`), so a
-typo raises before the first trial rather than being silently ignored.
+Anything not supplied falls back per-key to the range the model's registry entry
+declares. `search_space` keys are validated up front against that entry, so a typo
+raises before the first trial rather than being silently ignored. `training` holds
+`n_epochs`, `patience`, `checkpoint_dir`, `verbose`, `loss_type`, `class_weights`,
+`focal_gamma`, `grad_clip`, `log_wandb` and `seed`; the first two are training
+control but may still be handed a spec (`"patience": {5, 7, 9}`), so they go through
+the same mini-language.
 
 The scalar row is a trap — see [Gotchas](#14-gotchas-and-invariants).
 
@@ -518,7 +523,7 @@ study names refers to.
 ```mermaid
 flowchart TD
     START["run_optuna_study<br/>n_trials"] --> T["objective(trial)"]
-    T --> SP["suggest_lstm_params<br/>merge data_info over LSTM_SEARCH_DEFAULTS"]
+    T --> SP["registry.suggest_params<br/>merge search_space over the entry's ranges"]
     SP --> CS["suggest_covariate_selection<br/>one boolean per removable entry"]
     CS --> DB["data_builder(drop_cols, batch_size)<br/>= select_features + split_calibration"]
     DB --> BM["_build_lstm<br/>ProjectedEmbedder + MultinomialLSTMModel"]
@@ -680,7 +685,8 @@ config = StudySuiteConfig(
     base_seed=42,
     models=[
         ModelSpec(name="LSTM", model_type="lstm", n_trials=100,
-                  data_info={"n_epochs": 100, "patience": {5, 7, 9}, ...}),
+                  search_space={"dropout": {0.0, 0.2, 0.4}, ...},
+                  training={"n_epochs": 100, "patience": {5, 7, 9}}),
         ModelSpec(name="ParetoNBD", model_type="pareto_nbd"),
     ],
 )
@@ -688,35 +694,29 @@ run_study_suite(config)
 ```
 
 `studies/config.py` holds both dataclasses and `validate()`, which checks the base
-directory exists, model names are unique, `model_type` is in `VALID_MODEL_TYPES`
-(`lstm`, `transformer`, `valendin_lstm`, `pareto_nbd`) and `data` carries the
-required keys — all before any training starts.
+directory exists, model names are unique, `model_type` is a key of the model
+registry (`lstm`, `transformer`, `valendin_lstm`, `pareto_nbd`) and `data` carries
+the required keys — all before any training starts.
 
 For each neural model, for `i` in `1..n_studies_per_model`:
 
 1. `seed = base_seed + i`, and a study directory `Optuna_Studies/study_{i:02d}`.
-2. `data_info` is augmented with that seed and a per-study `checkpoint_dir` — **the
+2. `training` is augmented with that seed and a per-study `checkpoint_dir` — **the
    runner owns the seed**, so a `ModelSpec` cannot accidentally pin one.
 3. `run_optuna_study(..., sampler=TPESampler(seed=seed), append_timestamp=False)`.
 4. `refit_best_trial` — the only route to a forecast-ready model (ADR-0008).
-5. `_FORECASTERS[model_type]` runs the rollout at `n_simulations`.
+5. `registry.rollout_for(model_type)` runs the rollout at `n_simulations`.
 6. Predictions to CSV, `compute_forecast_metrics`, one row appended.
 
-`_FORECASTERS` is the dispatch table that decides which simulator a model type gets:
+Which simulator a model type gets is declared by its registry entry, not chosen
+here — the recurrent models roll out through `run_monte_carlo_forecast` and the
+Transformer through `run_monte_carlo_forecast_transformer`, and the wrong pairing
+would produce a wrong forecast rather than an error.
 
-```python
-_FORECASTERS = {
-    "lstm":          mc_forecast,               # stateful rollout
-    "transformer":   mc_forecast_transformer,   # growing-context rollout
-    "valendin_lstm": mc_forecast,               # stateful, same as our LSTM
-}
-```
-
-Adding a model means registering it in three places — `studies/config.py`
-(`VALID_MODEL_TYPES`), `studies/runner.py` (`_FORECASTERS`), and
-`tuning/optuna_tuning.py` (`_SEARCH_DEFAULTS`, `_SUGGESTERS`, `_BUILDERS` and a
-branch in `_build_inference_model_for`). Missing the second fails only after
-training completes.
+Adding a model means one entry in `registry/model_registry.py` (ADR-0006): its
+search space, how that space is sampled, how the training model is built, and the
+rollout it forecasts through. Every model-type list in the package derives from that
+table's keys.
 
 ---
 
@@ -781,7 +781,7 @@ value per (group, metric) and no spread.
 
 Same pipeline. Four divergences.
 
-**1 — Search space.** `TRANSFORMER_SEARCH_DEFAULTS`: `d_model {32,64,128}`,
+**1 — Search space.** Its registry entry declares `d_model {32,64,128}`,
 `nhead {2,4,8}`, `num_encoder_layers (1,3,"int")`, `dropout (0.0,0.4)`, plus the
 shared `learning_rate` / `weight_decay` / `batch_size`. `suggest_transformer_params`
 resolves `d_model` and `nhead` first and raises `optuna.TrialPruned` when
@@ -806,7 +806,8 @@ encoding indexes holdout step *t* at `T_CAL + t`, matching training. A single-st
 feed would reset the position to 0 and drop all history. The model is called with
 `only_last=True`.
 
-**4 — Dispatch.** `_FORECASTERS["transformer"] = mc_forecast_transformer`, and
+**4 — Dispatch.** Its registry entry declares `run_monte_carlo_forecast_transformer`
+as its rollout, and
 `build_inference_from_trial` drops a stale `_cached_mask` key before
 `load_state_dict` (older checkpoints persisted the causal mask; a no-op for the LSTM).
 
@@ -872,12 +873,12 @@ isolate architecture.
 **In the pipeline** it is `model_type="valendin_lstm"` and behaves like any other
 neural model, with two differences:
 
-- `VALENDIN_SEARCH_DEFAULTS` holds **only** `learning_rate`, `weight_decay` and
-  `batch_size`. The widths are the published `memory_units=128` / `dense_units=128`
-  and never enter the search — tuning a width would quietly unfreeze the reference.
-  `_build_inference_model_for` reads no architecture params at all for this type.
+- Its registry entry's search space holds **only** `learning_rate`, `weight_decay`
+  and `batch_size`. The widths are the published `memory_units=128` /
+  `dense_units=128` and never enter the search — tuning a width would quietly
+  unfreeze the reference. Its builder reads no architecture params at all.
 - `InferenceValendinLSTMModel` returns `(sample, state)` with the same contract as
-  ours, so `_FORECASTERS["valendin_lstm"] = mc_forecast` — the identical stateful
+  ours, so its entry declares `run_monte_carlo_forecast` — the identical stateful
   rollout, no special-casing.
 
 Deliberate departures that stay: the temporal validation split (ADR-0001) and Optuna
@@ -905,7 +906,7 @@ match exactly — Keras carries one bias vector per gate, PyTorch two, so ours h
 Failure modes that surface late, silently, or both.
 
 **Pinning an architecture hyperparameter to a scalar breaks the rebuild.** A scalar
-in `data_info` is returned as-is and **no trial parameter is registered**, so it
+in `search_space` is returned as-is and **no trial parameter is registered**, so it
 never appears in `best_params`. But `build_inference_from_trial` rebuilds from
 `study.best_trial.params` and indexes required keys directly. Pinning `dropout` to
 `0.0` and running a study raises, after every trial has finished training:

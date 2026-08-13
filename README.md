@@ -60,8 +60,8 @@ data_full = dynamic_panel_dataset.prepare_dataset(panel, cfg)
 study = run_optuna_study(
     model_type="lstm",
     data_builder=make_data_builder(data_full),
-    data_info={"n_epochs": 150, "patience": 7,
-               "checkpoint_dir": "./checkpoints/lstm_optuna", "loss_type": "cross_entropy"},
+    training={"n_epochs": 150, "patience": 7,
+              "checkpoint_dir": "./checkpoints/lstm_optuna", "loss_type": "cross_entropy"},
     n_trials=30,
 )
 

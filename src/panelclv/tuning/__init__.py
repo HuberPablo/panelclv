@@ -3,8 +3,9 @@
 Model selection sits a layer *above* both the model and the training loop: it
 repeatedly builds, trains and scores candidate models to choose architecture and
 feature subsets. It is model-aware (it builds each candidate from the same
-constructors the training path uses) but is not part of the model definition —
-hence its own subpackage.
+constructors the training path uses, through ``panelclv.registry``) but is not part
+of the model definition — hence its own subpackage. Which model types exist, and what
+each one searches, is declared in the registry (ADR-0006), not here.
 """
 
 from .optuna_tuning import (
@@ -12,7 +13,6 @@ from .optuna_tuning import (
     select_features,
     select_features_for_trial,
     validate_removable_features,
-    validate_data_info,
 )
 
 __all__ = [
@@ -20,5 +20,4 @@ __all__ = [
     "select_features",
     "select_features_for_trial",
     "validate_removable_features",
-    "validate_data_info",
 ]

@@ -17,6 +17,7 @@ import pytest
 SUBPACKAGES = [
     "panelclv",
     "panelclv.models",
+    "panelclv.registry",
     "panelclv.training",
     "panelclv.tuning",
     "panelclv.evaluation",
@@ -46,6 +47,7 @@ def test_public_api_resolves_from_new_homes():
     from panelclv.evaluation import metrics_table, plot_weekly_aggregated
     from panelclv.benchmarks import compute_pareto_predictions
     from panelclv.trials import make_data_builder, build_inference_from_trial
+    from panelclv.registry import MODEL_TYPES, build_model, is_neural, rollout_for  # noqa: F401
 
     # `mc_forecast` is documented as an alias for `run_monte_carlo_forecast`.
     assert mc_forecast is run_monte_carlo_forecast
@@ -192,3 +194,66 @@ def test_refit_is_the_only_forecast_source():
 
     # The two halves the old catch-all split into, under their current names.
     from panelclv.trials import CalibrationSplit, refit_loader, split_calibration  # noqa: F401
+
+
+def test_the_model_set_is_enumerated_once():
+    """The seven scattered model-type enumerations are gone — issue 06.
+
+    ADR-0006: a model is one entry in `panelclv.registry`, and every list of model
+    types derives from that table's keys. The names below were the copies — a
+    valid-types list, a neural list, a per-model search-defaults map, a suggester
+    map, a builder map, and the suite's own forecaster map — and each re-added one
+    would be a second place to register a model, which is the failure that used to
+    surface only after training completed.
+    """
+    from panelclv.registry import MODEL_TYPES, is_neural
+    import panelclv.studies.config as studies_config
+    import panelclv.studies.runner as runner
+    import panelclv.tuning as tuning
+    from panelclv.tuning import optuna_tuning
+
+    for name in ("VALID_MODEL_TYPES", "NEURAL_MODEL_TYPES"):
+        assert not hasattr(studies_config, name), f"{name} should derive from the registry"
+    assert not hasattr(runner, "_FORECASTERS"), \
+        "the rollout is declared by the registry entry, not a second map"
+    for name in ("_SEARCH_DEFAULTS", "_SUGGESTERS", "_BUILDERS",
+                 "LSTM_SEARCH_DEFAULTS", "TRANSFORMER_SEARCH_DEFAULTS",
+                 "VALENDIN_SEARCH_DEFAULTS", "validate_data_info"):
+        assert not hasattr(optuna_tuning, name), f"{name} should have been retired"
+    assert not hasattr(tuning, "validate_data_info"), \
+        "the search space is validated against the registry entry that declares it"
+
+    # `pareto_nbd` is IN the table (declaratively), which is what lets both lists
+    # derive from it rather than one of them carrying a hand-written addend.
+    assert "pareto_nbd" in MODEL_TYPES and not is_neural("pareto_nbd")
+
+
+def test_model_spec_separates_search_space_from_training():
+    """`data_info` carried both and was policed by a hand-maintained allowlist — issue 06.
+
+    Splitting it means a misplaced key lands in the wrong *field*, where the search
+    space is validated against the registry entry that declares it, rather than
+    against a list of non-search keys someone has to remember to extend.
+    """
+    import dataclasses
+
+    from panelclv.studies import ModelSpec
+
+    fields = {f.name for f in dataclasses.fields(ModelSpec)}
+    assert "data_info" not in fields
+    assert {"search_space", "training"} <= fields
+
+
+def test_torch_is_not_imported_lazily_anywhere():
+    """The torch-free idea is gone, not just unenforced — issue 06.
+
+    Torch is a hard dependency, so deferring an import never bought the ability to
+    run without it; `panelclv.benchmarks` carried ~30 lines of PEP 562 lazy loader
+    to protect a property `panelclv.studies` does not have anyway.
+    """
+    import panelclv.benchmarks as benchmarks
+
+    assert not hasattr(benchmarks, "_LAZY")
+    assert "__getattr__" not in vars(benchmarks)
+    # The names it deferred resolve as ordinary module attributes.
+    assert benchmarks.ValendinLSTMModel.__module__.endswith("valendin_lstm")

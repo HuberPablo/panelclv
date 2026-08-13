@@ -13,6 +13,9 @@ wrong breaks everything downstream, so it is worth stating plainly:
 
 - The model emits a softmax over transaction-count classes at each period — logits
   of shape `(B, T, K)`, where a count is a **category**, never a quantity.
+- The target's own column is one of the model's inputs, and the number of classes it
+  can take is the size of that softmax head. `Embedder` refuses to build a model
+  where those disagree.
 - It trains by cross-entropy against a class index.
 - A forecast is a **rollout**: warm up on the calibration window, then step through
   the holdout one period at a time, sampling a count and feeding that sample back as
@@ -42,8 +45,10 @@ them and there is no umbrella re-export — import from the subpackage that owns
 
 - `models` — architectures under development, their losses, and the Monte Carlo
   simulator (ADR-0002).
+- `registry` — the one table declaring every model: its search space, its builder and
+  the rollout it forecasts through (ADR-0006).
 - `benchmarks` — frozen reference implementations we reproduce, not develop
-  (ADR-0004). Torch is imported lazily here.
+  (ADR-0004).
 - `data_preparation` — panel to model-ready tensors, and leak-free autoregressive
   features.
 - `configs` — `PanelConfig`, which carries every column role, window date and
@@ -76,18 +81,13 @@ it.
 the intent of a block, what a tensor's shape means, why a step exists. Explain the
 non-obvious.
 
-**Adding a model** touches three places, and missing the second fails only after
-training completes:
-
-1. `studies/config.py` — `VALID_MODEL_TYPES`
-2. `studies/runner.py` — `_FORECASTERS`
-3. `tuning/optuna_tuning.py` — a `suggest_*_params` branch
+**Adding a model** touches one place: an entry in the model registry, holding its
+search space, its builder and the rollout function it forecasts through. Every
+model-type list in the package derives from that table's keys, and whether a type
+is neural is read off the entry rather than restated.
 
 **Invariants worth knowing before you hit them:**
 
-- The target column appears in both `seq_cols` and `embedded_cols`; its cardinality
-  sets the softmax head size.
-- `clip_target_upper` caps counts and therefore sets that head size.
 - An inference model loads its `state_dict` from the trained model, so their
   constructor arguments must match.
 
@@ -96,8 +96,6 @@ training completes:
 The project venv is `/home/virthian/Desktop/Thesis/venvs/thesis_rocm/` (PyTorch on
 ROCm). Run code with its interpreter. It is **user-maintained: leave its packages
 exactly as they are.** When a dependency is missing, say so and stop.
-
-Data preparation needs only numpy and pandas, so it runs without loading torch.
 
 ## Agent skills
 

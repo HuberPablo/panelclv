@@ -1,12 +1,13 @@
-"""Optuna tuning for the multinomial LSTM / Transformer baselines.
+"""Optuna tuning for the models the registry declares.
 
-One file, two search spaces (`suggest_lstm_params` / `suggest_transformer_params`),
-one shared `objective`. Each trial samples an architecture + training HPs (and,
-optionally, a covariate subset), trains via `training_utils.fit_model` — which
-optimises classification cross-entropy and owns the loss curve, early stopping,
-and per-epoch pruning reports — then returns that same cross-entropy, scored on
-the temporal validation window (ADR-0001), to Optuna. Selection and training
-therefore minimise one number.
+One shared `objective` over every registered model type: what each one searches, how
+that space is sampled and how the model is built all come from its registry entry
+(ADR-0006), so this file holds the *search*, not a list of architectures. Each trial
+samples an architecture + training HPs (and, optionally, a covariate subset), trains
+via `training_utils.fit_model` — which optimises classification cross-entropy and
+owns the loss curve, early stopping, and per-epoch pruning reports — then returns
+that same cross-entropy, scored on the temporal validation window (ADR-0001), to
+Optuna. Selection and training therefore minimise one number.
 
 data_builder contract
 ---------------------
@@ -61,16 +62,48 @@ import torch
 # training loop lives in `panelclv.training`. After the subpackage split these are
 # cross-package imports, so they are absolute rather than relative.
 from panelclv.models.embedders import ProjectedEmbedder
-from panelclv.models.multinomial_lstm import MultinomialLSTMModel, InferenceMultinomialLSTMModel
-from panelclv.models.multinomial_transformer import (
-    MultinomialTransformerModel,
-    InferenceMultinomialTransformerModel,
-)
+from panelclv.models.multinomial_lstm import InferenceMultinomialLSTMModel
+from panelclv.models.multinomial_transformer import InferenceMultinomialTransformerModel
 from panelclv.models.monte_carlo_forecasting import (
     run_monte_carlo_forecast,
     run_monte_carlo_forecast_transformer,
 )
+# Which architectures exist, what they search and how they are built is declared once,
+# in the registry (ADR-0006). This module searches; it does not enumerate models.
+from panelclv.registry import (
+    MODEL_TYPES,
+    build_model,
+    is_neural,
+    suggest_param,
+    suggest_params,
+    validate_model_knobs,
+)
 from panelclv.training.training_utils import fit_model
+
+
+# The `training` keys this module reads — every one appears as a `training.get(...)`
+# in `objective` or `run_optuna_study` below. Kept next to the reads it describes so
+# the two cannot drift, and checked up front because a misspelled control
+# (`"paitence"`) is otherwise dropped in silence and discovered only in the loss
+# curve. The search-space half of the same question belongs to the registry entry,
+# which declares what each model searches.
+TRAINING_CONTROLS: frozenset[str] = frozenset({
+    "n_epochs", "patience",          # training control (scalar, or a search spec)
+    "checkpoint_dir", "verbose",     # bookkeeping
+    "loss_type", "class_weights", "focal_gamma",   # loss configuration
+    "grad_clip", "log_wandb", "seed",              # optimiser / logging / RNG
+})
+
+
+def _validate_training(model_type: str, training: dict[str, Any]) -> None:
+    """Fail fast on a training control this module would silently ignore."""
+    unknown = [k for k in training if k not in TRAINING_CONTROLS]
+    if unknown:
+        raise ValueError(
+            f"Unrecognised training key(s) for model_type={model_type!r}: "
+            f"{sorted(unknown)}. Recognised controls: {sorted(TRAINING_CONTROLS)}; "
+            f"hyperparameters go in `search_space`."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -237,321 +270,19 @@ def select_features_for_trial(
     return select_features(data, dropped)
 
 
-# ---------------------------------------------------------------------------
-# Per-model search spaces
-# ---------------------------------------------------------------------------
-
-
-# Hardcoded fallback search spaces. These are used per-parameter ONLY when the
-# caller's `data_info` does not specify that parameter, so the historical
-# behaviour (caller passes no search keys) is reproduced exactly. Each value is a
-# "spec" in the mini-language `_suggest_param` understands (see its docstring):
-#   set            -> categorical over those values
-#   (lo, hi)       -> float, uniform
-#   (lo, hi,'log') -> float, log scale
-#   (lo, hi,'int') -> integer
-#   (lo, hi, step) -> float on a step grid
-#   scalar         -> fixed (not searched)
-LSTM_SEARCH_DEFAULTS: dict[str, Any] = {
-    "embedding_dim":    {64, 128, 256},
-    "lstm_hidden_size":  {32, 64, 128},
-    "dense_units":   {32, 64, 128},
-    "dropout":       (0.0, 0.4),
-    "learning_rate": (1e-4, 3e-3, "log"),
-    "weight_decay":  (1e-6, 1e-2, "log"),
-    "batch_size":    {64, 128, 256},
-}
-
-TRANSFORMER_SEARCH_DEFAULTS: dict[str, Any] = {
-    "d_model":            {32, 64, 128},
-    "nhead":              {2, 4, 8},
-    "num_encoder_layers": (1, 3, "int"),
-    "dropout":            (0.0, 0.4),
-    "learning_rate":      (1e-4, 3e-3, "log"),
-    "weight_decay":       (1e-6, 1e-2, "log"),
-    "batch_size":         {64, 128, 256},
-}
-
-# The Valendin benchmark's architecture is FROZEN (ADR-0004): its widths are the
-# published `memory_units = 128` / `dense_units = 128`, and its embeddings are raw
-# sqrt(n)+1 vectors, so none of them appear here. Only training hyperparameters are
-# searched — Optuna over fixed sizes is the deliberate departure ADR-0004 records, and
-# searching a width would quietly unfreeze the reference implementation.
-VALENDIN_SEARCH_DEFAULTS: dict[str, Any] = {
-    "learning_rate": (1e-4, 3e-3, "log"),
-    "weight_decay":  (1e-6, 1e-2, "log"),
-    "batch_size":    {64, 128, 256},
-}
-
-# `data_info` keys that are NOT search-space parameters — training control and
-# loss/logging settings. `n_epochs`/`patience` are special: they are training
-# control, but the caller may still hand them a search spec (e.g. patience over
-# {5,7,9}), so they are resolved through `_suggest_param` like a hyperparameter.
-# This whitelist is what `validate_data_info` checks against so a typo'd key
-# (e.g. "hiddendim") raises up front instead of being silently ignored.
-_NON_SEARCH_DATA_INFO_KEYS: frozenset[str] = frozenset({
-    "n_epochs", "patience",          # training control (scalar, or a search spec)
-    "checkpoint_dir", "verbose",     # bookkeeping
-    "loss_type", "class_weights", "focal_gamma",   # loss configuration
-    "grad_clip", "log_wandb", "seed",              # optimiser / logging / RNG
-})
-
-
-# Search space per model type. The four dispatch sites below read this rather than
-# each carrying its own `if model_type == ...` cascade, so a type registered here is
-# recognised by all of them or by none — never by some.
-_SEARCH_DEFAULTS: dict[str, dict[str, Any]] = {
-    "lstm": LSTM_SEARCH_DEFAULTS,
-    "transformer": TRANSFORMER_SEARCH_DEFAULTS,
-    "valendin_lstm": VALENDIN_SEARCH_DEFAULTS,
-}
-
-
-def _suggest_param(trial: optuna.Trial, name: str, spec: Any) -> Any:
-    """Turn one `data_info` spec into a value, sampling from `trial` if needed.
-
-    The spec mini-language lets the caller describe a search dimension (or a
-    fixed value) declaratively in the notebook, instead of editing this module:
-
-    - **scalar** (`int`/`float`/`str`/`bool`) -> returned as-is, FIXED. No trial
-      parameter is registered, so it never appears in `best_params`.
-    - **set / frozenset** -> `suggest_categorical` over the values (sorted for a
-      deterministic, reproducible category order).
-    - **list** -> `suggest_categorical` in the given order.
-    - **tuple** -> a numeric RANGE:
-        `(lo, hi)`          float, uniform
-        `(lo, hi, "log")`   float, log scale (for LR / weight decay)
-        `(lo, hi, "int")`   integer
-        `(lo, hi, step)`    float on a step grid (numeric 3rd element)
-
-    A clear `ValueError` is raised for malformed specs (e.g. an empty set or an
-    unknown range mode) so mistakes surface immediately, not as a silent default.
-    """
-    # bool is a subclass of int — check it within the scalar branch so a fixed
-    # boolean flag is returned verbatim rather than mis-read as a number.
-    if isinstance(spec, (bool, int, float, str)):
-        return spec
-    if isinstance(spec, (set, frozenset)):
-        if not spec:
-            raise ValueError(f"{name}: empty set of choices")
-        return trial.suggest_categorical(name, sorted(spec))
-    if isinstance(spec, list):
-        if not spec:
-            raise ValueError(f"{name}: empty list of choices")
-        return trial.suggest_categorical(name, spec)
-    if isinstance(spec, tuple):
-        if len(spec) == 2:
-            low, high = spec
-            return trial.suggest_float(name, float(low), float(high))
-        if len(spec) == 3:
-            low, high, mode = spec
-            if mode == "log":
-                return trial.suggest_float(name, float(low), float(high), log=True)
-            if mode == "int":
-                return trial.suggest_int(name, int(low), int(high))
-            if isinstance(mode, (int, float)) and not isinstance(mode, bool):
-                # numeric 3rd element = grid step
-                return trial.suggest_float(name, float(low), float(high), step=float(mode))
-            raise ValueError(
-                f"{name}: unknown range mode {mode!r}; use 'log', 'int', or a "
-                f"numeric step"
-            )
-        raise ValueError(
-            f"{name}: tuple spec must be (lo, hi), (lo, hi, 'log'|'int'), or "
-            f"(lo, hi, step); got {spec!r}"
-        )
-    raise ValueError(
-        f"{name}: unsupported spec {spec!r} (type {type(spec).__name__}). Use a "
-        f"set/list (categorical), a tuple (range), or a scalar (fixed)."
-    )
-
-
-def _merge_specs(
-    defaults: dict[str, Any], overrides: dict[str, Any] | None
-) -> dict[str, Any]:
-    """Per-parameter override: caller's spec wins, else the hardcoded default.
-
-    Only keys present in `defaults` are pulled from `overrides`; non-search
-    settings in `data_info` (checkpoint_dir, loss_type, ...) are ignored here.
-    """
-    overrides = overrides or {}
-    return {name: overrides.get(name, default) for name, default in defaults.items()}
-
-
-def validate_data_info(model_type: str, data_info: dict[str, Any]) -> None:
-    """Fail fast on unrecognised `data_info` keys, before any training runs.
-
-    The search space is now driven by `data_info`, so a typo'd hyperparameter
-    name (`"hiddendim"`) would otherwise be silently dropped and the default
-    range used instead — exactly the kind of silent miss this guard prevents.
-    """
-    if model_type not in _SEARCH_DEFAULTS:
-        raise ValueError(
-            f"Unknown model_type {model_type!r}; "
-            f"registered types: {sorted(_SEARCH_DEFAULTS)}"
-        )
-    search_keys = set(_SEARCH_DEFAULTS[model_type])
-    allowed = search_keys | set(_NON_SEARCH_DATA_INFO_KEYS)
-    unknown = [k for k in data_info if k not in allowed]
-    if unknown:
-        raise ValueError(
-            f"Unrecognised data_info key(s) for model_type={model_type!r}: "
-            f"{sorted(unknown)}. Allowed search params: {sorted(search_keys)}; "
-            f"allowed settings: {sorted(_NON_SEARCH_DATA_INFO_KEYS)}."
-        )
-
-
-def suggest_lstm_params(
-    trial: optuna.Trial, overrides: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Sample the LSTM hyperparameters, honouring `overrides` (from data_info)."""
-    specs = _merge_specs(LSTM_SEARCH_DEFAULTS, overrides)
-    return {name: _suggest_param(trial, name, spec) for name, spec in specs.items()}
-
-
-def suggest_valendin_params(
-    trial: optuna.Trial, overrides: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Sample the Valendin benchmark's TRAINING hyperparameters only.
-
-    Its architecture is frozen at the published sizes (ADR-0004), so there is nothing
-    architectural to search — `VALENDIN_SEARCH_DEFAULTS` carries learning rate, weight
-    decay and batch size and nothing else.
-    """
-    specs = _merge_specs(VALENDIN_SEARCH_DEFAULTS, overrides)
-    return {name: _suggest_param(trial, name, spec) for name, spec in specs.items()}
-
-
-def suggest_transformer_params(
-    trial: optuna.Trial, overrides: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Sample the Transformer hyperparameters, honouring `overrides`.
-
-    `d_model` and `nhead` are resolved first so the divisibility constraint can
-    prune incompatible draws before the remaining params are sampled.
-    """
-    specs = _merge_specs(TRANSFORMER_SEARCH_DEFAULTS, overrides)
-    d_model = _suggest_param(trial, "d_model", specs["d_model"])
-    nhead = _suggest_param(trial, "nhead", specs["nhead"])
-    if d_model % nhead != 0:
-        # Cleaner than narrowing the categorical domain per trial; Optuna's
-        # samplers handle pruned trials gracefully.
-        raise optuna.TrialPruned(
-            f"d_model={d_model} is not divisible by nhead={nhead}"
-        )
-    params = {"d_model": d_model, "nhead": nhead}
-    for name, spec in specs.items():
-        if name in ("d_model", "nhead"):
-            continue
-        params[name] = _suggest_param(trial, name, spec)
-    return params
-
-
-# ---------------------------------------------------------------------------
-# Model factories
-# ---------------------------------------------------------------------------
-
-
-def _build_lstm(
-    params: dict[str, Any], metadata: dict[str, Any]
-) -> MultinomialLSTMModel:
-    return MultinomialLSTMModel(
-        embedder=ProjectedEmbedder(
-            seq_cols=metadata["seq_cols"],
-            embedded_cols=metadata["embedded_cols"],
-            target_col=metadata.get("target_col", "Transactions"),
-            embedding_dim=params["embedding_dim"],
-        ),
-        lstm_hidden_size=params["lstm_hidden_size"],
-        dense_units=params["dense_units"],
-        dropout=params["dropout"],
-    )
-
-
-def _build_valendin(
-    params: dict[str, Any], metadata: dict[str, Any]
-) -> "ValendinLSTMModel":
-    """Build the frozen benchmark. `params` carries no architecture, by design."""
-    from panelclv.benchmarks.valendin_lstm import ValendinLSTMModel
-
-    return ValendinLSTMModel(
-        seq_cols=metadata["seq_cols"],
-        embedded_cols=metadata["embedded_cols"],
-        target_col=metadata.get("target_col", "Transactions"),
-    )
-
-
-def _build_transformer(
-    params: dict[str, Any], metadata: dict[str, Any]
-) -> MultinomialTransformerModel:
-    return MultinomialTransformerModel(
-        # The Transformer projects the embedder's width onto d_model, and has always
-        # embedded at d_model, so that is the width the ProjectedEmbedder uses.
-        embedder=ProjectedEmbedder(
-            seq_cols=metadata["seq_cols"],
-            embedded_cols=metadata["embedded_cols"],
-            target_col=metadata.get("target_col", "Transactions"),
-            embedding_dim=params["d_model"],
-        ),
-        seq_len=metadata.get("seq_len"),
-        d_model=params["d_model"],
-        nhead=params["nhead"],
-        num_encoder_layers=params["num_encoder_layers"],
-        dropout=params["dropout"],
-    )
-
-
-# Parameter suggester and training-model builder per registered type. Every dispatch
-# site goes through these two helpers, so a type is either wired everywhere or nowhere.
-# Before this table two sites fell through to the Transformer on an unrecognised type,
-# which would have trained the wrong architecture under the right name.
-_SUGGESTERS = {
-    "lstm": suggest_lstm_params,
-    "transformer": suggest_transformer_params,
-    "valendin_lstm": suggest_valendin_params,
-}
-
-_BUILDERS = {
-    "lstm": _build_lstm,
-    "transformer": _build_transformer,
-    "valendin_lstm": _build_valendin,
-}
-
-
-def _require_registered(model_type: str, table: dict, what: str) -> Any:
-    """Look `model_type` up, or say plainly that it is not registered."""
-    try:
-        return table[model_type]
-    except KeyError:
-        raise ValueError(
-            f"Unknown model_type {model_type!r} — no {what} registered. "
-            f"Registered types: {sorted(table)}"
-        ) from None
-
-
-def _suggest_params_for(
-    model_type: str, trial: optuna.Trial, data_info: dict[str, Any]
-) -> dict[str, Any]:
-    """Sample this model type's hyperparameters."""
-    return _require_registered(model_type, _SUGGESTERS, "parameter suggester")(
-        trial, data_info
-    )
-
-
-def _build_model_for(
-    model_type: str, params: dict[str, Any], metadata: dict[str, Any]
-):
-    """Build this model type's TRAINING model."""
-    return _require_registered(model_type, _BUILDERS, "model builder")(params, metadata)
-
-
 def _build_inference_model_for(
     model_type: str, params: dict[str, Any], metadata: dict[str, Any]
 ):
-    """Build the matching INFERENCE model and the simulator that drives it.
+    """Build the matching rollout model and the simulator that drives it.
 
-    Returns ``(inference_model, forecaster)``. Constructor arguments mirror the
-    training model's, since the rollout loads that model's ``state_dict`` into this one.
+    Returns ``(rollout_model, forecaster)``. Constructor arguments mirror the training
+    model's, since the rollout loads that model's ``state_dict`` into this one.
+
+    **The one dispatch site the registry does not own.** It re-states the
+    model-to-rollout pairing that ``ModelEntry.rollout`` already declares, so until it
+    goes, adding a model means a branch here as well as a registry entry. ADR-0007
+    removes it: the trained model hands over its own paired rollout, and this whole
+    rebuild-from-params path disappears with it.
     """
     seq_cols = metadata["seq_cols"]
     embedded_cols = metadata["embedded_cols"]
@@ -594,7 +325,7 @@ def _build_inference_model_for(
         )
     raise ValueError(
         f"Unknown model_type {model_type!r} — no inference model registered. "
-        f"Registered types: {sorted(_BUILDERS)}"
+        f"Registered types: {sorted(t for t in MODEL_TYPES if is_neural(t))}"
     )
 
 
@@ -607,25 +338,27 @@ def objective(
     trial: optuna.Trial,
     model_type: str,
     data_builder: DataBuilder,
-    data_info: dict[str, Any],
+    search_space: dict[str, Any],
+    training: dict[str, Any],
     device: str | torch.device | None = None,
     removable_features: Sequence[str | Sequence[str]] = (),
 ) -> float:
     """Objective: teacher-forced validation cross-entropy.
 
-    `data_info` carries BOTH the search-space overrides (per-parameter specs in
-    the `_suggest_param` mini-language — set=categorical, tuple=range, scalar=
-    fixed; anything omitted falls back to the model's hardcoded default range)
-    and the non-search settings (checkpoint dir, loss config, ...). Its keys are
-    validated up front by `validate_data_info`. `removable_features`
-    lists covariates Optuna may drop this trial (see `suggest_covariate_selection`);
-    the chosen drop-set is handed to `data_builder` as `feature_config`.
+    `search_space` overrides the registry entry's default spec for a hyperparameter
+    (per-parameter specs in the `suggest_param` mini-language — set=categorical,
+    tuple=range, scalar=fixed; anything omitted falls back to the entry's own
+    range), and is validated up front against that entry's keys. `training` carries
+    the controls that are not searched — checkpoint dir, loss config, epochs — and
+    is read with defaults. `removable_features` lists covariates Optuna may drop
+    this trial (see `suggest_covariate_selection`); the chosen drop-set is handed to
+    `data_builder` as `feature_config`.
 
     What is RETURNED to Optuna is the cross-entropy the training loop already
     minimises, scored on the temporal validation window only (ADR-0001), so
     selection and training agree on the number they are looking at.
     """
-    params = _suggest_params_for(model_type, trial, data_info)
+    params = suggest_params(model_type, trial, search_space)
 
     # Which covariates to drop this trial (empty list ⇒ fixed feature set).
     drop_cols = suggest_covariate_selection(trial, removable_features)
@@ -640,12 +373,12 @@ def objective(
     trial.set_user_attr("dropped_features", ",".join(sorted(drop_cols)))
     trial.set_user_attr("target_col", metadata.get("target_col", "Transactions"))
 
-    model = _build_model_for(model_type, params, metadata)
+    model = build_model(model_type, params, metadata)
 
     # `focal_gamma` is either a scalar (fixed) or `(low, high, step)`
     # (Optuna-tuned on a step grid). Missing / None → 2.0.
-    loss_type = data_info.get("loss_type", "cross_entropy")
-    focal_gamma_spec = data_info.get("focal_gamma", 2.0)
+    loss_type = training.get("loss_type", "cross_entropy")
+    focal_gamma_spec = training.get("focal_gamma", 2.0)
     if loss_type == "focal" and isinstance(focal_gamma_spec, (tuple, list)):
         low, high, step = focal_gamma_spec
         focal_gamma = trial.suggest_float(
@@ -664,19 +397,19 @@ def objective(
         # n_epochs / patience are training control, but the caller may still hand
         # them a search spec (e.g. patience over {5,7,9}); resolve through the same
         # mini-language so a scalar stays fixed and a set/tuple is searched.
-        n_epochs=_suggest_param(trial, "n_epochs", data_info.get("n_epochs", 50)),
-        patience=_suggest_param(trial, "patience", data_info.get("patience", 5)),
+        n_epochs=suggest_param(trial, "n_epochs", training.get("n_epochs", 50)),
+        patience=suggest_param(trial, "patience", training.get("patience", 5)),
         learning_rate=params["learning_rate"],
         weight_decay=params["weight_decay"],
-        grad_clip=data_info.get("grad_clip", 1.0),
+        grad_clip=training.get("grad_clip", 1.0),
         device=device,
-        checkpoint_dir=data_info.get("checkpoint_dir", "./checkpoints"),
+        checkpoint_dir=training.get("checkpoint_dir", "./checkpoints"),
         model_name=f"{model_type}_trial_{trial.number}",
         trial=trial,
-        log_wandb=data_info.get("log_wandb", False),
-        verbose=data_info.get("verbose", False),
+        log_wandb=training.get("log_wandb", False),
+        verbose=training.get("verbose", False),
         loss_type=loss_type,
-        class_weights=data_info.get("class_weights"),
+        class_weights=training.get("class_weights"),
         focal_gamma=focal_gamma,
         # Temporal split: score CE only on the validation suffix (periods after
         # validation_start). split_calibration puts this in its recipe; 0 ⇒ score all steps.
@@ -700,7 +433,8 @@ def objective(
 def run_optuna_study(
     model_type: str,
     data_builder: DataBuilder,
-    data_info: dict[str, Any],
+    search_space: dict[str, Any] | None = None,
+    training: dict[str, Any] | None = None,
     device: str | torch.device | None = None,
     n_trials: int = 50,
     study_name: str | None = None,
@@ -720,9 +454,20 @@ def run_optuna_study(
     `study.best_trial` and the saved checkpoint path stored as a user attribute
     on each trial.
 
+    The two knob dicts are deliberately separate. `search_space` overrides the
+    registry entry's default spec for a hyperparameter, one key per parameter in
+    the `registry.suggest_param` mini-language (a `{...}` set is a categorical, a
+    `(lo, hi, "log"|"int")` tuple a range, a scalar is pinned); anything left out
+    keeps the entry's own range, and a key the model does not have raises. `training`
+    carries what is not searched — `n_epochs`, `patience`, `checkpoint_dir`,
+    `verbose`, `loss_type`, `class_weights`, `focal_gamma`, `grad_clip`, `log_wandb`,
+    `seed`. `n_epochs` / `patience` sit there because they are training control, but
+    they may still be handed a search spec (e.g. patience over `{5, 7, 9}`) and are
+    resolved through the same mini-language.
+
     When `append_timestamp` is True (default) the effective run name is
     `f"{study_name}_{YYYYMMDD_HHMM}"`; that name is used for the Optuna study,
-    a per-run checkpoint subfolder under `data_info["checkpoint_dir"]`, and the
+    a per-run checkpoint subfolder under `training["checkpoint_dir"]`, and the
     summary files, so separate runs never overwrite each other. The resolved
     name is available afterwards as `study.study_name`. Pass False to keep a
     stable name (e.g. to resume via `storage=`).
@@ -750,17 +495,14 @@ def run_optuna_study(
     `checkpoint_path`) is preserved, so the downstream workflow is unaffected; you
     only lose the ability to rebuild a NON-winning trial from its weights.
     """
-    # Reject an unregistered type here rather than after the first trial trains.
-    if model_type not in _BUILDERS:
-        raise ValueError(
-            f"Unknown model_type {model_type!r}; "
-            f"registered types: {sorted(_BUILDERS)}"
-        )
+    search_space = dict(search_space or {})
+    training = dict(training or {})
 
-    # Validate data_info keys once, up front: the search space is now driven by
-    # data_info, so a typo'd hyperparameter name must raise here rather than be
-    # silently ignored (which would quietly fall back to the default range).
-    validate_data_info(model_type, data_info)
+    # Reject an unregistered type, a key in the wrong knob dict, and a control this
+    # module does not read — all here rather than after the first trial has trained,
+    # because every one of them is otherwise ignored in silence.
+    validate_model_knobs(model_type, search_space, training)
+    _validate_training(model_type, training)
 
     # Validate removable_features once, before any training. We probe the
     # data_builder with an empty drop-set (keep everything) purely to learn the
@@ -785,10 +527,10 @@ def run_optuna_study(
         if append_timestamp else study_name
     )
     # Isolate this run's checkpoints in a per-run subfolder so trial-number
-    # filenames never overwrite a previous study's. Copy data_info rather than
-    # mutating the caller's dict. `fit_model` mkdir's the dir, so no setup here.
-    base_ckpt = Path(data_info.get("checkpoint_dir", "./checkpoints"))
-    data_info = {**data_info, "checkpoint_dir": str(base_ckpt / run_name)}
+    # filenames never overwrite a previous study's. `training` was already copied
+    # above, so the caller's dict is untouched. `fit_model` mkdir's the dir.
+    base_ckpt = Path(training.get("checkpoint_dir", "./checkpoints"))
+    training["checkpoint_dir"] = str(base_ckpt / run_name)
 
     # Resolve the pruner. `True` (default) / `None` keep the historical
     # early-stopping behaviour (MedianPruner on the per-epoch CE fit_model
@@ -799,7 +541,7 @@ def run_optuna_study(
     elif pruner is False:
         pruner = optuna.pruners.NopPruner()
     if sampler is None:
-        sampler = optuna.samplers.TPESampler(seed=data_info.get("seed", 42))
+        sampler = optuna.samplers.TPESampler(seed=training.get("seed", 42))
 
     study = optuna.create_study(
         study_name=run_name,
@@ -812,7 +554,7 @@ def run_optuna_study(
 
     study.optimize(
         lambda trial: objective(
-            trial, model_type, data_builder, data_info, device,
+            trial, model_type, data_builder, search_space, training, device,
             removable_features=removable_features,
         ),
         n_trials=n_trials,
@@ -858,7 +600,7 @@ def run_optuna_study(
                     removed += 1
                 except OSError:
                     pass  # never let cleanup crash an otherwise-finished study
-            if data_info.get("verbose"):
+            if training.get("verbose"):
                 print(
                     f"[run_optuna_study] keep_only_best_checkpoint: removed "
                     f"{removed} non-best trial checkpoint(s); kept {best_ckpt}"

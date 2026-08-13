@@ -1,13 +1,17 @@
-"""Every registered neural model type is wired into all of its dispatch sites.
+"""Every model type is declared once, in the registry table, and read from there.
 
-CLAUDE.md: "Adding a model touches three places, and missing the second fails only
-after training completes." These tests make that failure immediate and cheap.
+ADR-0006: adding a model means adding one entry to ``registry.MODEL_REGISTRY``.
+Before it, the model set was enumerated seven times and one of those copies had
+already drifted. So these tests do not check that several lists agree — there is
+one table — they check that the table is *complete* and that every derivation off
+it lands on the right thing.
 
-They assert more than list membership. `tuning/optuna_tuning.py` dispatches on
-`model_type` at four sites, and two of them historically fell through to the
-Transformer on an unrecognised type — so a model registered in some lists but not all
-would train the wrong architecture under the right name. Membership alone would not
-catch that, so the built model's *class* is checked per type.
+They assert more than key membership. The tuning path dispatches on ``model_type``
+and two of its sites historically fell through to the Transformer on an
+unrecognised type, so a half-registered model would train the wrong architecture
+under the right name. Membership alone would not catch that; the built model's
+*class* is checked per type, which is the assertion this file was written for and
+which the registry does not make redundant.
 """
 
 import json
@@ -16,20 +20,33 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from panelclv.studies.config import NEURAL_MODEL_TYPES, VALID_MODEL_TYPES  # noqa: E402
-from panelclv.studies.runner import _FORECASTERS  # noqa: E402
+from panelclv.registry import (  # noqa: E402
+    MODEL_REGISTRY,
+    MODEL_TYPES,
+    build_model,
+    entry,
+    is_neural,
+    rollout_for,
+    suggest_params,
+    validate_model_knobs,
+)
 from panelclv.tuning import optuna_tuning as tuning  # noqa: E402
 
-# The architecture each model type must build. Getting a different class here means a
-# dispatch site fell through — the silent failure these tests exist for.
+# The architecture each neural model type must build. Getting a different class
+# here means a dispatch site fell through — the silent failure these tests exist
+# for.
 EXPECTED_CLASS = {
     "lstm": "MultinomialLSTMModel",
     "transformer": "MultinomialTransformerModel",
     "valendin_lstm": "ValendinLSTMModel",
 }
 
+# Types with a training builder, read off the table rather than restated: a second
+# list here would be the copy ADR-0006 exists to make unwritable.
+NEURAL_TYPES = [t for t in MODEL_TYPES if is_neural(t)]
+
 # A small panel every model type can be built against.
-METADATA = {
+RECIPE = {
     "seq_cols": ["Transactions", "week_idx"],
     "embedded_cols": {"Transactions": 6, "week_idx": 52},
     "target_col": "Transactions",
@@ -40,7 +57,7 @@ METADATA = {
 class _FixedTrial:
     """Stands in for an optuna.Trial, returning the low end of every search range.
 
-    Enough to drive `suggest_*_params` without an Optuna study; the values do not
+    Enough to drive the suggesters without an Optuna study; the values do not
     matter, only that every declared parameter can be sampled.
     """
 
@@ -54,70 +71,148 @@ class _FixedTrial:
         return low
 
 
-def test_every_neural_type_is_a_valid_model_type():
-    for model_type in NEURAL_MODEL_TYPES:
-        assert model_type in VALID_MODEL_TYPES
+def test_model_types_are_the_tables_keys():
+    """The enumeration IS the table — not a list kept in step with it."""
+    assert MODEL_TYPES == tuple(MODEL_REGISTRY)
 
 
-@pytest.mark.parametrize("model_type", NEURAL_MODEL_TYPES)
-def test_neural_type_has_a_forecaster(model_type):
-    """studies/runner.py — the entry missing this fails only after training."""
-    assert model_type in _FORECASTERS
-    assert callable(_FORECASTERS[model_type])
+def test_neural_is_read_off_the_entry():
+    """"Neural" is the predicate "this entry has a training builder", not a list.
+
+    This is the copy that drifted once (a stale neural list in the archive reader
+    collapsed the Valendin benchmark's across-study spread to one study), so the
+    derivation is pinned rather than assumed.
+    """
+    for model_type in MODEL_TYPES:
+        assert is_neural(model_type) is (entry(model_type).build is not None)
+    assert set(NEURAL_TYPES) == set(EXPECTED_CLASS)
 
 
-@pytest.mark.parametrize("model_type", NEURAL_MODEL_TYPES)
-def test_neural_type_has_a_search_space_and_suggester(model_type):
-    """tuning/optuna_tuning.py — data_info validation and parameter sampling."""
-    # Validation must recognise the type rather than raising "Unknown model_type".
-    tuning.validate_data_info(model_type, {})
+def test_pareto_entry_is_declarative():
+    """Pareto/NBD sits in the table with empty fields, not outside it.
 
-    params = tuning._suggest_params_for(model_type, _FixedTrial(), {})
+    It is a valid model type with no search space, no builder and no rollout; its
+    entry exists so every enumeration still derives from one place, and the runner
+    keeps a separate deterministic path for it.
+    """
+    pareto = entry("pareto_nbd")
+    assert (pareto.search_space, pareto.suggest, pareto.build, pareto.rollout) == (
+        None, None, None, None,
+    )
+    assert is_neural("pareto_nbd") is False
+
+
+@pytest.mark.parametrize("model_type", NEURAL_TYPES)
+def test_neural_entry_is_complete(model_type):
+    """Every field a neural model needs is filled in, in one place."""
+    e = entry(model_type)
+    assert e.search_space, f"{model_type} declares no search space"
+    assert callable(e.suggest)
+    assert callable(e.build)
+    assert callable(e.rollout)
+
+    # Validation recognises the type rather than raising "Unknown model_type".
+    validate_model_knobs(model_type, {}, {})
+    params = suggest_params(model_type, _FixedTrial(), {})
     assert isinstance(params, dict) and params, f"{model_type} sampled no parameters"
 
 
-@pytest.mark.parametrize("model_type", NEURAL_MODEL_TYPES)
+@pytest.mark.parametrize("model_type", NEURAL_TYPES)
 def test_neural_type_builds_its_own_architecture(model_type):
     """The check membership alone cannot make: the right class comes out.
 
-    A dispatch site that falls through to another family would pass every list-based
-    assertion above and still train the wrong model.
+    A dispatch site that falls through to another family would pass every
+    table-based assertion above and still train the wrong model.
     """
-    params = tuning._suggest_params_for(model_type, _FixedTrial(), {})
-    model = tuning._build_model_for(model_type, params, METADATA)
+    params = suggest_params(model_type, _FixedTrial(), {})
+    model = build_model(model_type, params, RECIPE)
     assert type(model).__name__ == EXPECTED_CLASS[model_type]
 
 
-@pytest.mark.parametrize("model_type", NEURAL_MODEL_TYPES)
+@pytest.mark.parametrize("model_type", NEURAL_TYPES)
 def test_neural_type_builds_a_matching_inference_model(model_type):
-    """The rollout loads the trained model's state_dict into the inference model.
+    """The rollout model loads its weights from the trained model it is paired with.
 
-    CLAUDE.md's invariant: their constructor arguments must match. A mismatch here
-    surfaces only after a full training run, so it is pinned.
+    Their constructor arguments must match, and a mismatch surfaces only after a full
+    training run, so it is pinned. The builder for that paired model is still an
+    ``if``-chain in the tuner — the one dispatch site the registry does not yet own —
+    which is exactly why the class assertion stays.
     """
-    params = tuning._suggest_params_for(model_type, _FixedTrial(), {})
-    trained = tuning._build_model_for(model_type, params, METADATA)
+    params = suggest_params(model_type, _FixedTrial(), {})
+    trained = build_model(model_type, params, RECIPE)
     inference, forecaster = tuning._build_inference_model_for(
-        model_type, params, METADATA
+        model_type, params, RECIPE
     )
     inference.load_state_dict(trained.state_dict(), strict=True)
     assert callable(forecaster)
 
 
+@pytest.mark.parametrize("model_type", NEURAL_TYPES)
+def test_rollout_is_declared_by_the_entry(model_type):
+    """The suite reads the rollout off the table instead of its own forecaster map.
+
+    A type registered for tuning but missing from that map used to fail only after
+    the study had trained; there is no second map to be missing from now.
+    """
+    assert rollout_for(model_type) is entry(model_type).rollout
+
+
 def test_unknown_model_type_is_rejected_everywhere():
-    """No dispatch site may quietly fall through to another architecture."""
+    """No lookup may quietly fall through to another architecture."""
     for call in (
-        lambda: tuning.validate_data_info("nonesuch", {}),
-        lambda: tuning._suggest_params_for("nonesuch", _FixedTrial(), {}),
-        lambda: tuning._build_model_for("nonesuch", {}, METADATA),
-        lambda: tuning._build_inference_model_for("nonesuch", {}, METADATA),
+        lambda: entry("nonesuch"),
+        lambda: validate_model_knobs("nonesuch", {}, {}),
+        lambda: suggest_params("nonesuch", _FixedTrial(), {}),
+        lambda: build_model("nonesuch", {}, RECIPE),
+        lambda: rollout_for("nonesuch"),
+        lambda: tuning._build_inference_model_for("nonesuch", {}, RECIPE),
     ):
         with pytest.raises(ValueError, match="model_type"):
             call()
 
 
-@pytest.mark.parametrize("model_type", NEURAL_MODEL_TYPES)
-def test_study_entry_point_accepts_every_registered_type(model_type):
+def test_declarative_entry_is_rejected_where_it_has_nothing_to_offer():
+    """`pareto_nbd` is a valid type that cannot be tuned, built or rolled out.
+
+    It must fail loudly at each of those, rather than returning ``None`` for a
+    caller to trip over later.
+    """
+    for call in (
+        lambda: validate_model_knobs("pareto_nbd", {}, {}),
+        lambda: suggest_params("pareto_nbd", _FixedTrial(), {}),
+        lambda: build_model("pareto_nbd", {}, RECIPE),
+        lambda: rollout_for("pareto_nbd"),
+    ):
+        with pytest.raises(ValueError, match="pareto_nbd"):
+            call()
+
+
+def test_a_knob_in_the_wrong_dict_is_rejected():
+    """Both misplacements are silent otherwise, and both waste a whole search.
+
+    The one allowlist is the entry's own search space, so it cannot drift from what
+    the suggester actually samples — which is what replaced the hand-maintained list
+    of keys that were *not* search parameters.
+    """
+    # A parameter the model does not have: a typo, not a knob.
+    with pytest.raises(ValueError, match="hiddendim"):
+        validate_model_knobs("lstm", {"hiddendim": {32, 64}}, {})
+
+    # A training control in the search space.
+    with pytest.raises(ValueError, match="n_epochs"):
+        validate_model_knobs("lstm", {"n_epochs": 10}, {})
+
+    # A real hyperparameter left in `training`, where nothing would search it.
+    with pytest.raises(ValueError, match="dropout"):
+        validate_model_knobs("lstm", {}, {"dropout": {0.0, 0.2}})
+
+    # And a misspelled training control, which the tuner polices against the keys it
+    # actually reads — the half of the old allowlist that is not per-model.
+    with pytest.raises(ValueError, match="paitence"):
+        tuning._validate_training("lstm", {"paitence": 7})
+
+
+def test_study_entry_point_accepts_every_registered_type():
     """`run_optuna_study` carried its own hardcoded {"lstm", "transformer"} guard.
 
     Every other site agreed on the registered set while this one did not, so a newly
@@ -138,17 +233,18 @@ def test_valendin_architecture_is_not_searched():
     Optuna searching `memory_units` or `dense_units` would silently unfreeze the
     reference implementation, which is the drift ADR-0004 exists to prevent.
     """
-    search_space = set(tuning.VALENDIN_SEARCH_DEFAULTS)
-    assert search_space == {"learning_rate", "weight_decay", "batch_size"}
+    assert set(entry("valendin_lstm").search_space) == {
+        "learning_rate", "weight_decay", "batch_size",
+    }
 
-    params = tuning._suggest_params_for("valendin_lstm", _FixedTrial(), {})
-    model = tuning._build_model_for("valendin_lstm", params, METADATA)
+    params = suggest_params("valendin_lstm", _FixedTrial(), {})
+    model = build_model("valendin_lstm", params, RECIPE)
     # The published sizes, whatever Optuna sampled.
     assert model.backbone.lstm.hidden_size == 128
     assert model.backbone.dense.out_features == 128
 
 
-@pytest.mark.parametrize("model_type", VALID_MODEL_TYPES)
+@pytest.mark.parametrize("model_type", MODEL_TYPES)
 def test_read_side_agrees_on_which_types_run_per_study(model_type, tmp_path):
     """The archive reader classifies each registered type the way the runner ran it.
 
@@ -165,4 +261,4 @@ def test_read_side_agrees_on_which_types_run_per_study(model_type, tmp_path):
     (model_dir / "config.json").write_text(json.dumps({"model_type": model_type}))
 
     # Neural types are Optuna-tuned once per study; anything else is a single fit.
-    assert _is_deterministic_model(model_dir) is (model_type not in NEURAL_MODEL_TYPES)
+    assert _is_deterministic_model(model_dir) is (not is_neural(model_type))
