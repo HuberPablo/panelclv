@@ -240,11 +240,22 @@ def _imported_panelclv_names(path: Path) -> dict[str, object]:
     return {k: v for k, v in imported.items() if k not in assigned}
 
 
+# Resolvers whose whole job is to return another callable from a literal key, and
+# which a notebook therefore calls in the head of another call:
+# `rollout_for("lstm")(model, data, ...)`. Without this, the outer call is invisible
+# to the binding check below — its `func` is a Call node, not a Name — so migrating
+# the notebooks onto the registry (ADR-0006) would have silently dropped the
+# forecast's arguments out of coverage. Each entry must be a pure table lookup: the
+# check evaluates it, so anything with a side effect does not belong here.
+CALLABLE_RESOLVERS = {"rollout_for"}
+
+
 def _called_panelclv_object(node: ast.Call, env: dict[str, object]):
     """The package callable a `Call` node targets, or None if it targets nothing we know.
 
-    Handles the two shapes notebooks use: a bare `f(...)` for a name imported
-    directly, and `mod.f(...)` where `mod` is an imported `panelclv` submodule.
+    Handles the three shapes notebooks use: a bare `f(...)` for a name imported
+    directly, `mod.f(...)` where `mod` is an imported `panelclv` submodule, and
+    `resolver("literal")(...)` for the registry lookups in CALLABLE_RESOLVERS.
     """
     func = node.func
     if isinstance(func, ast.Name):
@@ -252,9 +263,35 @@ def _called_panelclv_object(node: ast.Call, env: dict[str, object]):
     elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
         module = env.get(func.value.id)
         target = getattr(module, func.attr, None) if inspect.ismodule(module) else None
+    elif isinstance(func, ast.Call) and isinstance(func.func, ast.Name):
+        target = _resolved_callable(func, env)
     else:
         target = None
     return target if callable(target) else None
+
+
+def _resolved_callable(node: ast.Call, env: dict[str, object]):
+    """Evaluate a `resolver("literal")` head to the callable it returns, or None.
+
+    Deliberately narrow: the resolver must be one this file names, every argument
+    must be a literal, and a lookup that raises (an unknown model type) resolves to
+    None rather than failing here — the resolver's own call is bound separately, and
+    an unknown key is that check's business, not this one's.
+    """
+    if not isinstance(node.func, ast.Name) or node.func.id not in CALLABLE_RESOLVERS:
+        return None
+    resolver = env.get(node.func.id)
+    if not callable(resolver):
+        return None
+    try:
+        args = [ast.literal_eval(a) for a in node.args]
+        kwargs = {k.arg: ast.literal_eval(k.value) for k in node.keywords if k.arg}
+    except ValueError:
+        return None
+    try:
+        return resolver(*args, **kwargs)
+    except Exception:
+        return None
 
 
 @pytest.mark.parametrize("path", LIVE_NOTEBOOKS, ids=lambda p: p.name)
