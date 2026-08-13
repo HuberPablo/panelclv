@@ -39,7 +39,6 @@ Valendin one, and the registry declares which function each model uses.
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -48,7 +47,11 @@ import torch
 
 from panelclv.data_preparation.ar_features import ARFeatureState
 from panelclv.data_preparation.target_channel import holdout_actuals
-from panelclv.predictions import DEFAULT_ID_COL, save_predictions_to_csv
+from panelclv.predictions import (
+    DEFAULT_ID_COL,
+    create_run_directory,
+    save_predictions_to_csv,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -304,14 +307,15 @@ def _save_predictions_run(
     named subfolder inside it and writes one wide CSV (one row per customer,
     columns `week_0..week_{H-1}`) of the predicted-mean counts.
 
-    The subfolder name encodes everything needed to tell two runs apart and to
-    line a run up with its checkpoints/summaries:
+    The subfolder name is derived from the run's config and its seed:
 
-        {tag}_n{n_simulations}_seed{seed}_{YYYYMMDD_HHMMSS}
+        {tag}_n{n_simulations}_seed{seed}
 
     where `tag` is `run_name` if given (e.g. the Optuna study name) else the
-    model type. Seconds resolution keeps two runs in the same minute from
-    colliding into the same folder. Returns the path to the written CSV.
+    model type. Nothing in it comes from the wall clock, so re-running the same
+    config and seed lands in the same folder and finding an earlier forecast does
+    not require knowing when it was started; the run's timestamp is kept beside
+    the predictions as metadata instead. Returns the path to the written CSV.
     """
     if output_dir is None:
         raise ValueError(
@@ -321,11 +325,7 @@ def _save_predictions_run(
 
     tag = run_name if run_name else model_type
     seed_label = "None" if seed is None else seed
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    subfolder = f"{tag}_n{n_simulations}_seed{seed_label}_{timestamp}"
-
-    run_dir = Path(output_dir) / subfolder
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = create_run_directory(output_dir, f"{tag}_n{n_simulations}_seed{seed_label}")
 
     # IDs map each prediction row back to a customer; save_predictions_to_csv
     # falls back to a plain row index when they are absent.
@@ -466,7 +466,10 @@ def forecast_recurrent(
         run_name         : tag for the subfolder name (defaults to the model
                            type); pass the Optuna study name to line the dump
                            up with its checkpoints/summaries. The subfolder is
-                           `{tag}_n{n_simulations}_seed{seed}_{YYYYMMDD_HHMMSS}`.
+                           `{tag}_n{n_simulations}_seed{seed}` — derived from the
+                           config and the seed, so the same run always writes to
+                           the same path; its wall-clock time is written beside
+                           the predictions as metadata.
 
     Returns a dict with:
         prediction_mean : ndarray (N, T_HOLD)

@@ -58,7 +58,6 @@ rollouts return, with the optional prediction dump).
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -69,7 +68,11 @@ from scipy.special import gammaln
 # The one on-disk prediction layout, shared with the neural rollouts so a saved
 # Pareto/NBD forecast reads back through exactly the same reader (ADR-0002: the
 # prediction-I/O leaf names nothing above it, so this arrow points down).
-from panelclv.predictions import DEFAULT_ID_COL, save_predictions_to_csv
+from panelclv.predictions import (
+    DEFAULT_ID_COL,
+    create_run_directory,
+    save_predictions_to_csv,
+)
 
 # The one calendar-to-period conversion table. The fit's sufficient statistics are
 # measured in periods, so the frequency-to-days mapping is shared infrastructure
@@ -291,6 +294,11 @@ def _run_single_chain(x: np.ndarray, t_x: np.ndarray, T_cal: np.ndarray,
 # 4. Public API — fit + forecast
 # ---------------------------------------------------------------------------
 
+# The sampler's default seed, declared once: it is both the fit's default and the seed
+# `pareto_forecast` names its run folder after when the caller does not pass one, and
+# those two must agree or the folder would claim a seed the chain never used.
+_DEFAULT_SEED = 42
+
 
 def compute_pareto_predictions(
     train_panel: pd.DataFrame,
@@ -309,7 +317,7 @@ def compute_pareto_predictions(
     burnin: int = 500,
     thin: int = 50,
     chains: int = 2,
-    seed: int = 42,
+    seed: int = _DEFAULT_SEED,
     param_init: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
 ) -> tuple[np.ndarray, list]:
     """Hierarchical-Bayes Pareto/NBD forecast (BTYDplus-faithful).
@@ -448,8 +456,10 @@ def pareto_forecast(
                            (required when save_predictions=True).
         file_name        : name of the CSV inside that subfolder.
         run_name         : tag for the subfolder (defaults to "pareto").
-                           The subfolder is `{tag}_{YYYYMMDD_HHMMSS}` (seconds
-                           resolution avoids same-minute collisions).
+                           The subfolder is `{tag}_seed{seed}` — derived from the
+                           config and the fit seed, so the same fit always writes
+                           to the same path; its wall-clock time is written beside
+                           the predictions as metadata.
 
     `fit_kwargs` are forwarded to the estimator (`mcmc`, `burnin`, `thin`,
     `chains`, `seed`, `param_init`).
@@ -474,9 +484,10 @@ def pareto_forecast(
         # IDs map each prediction row back to a customer; save_predictions_to_csv
         # falls back to a plain row index when they are absent.
         tag = run_name if run_name else "pareto"
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = Path(output_dir) / f"{tag}_{timestamp}"
-        run_dir.mkdir(parents=True, exist_ok=True)
+        # The seed the chain actually ran on — the caller's if given, the sampler's
+        # own default otherwise — so the folder name identifies the fit inside it.
+        seed = fit_kwargs.get("seed", _DEFAULT_SEED)
+        run_dir = create_run_directory(output_dir, f"{tag}_seed{seed}")
         result["predictions_path"] = save_predictions_to_csv(
             prediction_mean,
             run_dir / file_name,

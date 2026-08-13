@@ -286,10 +286,15 @@ def _beta_for_churn(churn_rate: float, s: float, horizon_weeks: float) -> float:
     return horizon_weeks / ((1.0 - churn_rate) ** (-1.0 / s) - 1.0)
 
 
-def _auto_study_name(n_rate: int, n_churn: int, n_datasets: int) -> str:
-    """Timestamped default study name, e.g. ``pnbd_study_6x4x5_20260715-121500``."""
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"pnbd_study_{n_rate}x{n_churn}x{n_datasets}_{ts}"
+def _auto_study_name(n_rate: int, n_churn: int, n_datasets: int, base_seed: int) -> str:
+    """Default study name from the grid shape and the seed, e.g. ``pnbd_study_6x4x5_seed42``.
+
+    Every character comes from the arguments that decide what the study contains, so
+    regenerating a study finds its own folder instead of making a second one beside
+    it — the wall clock used to sit here, and its time is now recorded in
+    ``study_config.json`` as ``created_at`` instead.
+    """
+    return f"pnbd_study_{n_rate}x{n_churn}x{n_datasets}_seed{base_seed}"
 
 
 def generate_pnbd_study(
@@ -351,7 +356,8 @@ def generate_pnbd_study(
         dataset in the study (fixed, not a grid axis). See
         ``simulate_pareto_nbd_panel`` for the meaning; default = no seasonality.
     study_name
-        Folder name for this study. Auto-generated (timestamped) when omitted.
+        Folder name for this study. When omitted it is derived from the grid shape
+        and ``base_seed``, so the same study always regenerates into the same folder.
     base_seed
         Seeds are assigned ``base_seed, base_seed+1, ...`` across all datasets in
         generation order, so the whole study is reproducible and every replicate
@@ -381,7 +387,9 @@ def generate_pnbd_study(
     alpha_by_rate = [(m, r / m) for m in mean_rates]
     beta_by_churn = [(c, _beta_for_churn(c, s, n_weeks_for_churn_rate)) for c in churns]
 
-    study_name = study_name or _auto_study_name(len(mean_rates), len(churns), n_datasets)
+    study_name = study_name or _auto_study_name(
+        len(mean_rates), len(churns), n_datasets, base_seed
+    )
     study_dir = Path(out_path) / study_name
     study_dir.mkdir(parents=True, exist_ok=True)
 
