@@ -8,7 +8,7 @@ verbatim.
 
 Usage:
     1. Edit ``load_panel()`` to read your panel CSV.
-    2. Edit the ``PanelConfig`` and the ``models=[...]`` list.
+    2. Edit ``build_panel_config()`` and ``build_models()``.
     3. Pick a ``suite_name``.
     4. ``python scripts/run_studies.py``
 
@@ -40,6 +40,26 @@ STUDIES_BASE = Path(__file__).resolve().parents[1] / "Studies"
 def load_panel() -> pd.DataFrame:
     """EDIT ME — return the customer-period panel DataFrame to model."""
     return pd.read_csv("Datasets/Dataset_clean/electronics_customer_week_panel.csv")
+
+
+def build_panel_config() -> PanelConfig:
+    """EDIT ME — the column roles and window dates of the panel above.
+
+    ``embedded_cols`` must name the target. The target's own column is one of the
+    model's inputs and its cardinality *is* the softmax head size, so a config that
+    leaves it out builds no neural model at all — `Embedder` raises, and it raises
+    inside the first Optuna trial, long after `prepare_dataset` has succeeded.
+    ``"auto"`` reads the cardinality off the data, which `clip_target_upper` has
+    already capped, so the head size and the cap cannot drift apart.
+    """
+    return PanelConfig(
+        id_col="Id", target_col="Transactions", frequency="weekly",
+        training_start="1999-01-01", training_end="2000-12-31",
+        validation_start="2000-07-01",
+        holdout_start="2001-01-01", holdout_end="2001-12-31",
+        time_cols=("year", "week"), clip_target_upper=6,
+        embedded_cols={"Transactions": "auto"},
+    )
 
 
 def build_models() -> list[ModelSpec]:
@@ -109,14 +129,7 @@ def main() -> None:
 
     # --- 1. data: exactly as in the README quickstart -----------------------
     panel = load_panel()
-    cfg = PanelConfig(
-        id_col="Id", target_col="Transactions", frequency="weekly",
-        training_start="1999-01-01", training_end="2000-12-31",
-        validation_start="2000-07-01",
-        holdout_start="2001-01-01", holdout_end="2001-12-31",
-        time_cols=("year", "week"), clip_target_upper=6,
-    )
-    data_full = panel_dataset.prepare_dataset(panel, cfg)
+    data_full = panel_dataset.prepare_dataset(panel, build_panel_config())
 
     # --- 2. the suite config ------------------------------------------------
     # run_study_suite requires the base directory to already exist, and failing on
