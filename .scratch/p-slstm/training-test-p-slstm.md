@@ -116,9 +116,9 @@ SEED=0 <venv>/bin/python <dir>/train_test.py
 
 ## What this does NOT establish
 
-- **No comparison against panelclv's own models.** Beating the class prior is a floor,
-  not a benchmark. The open question is whether it beats `lstm` / `transformer` /
-  `pareto_nbd` on the same split — untested.
+- ~~**No comparison against panelclv's own models.**~~ Done — see
+  `comparison-p-slstm.md`. Short version: it does not beat the LSTM on the rollout,
+  though it is the better one-step-ahead density model.
 - **No rollout.** This is teacher-forced one-step-ahead only. Nothing was forecast
   through `monte_carlo_forecasting`, so there are no `rmse` / `bias_percent` /
   `mape_aggregate` numbers comparable to a real study.
