@@ -49,3 +49,4 @@ Original_paper_model/
 
 # R rewrites this on exit; it is not part of the package
 .Rhistory
+VastAI/state/

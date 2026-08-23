@@ -80,6 +80,10 @@ for candidate in /venv/main/bin/python /opt/conda/bin/python /usr/bin/python3; d
     [ -x "\$candidate" ] && PY="\$candidate" && break
 done
 rm -f /root/.shard_done /root/.shard_exit
+# Record what this worker was given. The supervisor reads the assignment back off
+# the box rather than keeping it in a local file, so it survives its own restart
+# and cannot drift from reality — the box is the authority on what it is doing.
+echo '$GRID $MODEL $SHARD' > /root/.shard_spec
 # Record the exit STATUS, not merely the fact that the command returned. Writing an
 # unconditional done-marker made a shard that crashed in seconds indistinguishable
 # from one that trained for hours — the health check read "done" and moved on.
