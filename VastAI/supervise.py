@@ -461,6 +461,16 @@ def main() -> None:
             start_driver(inst, spec, args.grid, shard, args.dry_run)
             pending.remove(shard)
 
+        # Surplus workers: healthy, assigned nothing, and no shard left wanting one.
+        # A cycle can over-rent (a launch in flight is not yet visible as an instance),
+        # and an unassigned box bills exactly as much as a working one. Only boxes with
+        # no trainer at all are destroyed, so this can never hit a worker whose
+        # assignment merely failed to parse.
+        if not pending:
+            for inst in free_instances:
+                if inst.shard == "none":
+                    destroy(inst.id, "surplus: no shard left to assign", args.dry_run)
+
         running = len([i for i in insts.values() if i.state == "running"])
         for shard in pending:
             if running >= args.max_workers:
