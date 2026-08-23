@@ -47,6 +47,19 @@ for attempt in $(seq 1 80); do
     sleep 15
 done
 
+# --- 1b. health check --------------------------------------------------------
+# Verify the box before sending 340 MB and hours of work at it. Every failure this
+# catches (wrong endpoint, dead CUDA runtime, missing package) otherwise shows up
+# as a shard that never starts, on a machine that bills the whole time. Catalogue:
+# VastAI/known_failures.md.
+if [ -n "${INSTANCE_ID:-}" ]; then
+    say "health check"
+    if ! "$SCRIPT_DIR/healthcheck.sh" "$INSTANCE_ID"; then
+        say "FATAL: failed the health check — not sending work to this box"
+        exit 1
+    fi
+fi
+
 # --- 2. push the data --------------------------------------------------------
 # Datasets/ is gitignored, so the clone has no panels. --partial resumes a dropped
 # transfer, and a re-run skips what is already there (VastAI/Rules.md §3).
@@ -66,10 +79,13 @@ cd $REPO_DIR
 for candidate in /venv/main/bin/python /opt/conda/bin/python /usr/bin/python3; do
     [ -x "\$candidate" ] && PY="\$candidate" && break
 done
-rm -f /root/.shard_done
+rm -f /root/.shard_done /root/.shard_exit
+# Record the exit STATUS, not merely the fact that the command returned. Writing an
+# unconditional done-marker made a shard that crashed in seconds indistinguishable
+# from one that trained for hours — the health check read "done" and moved on.
 setsid nohup bash -c "
     \$PY scripts/run_pnbd_grid.py --grid $GRID --model $MODEL --shard $SHARD
-    touch /root/.shard_done
+    echo \$? > /root/.shard_exit
 " > /root/shard.log 2>&1 &
 sleep 2
 head -5 /root/shard.log || true
