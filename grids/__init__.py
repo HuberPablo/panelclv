@@ -78,6 +78,10 @@ class GridSpec:
     # --- training ---------------------------------------------------------------
     # How the generated panels are read: column roles, window dates, clipping.
     panel: PanelConfig | None = None
+    # Simulated paths per forecast. A rollout samples a count and feeds it back, so a
+    # forecast is the average over this many paths; more paths means less Monte Carlo
+    # noise in the metrics and proportionally more time, paid once per dataset.
+    n_simulations: int = 200
     # The models to train on every dataset, with their search spaces and trial counts.
     models: tuple[ModelSpec, ...] = ()
     # Workers to rent per model *type*: how many vast.ai boxes that model's datasets

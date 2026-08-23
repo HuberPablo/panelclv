@@ -45,7 +45,7 @@ PANEL = PanelConfig(
 LSTM = ModelSpec(
     name="LSTM",
     model_type="lstm",
-    n_trials=20,
+    n_trials=10,
     search_space={
         "batch_size":       {64, 128, 256},
         "learning_rate":    (1e-4, 1e-2, "log"),
@@ -85,6 +85,23 @@ TRANSFORMER = ModelSpec(
     },
 )
 
+# The Valendin reference implementation. Its architecture is FROZEN (ADR-0004) — the
+# published memory_units=128 / dense_units=128 and raw sqrt(n)+1 embeddings — so no
+# search space is declared here at all: it inherits the registry entry's, which offers
+# only the three training hyperparameters. Naming a width would quietly unfreeze the
+# benchmark. Same trial budget as the others so search effort stays comparable.
+VALENDIN = ModelSpec(
+    name="ValendinLSTM",
+    model_type="valendin_lstm",
+    n_trials=20,
+    training={
+        "n_epochs": 100,
+        "patience": 7,
+        "loss_type": "cross_entropy",
+        "verbose": False,
+    },
+)
+
 # No Optuna: one deterministic MCMC fit on BTYDplus's default settings. On synthetic
 # Pareto/NBD data this is the *correct* model by construction, so it is the ceiling the
 # neural models are measured against.
@@ -114,9 +131,10 @@ GRID = GridSpec(
 
     # --- training -----------------------------------------------------------
     panel=PANEL,
-    models=(LSTM, TRANSFORMER, PARETO),
+    models=(LSTM, TRANSFORMER, VALENDIN, PARETO),
+    n_simulations=200,
 
     # EDIT ME: how many vast.ai workers each model's 160 datasets are split across.
     # 0 = run on the orchestrator instead of renting (VastAI/Rules.md §5).
-    workers={"transformer": 8, "lstm": 4, "pareto_nbd": 0},
+    workers={"transformer": 8, "lstm": 4, "valendin_lstm": 4, "pareto_nbd": 0},
 )
