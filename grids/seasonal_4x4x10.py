@@ -136,5 +136,5 @@ GRID = GridSpec(
 
     # EDIT ME: how many vast.ai workers each model's 160 datasets are split across.
     # 0 = run on the orchestrator instead of renting (VastAI/Rules.md §5).
-    workers={"transformer": 7, "lstm": 1, "valendin_lstm": 0, "pareto_nbd": 0},
+    workers={"transformer": 7, "lstm": 2, "valendin_lstm": 0, "pareto_nbd": 0},
 )
