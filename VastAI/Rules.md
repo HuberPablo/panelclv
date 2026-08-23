@@ -30,11 +30,28 @@ and no analysis runs on a worker. Workers train and forecast; that is all.
 
 ## 2. The grid is fixed, and it is generated once
 
-`scripts/generate_pnbd_grid.py` is the single source of truth for what the data is.
-Its constants are the study design; editing one changes what every machine trains
-on, which is why they are in version control rather than in a notebook.
+Each grid is declared by a module in **`grids/`** — its axes, its panels, its
+seasonality, the `PanelConfig` that reads it, the models that train on it and how
+many workers each model gets. One module per grid, selected by name:
 
-Current grid — `pnbd_study_4x4x10_seed42`:
+```bash
+python scripts/generate_pnbd_grid.py --grid seasonal_4x4x10
+python scripts/generate_pnbd_grid.py --list          # what is declared
+```
+
+The declaration is the study design, which is why it is committed rather than
+edited into a notebook. `scripts/generate_pnbd_grid.py` holds no parameters of its
+own; it is the entry point that reads one.
+
+**A grid names its own directory.** `GridSpec.name` is passed to the generator as
+`dataset_dir_name`, and every path derives from it —
+`Datasets/Synthetic/<name>/` and `Studies/<name>__<Model>/`. Do *not* fall back to
+the generator's derived name: it keys only on grid shape and seed, so two 4x4x10
+grids at seed 42 that differ in seasonality or panel size collide in one folder and
+overwrite each other. An explicit name is equally deterministic across machines —
+which is the property the workers actually need — and unique per grid.
+
+Current grid — `seasonal_4x4x10`:
 
 | | |
 |---|---|
@@ -44,20 +61,16 @@ Current grid — `pnbd_study_4x4x10_seed42`:
 | panels | 1000 customers × 156 weeks, 10 replicates per cell |
 | size | 16 cells × 10 = **160 datasets**, 340 MB on disk, 50 MB as `.tar.gz` |
 | build time | ~24 s |
-| panel checksum | `5e333d182d074e375e2bb188272a4b72` |
-
-**The directory name carries no timestamp.** It is derived from the grid shape and
-the seed alone, so the same grid always regenerates into the same folder on any
-machine. Do not pass `dataset_dir_name` — the derived name is what makes the
-worker trees line up.
+| panel checksum | `046541915abe14c560cb38b9ecb4b0c7` |
 
 Reproduce the checksum with:
 
 ```bash
-find Datasets/Synthetic/pnbd_study_4x4x10_seed42 -name '*.csv' | sort | xargs cat | md5sum
+find Datasets/Synthetic/seasonal_4x4x10 -name '*.csv' ! -name index.csv \
+  | sort | xargs cat | md5sum
 ```
 
-Checksum the **panels**, never `index.csv` — that file embeds absolute
+Checksum the **panels**, and exclude `index.csv` — that file embeds absolute
 `panel_path`s, so it differs per machine by design. Nothing reads that column:
 both `list_pnbd_datasets` and `load_pnbd_dataset` rebuild from disk, which is what
 makes a generated tree relocatable between machines.
@@ -70,8 +83,8 @@ The orchestrator generates the grid once and pushes it:
 
 ```bash
 rsync -avz --partial -e "ssh -p <PORT>" \
-  Datasets/Synthetic/pnbd_study_4x4x10_seed42/ \
-  root@<HOST>:/root/panelclv/Datasets/Synthetic/pnbd_study_4x4x10_seed42/
+  Datasets/Synthetic/seasonal_4x4x10/ \
+  root@<HOST>:/root/panelclv/Datasets/Synthetic/seasonal_4x4x10/
 ```
 
 `--partial` resumes a dropped transfer rather than restarting it, and a re-run
@@ -88,7 +101,7 @@ this scale. Revisit only if the worker count grows enough that home upstream
 becomes the bottleneck.
 
 *Fallback:* a worker can regenerate the grid itself with
-`python scripts/generate_pnbd_grid.py` (24 s, zero bandwidth). This is reproducible
+`python scripts/generate_pnbd_grid.py --grid <name>` (~30 s, zero bandwidth). This is reproducible
 because seeds are handed out deterministically in generation order — but it relies
 on NumPy's PCG64 producing identical draws, which holds for a given NumPy version
 and is not guaranteed across versions. **If a worker regenerates, verify the panel
@@ -110,9 +123,9 @@ Two workers running **different models on the same dataset** would both target
 pre-existing folder. So the model axis gets its own root:
 
 ```
-Studies/pnbd_study_4x4x10_seed42__LSTM/<combo>__<dataset>/
-Studies/pnbd_study_4x4x10_seed42__Transformer/<combo>__<dataset>/
-Studies/pnbd_study_4x4x10_seed42__ParetoNBD/<combo>__<dataset>/
+Studies/seasonal_4x4x10__LSTM/<combo>__<dataset>/
+Studies/seasonal_4x4x10__Transformer/<combo>__<dataset>/
+Studies/seasonal_4x4x10__ParetoNBD/<combo>__<dataset>/
 ```
 
 Within one model's tree every worker writes disjoint `<combo>__<dataset>/`
@@ -125,11 +138,18 @@ one, the split has gone wrong.
 
 ## 5. How the work is split
 
-The orchestrator holds a split specification: **a number of workers per model.**
+The split is declared in the grid module, as **a number of workers per model
+type**:
 
 ```python
-SPLITS = {"transformer": 8, "lstm": 4, "pareto_nbd": 0}   # -> 12 workers
+GRID = GridSpec(
+    ...,
+    workers={"transformer": 8, "lstm": 4, "pareto_nbd": 0},   # -> 12 workers
+)
 ```
+
+It lives beside the models it splits because the right number depends on the trial
+budget declared a few lines above it; separating them is how the two drift apart.
 
 - `N > 0` — that model's 160 datasets are divided across `N` rented workers.
 - `0` — the model does **not** go to vast; it runs on the orchestrator. This is
@@ -144,6 +164,11 @@ slice of every cell rather than four whole cells.
 Split counts are set per model because the models are not the same size of job: a
 100-trial Optuna search per dataset is worth many workers, and a single MCMC fit
 is worth none.
+
+**Trial budget: 20 Optuna trials per dataset per neural model**, the figure
+`Pareto_Datasets.ipynb` used for the existing 4x4x10 grids — not the 100 a
+single-panel suite uses, because this budget is paid 160 times over. It buys a
+tuned model per dataset, not an exhaustively tuned one.
 
 **Shards must be resumable.** A worker skips any `<combo>__<dataset>/` that already
 exists, so a box that dies mid-run is restarted rather than rewound, and re-running
@@ -254,9 +279,6 @@ generating a new keypair and registering it with vast.
 
 ## Open — not yet decided
 
-- **Trials and search space per model for the grid runs.** `scripts/run_studies.py`
-  declares 100 Optuna trials, but × 160 datasets that is 16,000 trials per neural
-  model. The grid needs its own, smaller budget; the number is not yet chosen.
 - **Whether `valendin_lstm` is in scope.** The registry declares four models; this
   study currently names three.
 - **The watchdog's actual value and the `$/hr` ceiling.** Both are pending a pilot
