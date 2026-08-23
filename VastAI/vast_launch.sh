@@ -93,7 +93,20 @@ case "$ATTACH" in
     *"'success': True"*|*"already associated"*) ;;
     *) echo "FATAL: could not attach the ssh key to ${ID}"; exit 1 ;;
 esac
-"$VASTAI" start instance "$ID" 2>&1 | sed 's/^/  /'
+# `start` can succeed as a call and still not start anything: when the host has
+# no free GPU it answers "Required resources are currently unavailable, state
+# change queued" and leaves the instance stopped forever. Polling cur_state then
+# burns the full 20-minute timeout on a box that was never going to boot, so read
+# the answer instead of discarding it.
+START="$("$VASTAI" start instance "$ID" 2>&1)"
+echo "  $START"
+case "$START" in
+    *"currently unavailable"*|*"queued"*)
+        echo "FATAL: host cannot allocate resources for ${ID} — the GPU is taken."
+        echo "  Destroying it rather than waiting; pick the next offer from vast_search.py."
+        "$VASTAI" destroy instance "$ID" -y 2>&1 | sed 's/^/  /'
+        exit 1 ;;
+esac
 
 # --- 4. poll until the container is genuinely running -------------------------
 # `actual_status` can read 'loading' while cur_state is still 'stopped', so gate

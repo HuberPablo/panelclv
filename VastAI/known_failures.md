@@ -199,3 +199,27 @@ changes what *every* model in the grid sees, so it is not a per-model workaround
 Using `ProjectedEmbedder` instead would unfreeze the benchmark and is not an
 option. **Check this before renting:** a grid that pairs `valendin_lstm` with
 `add_week_sin_cos` will burn a worker to discover it.
+
+---
+
+## F12 — `start instance` is queued and never runs
+
+**Symptom.** An instance sits at `cur_state=stopped`, `actual_status=loading`
+indefinitely. `vastai show instances` reveals the giveaway: `intended_status` and
+`next_state` are both `stopped` — vast does not believe it should be running.
+`vast_launch.sh` polls the full 20 minutes and times out.
+
+**Cause.** The host had no free GPU when we asked. `start instance` answers
+
+    Required resources are currently unavailable, state change queued.
+
+and leaves the instance allocated but stopped. It is oversubscribed — someone else
+holds the GPU — and the queued start may never fire.
+
+**Check.** Caught at launch: `vast_launch.sh` now reads the `start` response
+instead of piping it to `sed`, and destroys the instance immediately rather than
+waiting out a boot that will not happen.
+
+**Fix.** Destroy and rent a different offer. Nothing about the box will improve by
+waiting. Related to F4: the pattern is the same — a command whose output was
+discarded because it "obviously" succeeded.
