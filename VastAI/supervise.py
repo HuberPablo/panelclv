@@ -225,7 +225,7 @@ def destroy(inst_id: int, why: str, dry: bool) -> None:
         run([VASTAI, "destroy", "instance", str(inst_id), "-y"])
 
 
-def start_driver(inst: Instance, grid: str, shard: Shard, dry: bool) -> None:
+def start_driver(inst: Instance, spec, grid: str, shard: Shard, dry: bool) -> None:
     """Push data if needed and start the shard, detached, via start_shard.sh."""
     print(f"    start {shard.key} on {inst.id} ({inst.host}:{inst.port})")
     if dry:
@@ -432,7 +432,7 @@ def main() -> None:
                     if shard and shard.restarts < 1:
                         shard.restarts += 1
                         print(f"  {inst.id:<9} {tag:<22} STALLED {idle}m — restarting")
-                        start_driver(inst, args.grid, shard, args.dry_run)
+                        start_driver(inst, spec, args.grid, shard, args.dry_run)
                     else:
                         destroy(inst.id, f"stalled {idle}m twice", args.dry_run)
                         if shard:
@@ -445,7 +445,7 @@ def main() -> None:
             # data push died halfway (F10 — rsync resumes, so just re-run it).
             if shard:
                 print(f"  {inst.id:<9} {tag:<22} idle (panels={inst.panels}) — starting")
-                start_driver(inst, args.grid, shard, args.dry_run)
+                start_driver(inst, spec, args.grid, shard, args.dry_run)
             else:
                 free_instances.append(inst)
                 print(f"  {inst.id:<9} {tag:<22} healthy and unassigned")
@@ -458,7 +458,7 @@ def main() -> None:
             inst = free_instances.pop()
             shard.instance = inst.id
             print(f"  assign {shard.key} -> {inst.id}")
-            start_driver(inst, args.grid, shard, args.dry_run)
+            start_driver(inst, spec, args.grid, shard, args.dry_run)
             pending.remove(shard)
 
         running = len([i for i in insts.values() if i.state == "running"])
