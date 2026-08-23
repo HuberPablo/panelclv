@@ -240,10 +240,25 @@ the main way money is lost here.
   per-dataset wall-clock, not from the shape of the grid**, because past some point
   more workers buy overhead and failure modes rather than speed.
 
-**Renting spends real money, so the agent shortlists and the human approves.** The
-agent runs `vast_search.py`, presents the ranked offers with `$/hr`, and waits for
-a pick. After that it launches, provisions, runs, polls, retrieves and destroys
-without further check-ins, within the agreed watchdog and price ceiling.
+**Standing authorization: up to 10 workers at or below $0.10/hr may be rented
+without asking.** Inside that envelope the agent searches, picks, launches,
+provisions, runs, polls, retrieves and destroys on its own judgement, and reports
+what it spent. Outside it — a higher price, or more than 10 machines at once — the
+agent shortlists offers with their `$/hr` and waits for a human pick.
+
+The ceiling is per machine, not per fleet: ten boxes at $0.09/hr is authorized,
+one at $0.11/hr is not.
+
+Two constraints the ceiling does not express, which still apply:
+
+- **Take the CPU generation, not the cheapest row.** `vast_search.py` labels each
+  offer `current` / `recent` / `older` / `ancient`. Only `current` and `recent`
+  qualify — the `ancient` Xeon E5 v3/v4 class is where a launch-bound workload
+  crawls regardless of price, and there are usually enough recent-generation
+  offers under the ceiling to fill a fleet of ten.
+- **The watchdog still binds.** An authorized rental is not an unbounded one; every
+  worker carries a maximum lifetime (§8 above) and is destroyed when its results
+  are pulled.
 
 ---
 
