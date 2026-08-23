@@ -91,9 +91,14 @@ is neural is read off the entry rather than restated.
 
 ## Environment
 
-The project venv is `/home/virthian/Desktop/Thesis/venvs/thesis_rocm/` (PyTorch on
-ROCm). Run code with its interpreter. It is **user-maintained: leave its packages
-exactly as they are.** When a dependency is missing, say so and stop.
+Run code with the project venv's interpreter, never the system Python. Which venv
+that is depends on the machine — a ROCm build on the workstation, CPU-only torch on
+a VM or a rented GPU box — so no path is written down here. Take it from an
+activated `$VIRTUAL_ENV`; if nothing is activated, ask which interpreter to use
+rather than guessing one.
+
+The venv is **user-maintained: leave its packages exactly as they are.** When a
+dependency is missing, say so and stop.
 
 ## Agent skills
 
