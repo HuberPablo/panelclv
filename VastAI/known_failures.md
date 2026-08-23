@@ -223,3 +223,18 @@ waiting out a boot that will not happen.
 **Fix.** Destroy and rent a different offer. Nothing about the box will improve by
 waiting. Related to F4: the pattern is the same — a command whose output was
 discarded because it "obviously" succeeded.
+
+---
+
+## F13 — `pkill -f` matches the shell even with the bracket trick
+
+**Symptom.** A compound command dies partway through with exit code 144; later
+steps never run. This is F7 again, in a form the usual fix does not cover.
+
+**Cause.** `pkill -f "[s]upervise.py"` is safe only if the *whole* command line
+contains no plain occurrence of the target. A command that kills a process and then
+restarts it mentions the real name in the restart step, so the shell's own command
+line matches and `pkill` kills its own shell.
+
+**Fix.** Kill by PID (`kill "$PID"`), or split the kill and the restart into two
+separate commands. The bracket trick protects the pattern, not the rest of the line.

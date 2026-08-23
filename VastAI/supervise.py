@@ -230,6 +230,16 @@ def start_driver(inst: Instance, grid: str, shard: Shard, dry: bool) -> None:
     print(f"    start {shard.key} on {inst.id} ({inst.host}:{inst.port})")
     if dry:
         return
+    # Seed the worker with suites already collected for this model. run_pnbd_grid.py
+    # skips any suite whose results.csv exists, but it reads the *worker's* disk — so
+    # without this a replacement worker redoes work another worker already finished.
+    seed = spec.train_base(shard.model_name)
+    if seed.is_dir() and any(seed.glob("*__*")):
+        run(["rsync", "-az", "--partial", "-e",
+             "ssh " + " ".join(o for o in SSH_OPTS if o != "-n") + f" -p {inst.port}",
+             str(seed) + "/",
+             f"root@{inst.host}:/root/panelclv/Studies/{spec.name}__{shard.model_name}/"],
+            timeout=1800)
     log = REPO_ROOT / "VastAI" / "state" / f"driver_{inst.id}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
@@ -413,6 +423,11 @@ def main() -> None:
 
             if status.startswith("running"):
                 idle = int(status.split(":")[1]) if ":" in status else 0
+                # Incremental pull: rsync only moves suites that are not local yet,
+                # so this is cheap, and it means a worker lost at 90% costs one
+                # dataset rather than the whole shard.
+                if shard and cycle % 3 == 0:
+                    pull_results(inst, spec, shard, args.dry_run)
                 if idle > args.stall_minutes:
                     if shard and shard.restarts < 1:
                         shard.restarts += 1
