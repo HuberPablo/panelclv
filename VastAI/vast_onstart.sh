@@ -34,10 +34,17 @@ done
 export PATH="$(dirname "$PY"):$PATH"
 echo "python: $PY ($("$PY" --version 2>&1))"
 
-# Blocking on purpose: a six-hour sweep that silently ran on CPU costs the whole
-# rental. Failing here means .onstart_done is never touched.
-"$PY" -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)' \
-    || { echo "FATAL: no CUDA device visible — wrong image or CPU-only host"; exit 1; }
+# Poll rather than probe once: the container can win the race against its own GPU
+# driver, and a single check then aborts provisioning on a box whose GPU appears
+# seconds later — leaving a rented machine that bills but installed nothing. Still
+# fatal after the grace period, because a sweep that silently ran on CPU costs the
+# whole rental.
+for attempt in $(seq 1 20); do
+    "$PY" -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)' && break
+    [ "$attempt" = 20 ] && { echo "FATAL: no CUDA device after 100s — wrong image or CPU-only host"; exit 1; }
+    echo "  no CUDA device yet (attempt ${attempt}/20), waiting..."
+    sleep 5
+done
 echo "gpu: $("$PY" -c 'import torch; print(torch.cuda.get_device_name(0))')"
 
 # git to clone, rsync for the data push/pull (needed on BOTH ends), tmux to keep

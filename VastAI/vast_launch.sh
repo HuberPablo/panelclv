@@ -84,7 +84,15 @@ echo "  instance id: ${ID}"
 # --- 3. attach key + start ----------------------------------------------------
 # Order matters: attach before start so the key is present at first boot.
 echo "[3/4] attaching ssh key and starting..."
-"$VASTAI" attach ssh "$ID" "$(cat "${KEY}.pub")" 2>&1 | sed 's/^/  /' || true
+# Not `|| true`: a swallowed attach failure surfaces much later as an unreachable
+# box that has already been billing through the whole image pull. "already
+# associated" is the one benign non-success, so let only that through.
+ATTACH="$("$VASTAI" attach ssh "$ID" "$(cat "${KEY}.pub")" 2>&1)"
+echo "  $ATTACH"
+case "$ATTACH" in
+    *"'success': True"*|*"already associated"*) ;;
+    *) echo "FATAL: could not attach the ssh key to ${ID}"; exit 1 ;;
+esac
 "$VASTAI" start instance "$ID" 2>&1 | sed 's/^/  /'
 
 # --- 4. poll until the container is genuinely running -------------------------
@@ -117,7 +125,18 @@ print(f\"instance : {r['id']}\")
 print(f\"gpu/cpu  : {r.get('gpu_name')} | {r.get('cpu_name')}\")
 print(f\"cost     : \${r.get('dph_total'):.4f}/hr\")
 print()
-print(f\"ssh -i ${KEY} -p {r['ssh_port']} root@{r['ssh_host']}\")
+# ssh_host/ssh_port name vast's PROXY (sshN.vast.ai). Despite --direct that
+# endpoint often refuses the instance-attached key — 'Permission denied
+# (publickey)' or a bare 'Connection closed' — while the machine's own address
+# accepts it. Prefer the container's mapped 22/tcp port on public_ipaddr and fall
+# back to the proxy only when no direct port was allocated.
+ports = (r.get('ports') or {}).get('22/tcp') or []
+direct_port = ports[0].get('HostPort') if ports else None
+if direct_port:
+    print(f\"ssh -i ${KEY} -p {direct_port} root@{r['public_ipaddr']}\")
+    print(f\"proxy    : ssh -i ${KEY} -p {r['ssh_port']} root@{r['ssh_host']}  (fallback)\")
+else:
+    print(f\"ssh -i ${KEY} -p {r['ssh_port']} root@{r['ssh_host']}\")
 print()
 print(f\"logs     : $VASTAI logs {r['id']}\")
 print(f\"destroy  : $VASTAI destroy instance {r['id']}\")
