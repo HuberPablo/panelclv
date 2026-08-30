@@ -210,6 +210,31 @@ def test_a_knob_in_the_wrong_dict_is_rejected():
         tuning._validate_training("lstm", {"paitence": 7})
 
 
+def test_the_embedder_is_a_pinnable_search_dimension():
+    """Which embedding strategy a model is built with is chosen by `params`.
+
+    The seam (ADR-0005) only pays off if a strategy can be selected per study rather
+    than per model type — otherwise the ablation needs a second registry entry, which
+    is the duplication ADR-0006 exists to prevent. So both arms are pinned here and
+    the built embedder is checked by class: a dispatch that fell through to a default
+    would still train, and would silently report the wrong architecture.
+    """
+    for name, expected in (("projected", "ProjectedEmbedder"),
+                           ("valendin", "ValendinEmbedder")):
+        params = suggest_params("lstm", _FixedTrial(), {"embedder": name})
+        assert params["embedder"] == name
+        model = build_model("lstm", params, RECIPE)
+        assert type(model.backbone.embedder).__name__ == expected
+
+    # `embedding_dim` is the ProjectedEmbedder's common projection width. The
+    # Valendin strategy has no such knob, so it must not be registered as a search
+    # dimension that spends the trial budget without reaching the model.
+    valendin = suggest_params("lstm", _FixedTrial(), {"embedder": "valendin"})
+    assert "embedding_dim" not in valendin
+    projected = suggest_params("lstm", _FixedTrial(), {"embedder": "projected"})
+    assert "embedding_dim" in projected
+
+
 def test_a_pinned_scalar_reaches_the_recorded_params():
     """Pinning a hyperparameter to a scalar must still record it on the trial.
 

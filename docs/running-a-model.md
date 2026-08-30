@@ -475,6 +475,9 @@ study = run_optuna_study(
     model_type="lstm",
     data_builder=make_data_builder(data_full),
     search_space={
+        # "embedder" defaults to "valendin", which has no covariate path — this
+        # panel carries week_sin/week_cos, so the projected strategy is pinned.
+        "embedder": "projected",
         "embedding_dim": {8}, "lstm_hidden_size": {8}, "dense_units": {8},
         "dropout": {0.0}, "learning_rate": (1e-3, 1e-2, "log"),
         "weight_decay": 0.0, "batch_size": {8},
@@ -544,7 +547,7 @@ flowchart TD
     T --> SP["registry.suggest_params<br/>merge search_space over the entry's ranges"]
     SP --> CS["suggest_covariate_selection<br/>one boolean per removable entry"]
     CS --> DB["data_builder(drop_cols, batch_size)<br/>= select_features + split_calibration"]
-    DB --> BM["_build_lstm<br/>ProjectedEmbedder + MultinomialLSTMModel"]
+    DB --> BM["_build_lstm<br/>_make_embedder(params[embedder]) + MultinomialLSTMModel"]
     BM --> FIT["fit_model<br/>reports per-epoch loss to the trial"]
     FIT --> PRUNE{"MedianPruner<br/>says stop?"}
     PRUNE -->|yes| KILL["trial pruned"]
@@ -560,7 +563,7 @@ flowchart TD
 Optuna's own `best_params` holds only what was *sampled*:
 
 ```python
-{'embedding_dim': 8, 'lstm_hidden_size': 8, 'dense_units': 8,
+{'embedder': 'projected', 'embedding_dim': 8, 'lstm_hidden_size': 8, 'dense_units': 8,
  'learning_rate': 0.0023688639503640775, 'batch_size': 8,
  'use_week_sin+week_cos': True, 'use_cumulative_transactions': True}
 ```
@@ -811,8 +814,9 @@ resolves `d_model` and `nhead` first and raises `optuna.TrialPruned` when
 `d_model % nhead != 0`, rather than narrowing the categorical domain per trial.
 
 **2 — Embedding width is tied to the model width.** Its registry builder passes
-`embedding_dim=params["d_model"]` to the `ProjectedEmbedder`. There is no separate
-`embedding_dim` knob.
+`d_model` as the width `_make_embedder` hands a `ProjectedEmbedder`. There is no
+separate `embedding_dim` knob (the LSTM has one, and searches it only when its
+sampled embedder is `"projected"`).
 
 **3 — The rollout carries history explicitly.** `simulate_attention_path`, because
 a Transformer has no recurrent state to thread:

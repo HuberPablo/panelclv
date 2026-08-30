@@ -37,7 +37,7 @@ from typing import Any, Callable
 import optuna
 
 from panelclv.benchmarks.valendin_lstm import ValendinLSTMModel
-from panelclv.models.embedders import ProjectedEmbedder
+from panelclv.models.embedders import Embedder, ProjectedEmbedder, ValendinEmbedder
 from panelclv.models.monte_carlo_forecasting import (
     forecast_recurrent,
     forecast_attention,
@@ -149,6 +149,29 @@ def _suggest_every_param(
     return {name: suggest_param(trial, name, spec) for name, spec in specs.items()}
 
 
+def _suggest_lstm_params(
+    trial: optuna.Trial, specs: dict[str, Any]
+) -> dict[str, Any]:
+    """Sample the LSTM's parameters, skipping a width the embedder does not have.
+
+    `embedding_dim` is the common width a `ProjectedEmbedder` projects every feature
+    to. `ValendinEmbedder` has no such knob — each feature keeps its own sqrt(n)+1
+    vector — so under that strategy the parameter does nothing. Registering it anyway
+    would spend the trial budget searching three values of a number that never
+    reaches the model, so the embedder is resolved FIRST and the width is offered only
+    when it is real.
+    """
+    embedder = suggest_param(trial, "embedder", specs["embedder"])
+    params = {"embedder": embedder}
+    for name, spec in specs.items():
+        if name == "embedder":
+            continue
+        if name == "embedding_dim" and embedder != "projected":
+            continue
+        params[name] = suggest_param(trial, name, spec)
+    return params
+
+
 def _suggest_transformer_params(
     trial: optuna.Trial, specs: dict[str, Any]
 ) -> dict[str, Any]:
@@ -184,15 +207,48 @@ def _suggest_transformer_params(
 # ({col: cardinality}), `target_col`, and optionally `seq_len`.
 
 
+# Which strategy turns features into a vector is a sampled choice, not a property
+# of the architecture (ADR-0005): both models below accept any `Embedder` and wire
+# themselves to its `output_dim`. So `embedder` sits in the search space beside
+# `dropout` — pinned to one strategy for an ablation arm, or left as a set of names
+# for Optuna to choose between. A new strategy is a new class in `models.embedders`
+# plus a name in `_EMBEDDERS`, never a second registry entry per model.
+#
+# `width` is the common projection width `ProjectedEmbedder` is asked for
+# (`embedding_dim` for the LSTM, `d_model` for the Transformer). `ValendinEmbedder`
+# takes none — every width is sqrt(cardinality)+1 — so it ignores the argument.
+# The strategies a search space may name. Keys are the categorical values, so the
+# set of legal names IS this table — nothing restates it, including the error below.
+_EMBEDDERS: dict[str, Callable[..., Embedder]] = {
+    "projected": lambda width, **cols: ProjectedEmbedder(embedding_dim=width, **cols),
+    # Takes no width: every feature keeps its own sqrt(cardinality)+1 vector.
+    "valendin": lambda width, **cols: ValendinEmbedder(**cols),
+}
+
+
+def _make_embedder(name: str, recipe: dict[str, Any], width: int | None) -> Embedder:
+    try:
+        make = _EMBEDDERS[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown embedder {name!r}; registered strategies: {sorted(_EMBEDDERS)}"
+        ) from None
+    return make(
+        width,
+        seq_cols=recipe["seq_cols"],
+        embedded_cols=recipe["embedded_cols"],
+        target_col=recipe.get("target_col", "Transactions"),
+    )
+
+
 def _build_lstm(
     params: dict[str, Any], recipe: dict[str, Any]
 ) -> MultinomialLSTMModel:
     return MultinomialLSTMModel(
-        embedder=ProjectedEmbedder(
-            seq_cols=recipe["seq_cols"],
-            embedded_cols=recipe["embedded_cols"],
-            target_col=recipe.get("target_col", "Transactions"),
-            embedding_dim=params["embedding_dim"],
+        # `embedding_dim` is absent from `params` whenever the sampled embedder has no
+        # width to set (see `_suggest_lstm_params`), so it is read with `.get`.
+        embedder=_make_embedder(
+            params["embedder"], recipe, params.get("embedding_dim")
         ),
         lstm_hidden_size=params["lstm_hidden_size"],
         dense_units=params["dense_units"],
@@ -205,13 +261,10 @@ def _build_transformer(
 ) -> MultinomialTransformerModel:
     return MultinomialTransformerModel(
         # The Transformer projects the embedder's width onto d_model, and has always
-        # embedded at d_model, so that is the width the ProjectedEmbedder uses.
-        embedder=ProjectedEmbedder(
-            seq_cols=recipe["seq_cols"],
-            embedded_cols=recipe["embedded_cols"],
-            target_col=recipe.get("target_col", "Transactions"),
-            embedding_dim=params["d_model"],
-        ),
+        # embedded at d_model, so that is the width a ProjectedEmbedder uses. A
+        # ValendinEmbedder ignores it and produces its own narrower concatenation,
+        # which `input_projection` maps onto d_model just the same.
+        embedder=_make_embedder(params["embedder"], recipe, params["d_model"]),
         seq_len=recipe.get("seq_len"),
         d_model=params["d_model"],
         nhead=params["nhead"],
@@ -274,6 +327,9 @@ class ModelEntry:
 MODEL_REGISTRY: dict[str, ModelEntry] = {
     "lstm": ModelEntry(
         search_space={
+            # Leads, because `_suggest_lstm_params` resolves it first to decide
+            # whether `embedding_dim` is a real parameter at all.
+            "embedder":        "valendin",
             "embedding_dim":   {64, 128, 256},
             "lstm_hidden_size": {32, 64, 128},
             "dense_units":     {32, 64, 128},
@@ -282,12 +338,13 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
             "weight_decay":    (1e-6, 1e-2, "log"),
             "batch_size":      {64, 128, 256},
         },
-        suggest=_suggest_every_param,
+        suggest=_suggest_lstm_params,
         build=_build_lstm,
         rollout=forecast_recurrent,
     ),
     "transformer": ModelEntry(
         search_space={
+            "embedder":           "valendin",
             # d_model and nhead lead, because `_suggest_transformer_params` resolves
             # them first to prune indivisible pairs.
             "d_model":            {32, 64, 128},
