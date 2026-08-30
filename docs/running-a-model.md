@@ -475,8 +475,8 @@ study = run_optuna_study(
     model_type="lstm",
     data_builder=make_data_builder(data_full),
     search_space={
-        # "embedder" defaults to "valendin", which has no covariate path — this
-        # panel carries week_sin/week_cos, so the projected strategy is pinned.
+        # The registry default is "valendin"; this walkthrough traces the projected
+        # strategy, which is also the only one `embedding_dim` below applies to.
         "embedder": "projected",
         "embedding_dim": {8}, "lstm_hidden_size": {8}, "dense_units": {8},
         "dropout": {0.0}, "learning_rate": (1e-3, 1e-2, "log"),

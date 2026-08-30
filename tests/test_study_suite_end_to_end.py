@@ -87,14 +87,12 @@ def suite(tmp_path_factory) -> dict:
         device="cpu",                      # CPU keeps the run reproducible and GPU-free
         data=data,
         models=[
-            # The golden panel carries numerical covariates (week_sin/week_cos) and
-            # AR features, which only `ProjectedEmbedder` has a path for — so both
-            # arms pin the embedder rather than taking the registry default.
+            # No `embedder` override: both arms take the registry default, so this
+            # covers the default strategy running on a panel that carries numerical
+            # covariates (week_sin/week_cos) and AR features.
             ModelSpec(name="LSTM", model_type="lstm",
-                      search_space={"embedder": "projected"},
                       n_trials=N_TRIALS, training=training),
             ModelSpec(name="Transformer", model_type="transformer",
-                      search_space={"embedder": "projected"},
                       n_trials=N_TRIALS, training=training),
             # Short chains: this records which code runs, not whether it has converged —
             # the same trade the golden test's Pareto arm makes.

@@ -45,8 +45,7 @@ def make_x(seq_cols=SEQ_COLS, embedded_cols=EMBEDDED_COLS, seed=0):
 def _both_embedders():
     return [
         ProjectedEmbedder(SEQ_COLS, EMBEDDED_COLS, TARGET, embedding_dim=16),
-        # Valendin has no covariate path, so it only ever sees embedded columns.
-        ValendinEmbedder(["Transactions", "week_idx"], EMBEDDED_COLS, TARGET),
+        ValendinEmbedder(SEQ_COLS, EMBEDDED_COLS, TARGET),
     ]
 
 
@@ -163,14 +162,39 @@ def test_valendin_applies_no_normalisation_or_projection():
         assert isinstance(block, torch.nn.Embedding)
 
 
-def test_valendin_rejects_a_numerical_covariate():
-    """The paper's model reads embedded features only; it has no covariate path.
+def test_valendin_concatenates_a_numerical_covariate_untouched():
+    """A covariate rides along as its own channel, with nothing applied to it.
 
-    Silently dropping a requested covariate would make the benchmark quietly differ
-    from what the caller asked for, so this is an error.
+    The paper's own model has no covariate to carry — that restriction belongs to the
+    benchmark (ADR-0004) and is enforced in `benchmarks/valendin_lstm.py`, not here.
+    The strategy itself is "concatenate, add no arithmetic", and a covariate is the
+    case where the arithmetic added is literally none: `prepare_dataset` has already
+    standardised the channel, so it appears in the output exactly as it arrived.
     """
-    with pytest.raises(ValueError, match="covariate"):
-        ValendinEmbedder(SEQ_COLS, EMBEDDED_COLS, TARGET)
+    emb = ValendinEmbedder(SEQ_COLS, EMBEDDED_COLS, TARGET).eval()
+    x = make_x(SEQ_COLS)
+
+    # Two embedded columns contribute sqrt(n)+1 each; two covariates one channel each.
+    assert emb.output_dim == _emb_size(6) + _emb_size(52) + 2
+
+    with torch.no_grad():
+        got = emb(x)
+    assert got.shape == (B, T, emb.output_dim)
+
+    # The covariates occupy the trailing slots, in seq_cols order, bit-for-bit.
+    assert torch.equal(got[:, :, -2], x[:, :, 2])   # spend_norm
+    assert torch.equal(got[:, :, -1], x[:, :, 3])   # tenure_norm
+
+
+def test_valendin_width_is_unchanged_without_covariates():
+    """The published width, pinned: the benchmark's arithmetic must not have moved.
+
+    Adding a covariate path is only safe for the frozen reference (ADR-0004) because
+    it contributes nothing when there is no covariate. This is that guarantee.
+    """
+    emb = ValendinEmbedder(["Transactions", "week_idx"], EMBEDDED_COLS, TARGET)
+    assert emb.output_dim == _emb_size(6) + _emb_size(52)
+    assert emb.output_dim == 3 + 8
 
 
 # ---------------------------------------------------------------------------

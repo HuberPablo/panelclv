@@ -15,7 +15,8 @@ covariate.
 Two strategies live here because the thesis needs both, and they genuinely differ:
 
 - ``ValendinEmbedder`` — the published architecture: one raw `Embedding(n, sqrt(n)+1)`
-  per feature, concatenated. No normalisation, no projection, no covariate path.
+  per feature, concatenated. No normalisation, no projection: a numerical covariate
+  is concatenated as its own single channel, exactly as it arrives.
 - ``ProjectedEmbedder`` — our own: every feature is embedded, normalised and projected
   to one common width, the context is summed, and the target embedding is concatenated
   last.
@@ -204,12 +205,21 @@ class ValendinEmbedder(Embedder):
     where the features are 52 weeks and the transaction-count classes), which is a
     large part of what makes the reference model smaller than ours.
 
-    There is no covariate path: the paper's model reads week and transaction count
-    only, both categorical. A numerical covariate is rejected rather than dropped,
-    because silently ignoring a requested feature would make the benchmark differ
-    from what the caller asked for without saying so.
+    A numerical covariate keeps that spirit: it is concatenated as its own single
+    channel, in its `seq_cols` slot, with nothing applied to it. `prepare_dataset`
+    has already standardised those channels against the calibration window, so they
+    arrive on a scale comparable to the embedding outputs and this strategy adds no
+    arithmetic of its own, which is the property that defines it. Carrying a covariate
+    is nonetheless an EXTENSION of the published strategy, not the published strategy
+    itself — Valendin et al. had none to carry (ADR-0004).
 
-        output_dim = sum of sqrt(n)+1 over every embedded column
+        output_dim = sum of sqrt(n)+1 over the embedded columns + 1 per covariate
+
+    That restriction — embedded features only — belongs to the *benchmark* (ADR-0004),
+    which enforces it in `benchmarks/valendin_lstm.py`, and not to this strategy — the seam exists so a strategy and a feature set can vary
+    independently (ADR-0005). Welding the paper's feature set into the embedder made
+    the developed models unable to use this strategy on any panel carrying a
+    covariate, which is a constraint on the config wearing a strategy's clothes.
     """
 
     def __init__(
@@ -220,29 +230,28 @@ class ValendinEmbedder(Embedder):
     ) -> None:
         super().__init__(seq_cols, embedded_cols, target_col)
 
-        if self.covariate_cols:
-            raise ValueError(
-                f"ValendinEmbedder has no covariate path, but seq_cols carries "
-                f"{len(self.covariate_cols)} non-embedded column(s): "
-                f"{self.covariate_cols}. The published model reads embedded features "
-                f"only. Either drop them from seq_cols or use ProjectedEmbedder."
-            )
-
         self._emb_modules = nn.ModuleList(
             nn.Embedding(int(self.embedded_cols[c]), _emb_size(int(self.embedded_cols[c])))
             for c in self._emb_cols
         )
+        # One channel per covariate, on top of every embedding's own width. With no
+        # covariates this is the published width unchanged, which is what keeps the
+        # frozen benchmark's arithmetic identical.
         self.output_dim: int = sum(
             _emb_size(int(self.embedded_cols[c])) for c in self._emb_cols
-        )
+        ) + len(self.covariate_cols)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self._check_shape(x)
 
         # Concatenated in seq_cols order — nothing is summed, so every feature keeps
-        # its own slot in the vector the LSTM sees.
+        # its own slot in the vector the LSTM sees. An embedded column contributes
+        # its sqrt(n)+1 vector; a covariate contributes its own single channel,
+        # untouched.
         chunks = [
             self._emb_modules[self._emb_index[col]](x[:, :, i].long())
+            if col in self.embedded_cols
+            else x[:, :, i : i + 1].float()
             for i, col in enumerate(self.seq_cols)
         ]
         return torch.cat(chunks, dim=-1)

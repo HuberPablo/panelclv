@@ -30,13 +30,32 @@ inherit our choices:
 - **Validation split** — temporal rather than a random 10% of customers (ADR-0001).
 - **Tuning** — Optuna over architecture and feature subset; they use fixed sizes.
 - **Covariates** — their model reads week and transaction count only; ours accepts
-  arbitrary covariates through a projection.
+  arbitrary covariates, projected to a common width or concatenated raw depending on
+  the embedding strategy it is configured with (ADR-0005).
 
 The covariate line is settled for the benchmark: **it takes none**. The published model
 has two inputs, `week` and `transaction`, with nowhere for a covariate to enter, so
-`ValendinEmbedder` raises on a non-embedded column rather than dropping it — silently
-ignoring a requested feature would make the benchmark differ from what the caller asked
-for without saying so. A covariate run is our model's job.
+`benchmarks/valendin_lstm.py` raises on a non-embedded column rather than dropping it —
+silently ignoring a requested feature would make the benchmark differ from what the
+caller asked for without saying so.
+
+**That ruling binds the benchmark, not the embedding strategy.** The check lived in
+`ValendinEmbedder` while the benchmark was its only caller, which was true until the
+developed models were allowed to select an embedder per study. They run on panels that
+carry covariates, so the constraint moved to the class it is actually about, and the
+strategy gained a covariate path: each non-embedded column is concatenated as its own
+single channel, untouched — `prepare_dataset` has already standardised it, so the
+strategy still adds no arithmetic of its own, which is the whole of what makes it the
+published one. Two consequences worth stating plainly:
+
+- **The benchmark is unmoved.** With no covariate the width is `sum of sqrt(n)+1` as
+  before, so the frozen architecture computes exactly what it computed. That is what
+  makes this change admissible under this ADR at all, and
+  `scripts/validate_valendin_lstm.py` is what proves it.
+- **The extended strategy is not the published one.** Valendin et al. never
+  concatenated a covariate; running our LSTM with `embedder="valendin"` on a covariate
+  panel is our extension of their embedding, and describing it as "the published
+  embedding" without that qualification would be a claim the paper does not support.
 
 Anything else that differs is a bug, not a decision. Two were found and are now fixed:
 their embeddings are raw `sqrt(n)+1` vectors concatenated together, where ours were

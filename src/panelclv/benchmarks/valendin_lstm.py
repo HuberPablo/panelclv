@@ -85,8 +85,24 @@ class _ValendinLSTMBackbone(nn.Module):
         super().__init__()
 
         # The embedder is the seam (ADR-0005), and this is the strategy that makes
-        # the model the paper's: raw sqrt(n)+1 embeddings concatenated. It rejects a
-        # numerical covariate, which is what keeps this benchmark honest.
+        # the model the paper's: raw sqrt(n)+1 embeddings concatenated.
+        #
+        # The published model reads week and transaction count, both categorical,
+        # with nowhere for a covariate to enter — so THIS class refuses one (ADR-0004).
+        # The check lives here rather than in the embedder because it is a fact about
+        # the benchmark's inputs, not about the embedding strategy: our own models may
+        # use the same strategy on a panel that carries covariates. Dropping them
+        # silently would make the benchmark differ from what the caller asked for
+        # without saying so, which is the failure this guards.
+        covariates = [c for c in seq_cols if c not in embedded_cols]
+        if covariates:
+            raise ValueError(
+                f"The Valendin benchmark reads embedded features only, but seq_cols "
+                f"carries {len(covariates)} non-embedded column(s): {covariates}. "
+                f"The published model has no covariate path (ADR-0004). Either drop "
+                f"them from seq_cols, or run one of the developed models in "
+                f"`models/` — they accept covariates under either embedding strategy."
+            )
         self.embedder = ValendinEmbedder(seq_cols, embedded_cols, target_col)
 
         self.seq_cols: list[str] = self.embedder.seq_cols

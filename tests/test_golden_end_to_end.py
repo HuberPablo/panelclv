@@ -166,10 +166,11 @@ def _golden_config() -> PanelConfig:
 def _valendin_config() -> PanelConfig:
     """The golden config stripped to what the published architecture can read.
 
-    `ValendinEmbedder` has no covariate path — the paper's model consumes embedded
-    features only — so the derived time features and autoregressive columns the other
-    arms carry have to go. Constructing this config is the ADR-0004 constraint made
-    concrete.
+    The published model consumes embedded features only, and `ValendinLSTMModel`
+    enforces that itself (ADR-0004), so the derived time features and autoregressive
+    columns the other arms carry have to go. Constructing this config is that
+    constraint made concrete. It binds this benchmark, not the embedding strategy:
+    `ValendinEmbedder` does carry covariates, and the developed models use it that way.
     """
     return replace(_golden_config(), time_features=None, ar_features=())
 
