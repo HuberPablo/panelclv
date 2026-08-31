@@ -139,6 +139,42 @@ using it would compress the year into a seventh of the sine's period. This is de
 not ISO 8601: ISO gives some years a 53rd week, which aliases exactly onto week 0 under a
 52-week sine and would encode New Year's Eve as New Year's Day.
 
+**A stored panel may not agree with that convention, and nothing checks it.** The
+convention above is what `period_calendar.week_of_year` implements and what
+`week_start` inverts, but a panel arrives with its `week` column already computed by
+whatever built it — the package never re-derives it from a date. The two builders in
+this repo disagree by one day:
+
+| builder | rule | week 0 | week 51 |
+|---|---|---|---|
+| `notebooks/archive/dataset_building.ipynb` (electronics, apparel, gift, multichannel) | `dayofyear // 7` | Jan 1–6 (6 days) | 9 days |
+| `period_calendar.week_of_year` / `scripts/build_cdnow_panel.py` (CDNOW) | `(dayofyear − 1) // 7` | Jan 1–7 | 8 days |
+
+Measured, not inferred — rebuilding the stored electronics panel from
+`Datasets/Electronic.csv` under each rule:
+
+```
+dayofyear // 7        (archived notebook):      0 mismatched cells of 172432
+(dayofyear - 1) // 7  (package week_of_year):  913 mismatched cells of 172432
+```
+
+So for the electronics family, the panel's week `w` sits one day earlier than
+`week_start(year, w)` places it on the calendar. Two consequences, one live and one
+latent:
+
+- **Cross-dataset:** "week 39" is not the same seven days on an electronics panel as on
+  CDNOW. Comparing a seasonal position between the two families is off by a day.
+- **Window slicing:** `prepare_dataset` cuts the calibration/holdout windows on
+  `week_start`, so a boundary falling mid-week could place up to one day of transactions
+  in the wrong window. **Neither current config is affected** — every electronics window
+  date is a year boundary, where both rules agree the year's last bucket ends on Dec 31,
+  and CDNOW's mid-year boundaries were built with the package rule, so `week_start` is
+  its exact inverse. The risk arrives with the first mid-year boundary on a panel from
+  the archived builder.
+
+A panel built outside this package is trusted as given. If you build one, use
+`period_calendar.week_of_year` so `week_start` inverts it.
+
 **Why sin/cos rather than the raw index.** A raw week number is a discontinuous
 encoding of a circular quantity: weeks 52 and 1 are adjacent in the world but maximally
 distant in the feature. Projecting onto the unit circle makes the encoding continuous and

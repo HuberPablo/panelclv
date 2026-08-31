@@ -981,3 +981,15 @@ unless `overwrite=True`.
 
 **Long studies fill the disk with checkpoints.** One `.pth` per trial. Set
 `keep_only_best_checkpoint=True` unless you need to rebuild a non-winning trial.
+
+**`embedding_dim` in a search space does nothing unless the embedder is
+`"projected"`.** The `lstm` registry entry defaults `embedder="valendin"`, whose widths
+are fixed by cardinality (`sqrt(n)+1` per column, concatenated), so it has no common
+width to set. `_suggest_lstm_params` resolves the embedder *first* and skips
+`embedding_dim` deliberately — registering it would spend the trial budget on a number
+that never reaches the model. The skip is silent: no error, no warning, and no
+`param_embedding_dim` column in `results.csv` or the trial summaries, which is the only
+place a reader could notice. Two archived electronics suites declared
+`"embedding_dim": {64, 128, 256}` and searched none of the three. Pin
+`"embedder": "projected"` in the same `search_space` to make the width live, or drop
+the key so the config stops advertising a search that is not happening.
