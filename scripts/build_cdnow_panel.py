@@ -94,10 +94,17 @@ def complete_week_grid(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
         columns=["year", "week"],
     )
     starts = week_start(grid["year"], grid["week"])
-    # A week is complete when both its first and its last day are observed. The last
-    # week of a calendar year runs a day or two long under this convention, so the
-    # test is written on the following week's start rather than on start + 6 days.
-    next_starts = starts + pd.Timedelta(days=7)
+    # A week is complete when both its first day and its last day are observed, and
+    # its last day is the day before the NEXT bucket begins. That is `start + 7` for
+    # every week but the year's last, which absorbs the calendar's leftover days (8 in
+    # a common year, 9 in a leap year) and therefore ends on Dec 31. Deriving the next
+    # start rather than adding seven is what keeps a truncated year-end week out: with
+    # a flat +7 the test would accept 1997 w51 on data that stops on Dec 30.
+    is_last_of_year = grid["week"] == WEEKS_PER_YEAR - 1
+    next_starts = starts.where(
+        ~is_last_of_year, pd.to_datetime((grid["year"] + 1).astype(str) + "-01-01")
+    )
+    next_starts = next_starts.mask(~is_last_of_year, starts + pd.Timedelta(days=7))
     keep = (starts >= start) & (next_starts <= end + pd.Timedelta(days=1))
     return grid.loc[keep].reset_index(drop=True)
 
