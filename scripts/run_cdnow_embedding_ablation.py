@@ -72,14 +72,23 @@ def build_panel_config() -> PanelConfig:
     them, the weights never train on them.
 
     CDNOW carries no covariates, so the features are the target's own history plus
-    engineered ones: `week_sin`/`week_cos` for the annual cycle and two leak-free
-    autoregressive signals recomputed from the sampled count during the rollout.
-    That mix is deliberate for this ablation. `prepare_dataset` standardises the
-    numeric channels on the calibration window, so the arms are not separated by
-    feature scaling: what separates them is that Valendin carries each standardised
-    covariate as one raw channel beside the target embedding, while Projected embeds
-    every feature to a common width and sums them. On this panel that is a 7-wide
-    input against a 2 x `embedding_dim`-wide one.
+    two leak-free autoregressive signals, recomputed from the sampled count during the
+    rollout. `prepare_dataset` standardises those numeric channels on the calibration
+    window, so the arms are not separated by feature scaling: what separates them is
+    that Valendin carries each standardised covariate as one raw channel beside the
+    target embedding, while Projected embeds every feature to a common width and sums
+    them. On this panel that is a 5-wide input against a 2 x `embedding_dim`-wide one.
+
+    **No seasonal features, deliberately.** CDNOW is 18 months long, so the
+    calibration window is 39 weeks — 0.75 of an annual cycle, weeks 0..38, January to
+    September. A `week_sin`/`week_cos` pair is not identifiable from less than one
+    cycle: with no second January to compare against, whatever the model reads as
+    seasonality is confounded with CDNOW's own acquisition decay (the cohort all buys
+    in Q1 1997 and thins out afterwards). Worse, 13 of the 38 holdout periods —
+    1997 w39..w51, October to December — sit at week-of-year phases that never occur
+    in training, so those channels would be extrapolated exactly where the forecast is
+    scored. Two embedders handling that extrapolation differently is not the thing
+    this ablation is meant to measure.
 
     `embedded_cols` names only the target: its cardinality IS the softmax head size,
     and `"auto"` reads it off the data that `clip_target_upper` has already capped, so
@@ -101,7 +110,9 @@ def build_panel_config() -> PanelConfig:
         # the cap costs three clipped training cells and buys a head that is not
         # mostly-empty classes. The holdout is never clipped.
         clip_target_upper=4,
-        time_features={"add_week_sin_cos": True},
+        # No time_features: see the seasonality note above — 39 calibration weeks is
+        # less than one annual cycle, so a cyclical pair could not be estimated from
+        # it and would be extrapolated over the whole of Q4 1997.
         ar_features=("period_since_last_transaction", "has_transacted_before"),
         embedded_cols={"Transactions": "auto"},
     )
