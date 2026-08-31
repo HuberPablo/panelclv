@@ -81,7 +81,7 @@ from panelclv.training.loop import fit_model
 TRAINING_CONTROLS: frozenset[str] = frozenset({
     "n_epochs", "patience",          # training control (scalar, or a search spec)
     "checkpoint_dir", "verbose",     # bookkeeping
-    "loss_type", "class_weights", "focal_gamma",   # loss configuration
+    "loss_type", "class_weights", "focal_gamma", "emd_weight",  # loss configuration
     "grad_clip", "log_wandb", "seed",              # optimiser / logging / RNG
 })
 
@@ -325,6 +325,17 @@ def objective(
     else:
         focal_gamma = 2.0
 
+    # `emd_weight` is lambda in `ce_emd`. Unlike `focal_gamma` above it goes through the
+    # registry's search mini-language, so a scalar pins and a set/tuple searches — the
+    # same grammar `search_space` uses, because lambda is an ordinary searched float.
+    # Resolving it through `suggest_param` also puts the chosen value in `best_params`,
+    # which is what makes "which lambda did the search pick?" answerable afterwards.
+    emd_weight = 1.0
+    if loss_type == "ce_emd":
+        emd_weight = float(
+            suggest_param(trial, "emd_weight", training.get("emd_weight", 1.0))
+        )
+
     result = fit_model(
         model=model,
         train_loader=train_loader,
@@ -347,6 +358,7 @@ def objective(
         loss_type=loss_type,
         class_weights=training.get("class_weights"),
         focal_gamma=focal_gamma,
+        emd_weight=emd_weight,
         # Temporal split: score CE only on the validation suffix (periods after
         # validation_start). split_calibration puts this in its recipe; 0 ⇒ score all steps.
         val_score_start=metadata.get("val_score_start", 0),
@@ -396,7 +408,8 @@ def run_optuna_study(
     `(lo, hi, "log"|"int")` tuple a range, a scalar is pinned); anything left out
     keeps the entry's own range, and a key the model does not have raises. `training`
     carries what is not searched — `n_epochs`, `patience`, `checkpoint_dir`,
-    `verbose`, `loss_type`, `class_weights`, `focal_gamma`, `grad_clip`, `log_wandb`,
+    `verbose`, `loss_type`, `class_weights`, `focal_gamma`, `emd_weight`, `grad_clip`,
+    `log_wandb`,
     `seed`. `n_epochs` / `patience` sit there because they are training control, but
     they may still be handed a search spec (e.g. patience over `{5, 7, 9}`) and are
     resolved through the same mini-language.

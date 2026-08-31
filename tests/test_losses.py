@@ -149,7 +149,7 @@ def test_dict_missing_targets_key_raises():
 # configured with went straight from `build_criterion` to production untested.
 # ---------------------------------------------------------------------------
 
-LOSS_TYPES = ("cross_entropy", "weighted_ce", "focal", "emd")
+LOSS_TYPES = ("cross_entropy", "weighted_ce", "focal", "emd", "ce_emd")
 
 
 def _logits_and_targets(n=6, num_classes=4, seed=0):
@@ -221,6 +221,44 @@ def test_emd_punishes_a_distant_class_more_than_a_neighbour():
     assert ce(logits, torch.tensor([1])).item() == pytest.approx(
         ce(logits, torch.tensor([3])).item(), rel=1e-6
     )
+
+
+def test_ce_emd_at_zero_weight_is_exactly_cross_entropy():
+    """`emd_weight=0` recovers the default loss bit for bit.
+
+    This is what makes 0 a safe left endpoint for a searched lambda: the arm cannot lose
+    to the `cross_entropy` baseline except through search noise, and a search that keeps
+    choosing 0 has answered the question rather than failed. Exact equality, not
+    approximate — the EMD term is multiplied out, never merely made small.
+    """
+    logits, targets = _logits_and_targets()
+
+    composite = build_criterion("ce_emd", emd_weight=0.0)(logits, targets)
+    ce = build_criterion("cross_entropy")(logits, targets)
+
+    assert torch.equal(composite, ce)
+
+
+def test_ce_emd_is_the_sum_of_its_two_terms():
+    """The composite is CE + lambda*EMD, with lambda scaling only the EMD half.
+
+    Pins the arithmetic the properness argument rests on: a non-negative combination of
+    two strictly proper rules. A lambda that also scaled the CE term would still look
+    sensible in a loss curve while being a different (and rescaled) objective.
+    """
+    logits, targets = _logits_and_targets()
+    ce = build_criterion("cross_entropy")(logits, targets)
+    emd = build_criterion("emd")(logits, targets)
+
+    for lam in (0.5, 1.0, 10.0):
+        composite = build_criterion("ce_emd", emd_weight=lam)(logits, targets)
+        assert composite.item() == pytest.approx(ce.item() + lam * emd.item(), rel=1e-6)
+
+
+def test_ce_emd_rejects_a_negative_weight():
+    """A negative lambda breaks the properness the loss is chosen for, so it raises."""
+    with pytest.raises(ValueError, match="emd_weight"):
+        build_criterion("ce_emd", emd_weight=-1.0)
 
 
 def test_an_unknown_loss_type_is_rejected_by_name():

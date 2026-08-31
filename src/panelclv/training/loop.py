@@ -213,9 +213,10 @@ def fit_model(
     log_wandb: bool = False,
     verbose: bool = True,
     validate_targets: bool = True,
-    loss_type: str = "cross_entropy",       # 'cross_entropy' | 'weighted_ce' | 'focal' | 'emd'
+    loss_type: str = "cross_entropy",       # see `models.losses.build_criterion`
     class_weights: torch.Tensor | None = None,
     focal_gamma: float = 2.0,
+    emd_weight: float = 1.0,
     val_score_start: int = 0,
 ) -> FitResult:
     """Train a multinomial model with early stopping on validation loss.
@@ -235,6 +236,7 @@ def fit_model(
     "focal"          Focal Loss with optional `class_weights` (as `alpha`)
                      and `focal_gamma` (default 2.0).
     "emd"            Squared Earth Mover's Distance — ordinal-aware.
+    "ce_emd"         `CE + emd_weight * squared EMD`. `emd_weight=0` is plain CE.
 
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.
@@ -254,6 +256,7 @@ def fit_model(
         loss_type,
         class_weights=class_weights,
         focal_gamma=focal_gamma,
+        emd_weight=emd_weight,
     )
     optimizer = optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay
@@ -399,6 +402,7 @@ def refit_full_calibration(
     loss_type: str = "cross_entropy",
     class_weights: torch.Tensor | None = None,
     focal_gamma: float = 2.0,
+    emd_weight: float = 1.0,
     validate_targets: bool = True,
     verbose: bool = True,
 ) -> FitResult:
@@ -440,6 +444,7 @@ def refit_full_calibration(
         class_weights = class_weights.to(device)
     criterion = build_criterion(
         loss_type, class_weights=class_weights, focal_gamma=focal_gamma,
+        emd_weight=emd_weight,
     )
     optimizer = optim.AdamW(
         model.parameters(), lr=learning_rate, weight_decay=weight_decay

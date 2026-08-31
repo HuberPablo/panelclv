@@ -10,6 +10,8 @@ Selectable via `loss_type` strings:
     "weighted_ce"    CE with per-class weights (inverse-frequency, etc.)
     "focal"          Focal Loss with optional class weights (`alpha`)
     "emd"            Squared Earth Mover's Distance — ordinal-aware
+    "ce_emd"         CE + `emd_weight` * squared EMD — the log score and the
+                     ordinal one together, with lambda searchable
 
 References
 ----------
@@ -17,6 +19,11 @@ References
   "Focal Loss for Dense Object Detection", ICCV.
 - Hou, Yu, Samaras (2016),
   "Squared Earth Mover's Distance-based Loss for Training Deep Neural Networks".
+- Gneiting & Raftery (2007), "Strictly Proper Scoring Rules, Prediction, and
+  Estimation", JASA 102(477) — eq. (49): with the Brier score and a sum of point
+  measures, the ranked probability score emerges. Squared EMD IS that score, so
+  `emd` and `ce_emd` are strictly proper; `weighted_ce` and `focal` are not.
+  See `docs/loss-functions.md` for the derivation and the measured minimisers.
 """
 
 from __future__ import annotations
@@ -82,6 +89,45 @@ class SquaredEMDLoss(nn.Module):
         cdf_pred = probs.cumsum(dim=-1)
         cdf_true = target_onehot.cumsum(dim=-1)
         return ((cdf_pred - cdf_true) ** 2).sum(dim=-1).mean()
+
+
+# ---------------------------------------------------------------------------
+# Cross-entropy + squared EMD
+# ---------------------------------------------------------------------------
+
+
+class CrossEntropyPlusEMDLoss(nn.Module):
+    """`CE + emd_weight * SquaredEMD` — the log score and the ordinal one together.
+
+    Both terms are strictly proper scoring rules (squared EMD is the discrete CRPS —
+    see the module references), and a non-negative combination of strictly proper rules
+    is strictly proper. So the truth remains the unique minimiser and the rollout still
+    samples from an unbiased estimate of it: the contract that makes the simulator
+    correct is untouched, which is what separates this from `weighted_ce` and `focal`.
+
+    What the mixture buys is the two sensitivities at once. Cross-entropy is unbounded
+    as `p -> 0`, so it keeps pressure on the rare non-zero classes that dominate a
+    97%-zero panel's tail; the EMD term penalises the `K-1` CDF residuals that the
+    forecast's aggregate bias is built from, which the log score does not see directly.
+
+    `emd_weight = 0` recovers plain cross-entropy exactly. That is deliberate: it makes
+    0 a safe left endpoint for a searched range, so the arm cannot lose to the default
+    except through search noise, and a search that keeps choosing 0 is itself a result.
+    """
+
+    def __init__(self, emd_weight: float = 1.0) -> None:
+        super().__init__()
+        if emd_weight < 0:
+            raise ValueError(
+                f"emd_weight must be >= 0 (a negative weight breaks properness), "
+                f"got {emd_weight}"
+            )
+        self.emd_weight = float(emd_weight)
+        self.ce = nn.CrossEntropyLoss()
+        self.emd = SquaredEMDLoss()
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return self.ce(logits, targets) + self.emd_weight * self.emd(logits, targets)
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +222,13 @@ def build_criterion(
     *,
     class_weights: torch.Tensor | None = None,
     focal_gamma: float = 2.0,
+    emd_weight: float = 1.0,
 ) -> nn.Module:
     """Build a loss module from a string name.
 
     `class_weights` is consumed by `weighted_ce` and (optionally) `focal`.
-    `focal_gamma` is consumed by `focal` only. Other args are ignored
-    where they don't apply.
+    `focal_gamma` is consumed by `focal` only. `emd_weight` is consumed by
+    `ce_emd` only. Other args are ignored where they don't apply.
     """
     if loss_type == "cross_entropy":
         return nn.CrossEntropyLoss()
@@ -196,7 +243,9 @@ def build_criterion(
         return FocalLoss(alpha=class_weights, gamma=focal_gamma)
     if loss_type == "emd":
         return SquaredEMDLoss()
+    if loss_type == "ce_emd":
+        return CrossEntropyPlusEMDLoss(emd_weight=emd_weight)
     raise ValueError(
         f"Unknown loss_type={loss_type!r}. "
-        f"Options: 'cross_entropy', 'weighted_ce', 'focal', 'emd'"
+        f"Options: 'cross_entropy', 'weighted_ce', 'focal', 'emd', 'ce_emd'"
     )

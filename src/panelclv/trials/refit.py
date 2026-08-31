@@ -47,6 +47,7 @@ def refit_best_trial(
     loss_type: str = "cross_entropy",
     class_weights: "torch.Tensor | None" = None,
     focal_gamma: float = 2.0,
+    emd_weight: float = 1.0,
     verbose: bool = True,
 ) -> tuple[torch.nn.Module, dict[str, Any]]:
     """Warm-start retrain the study's best model on the FULL calibration window.
@@ -109,6 +110,7 @@ def refit_best_trial(
         loss_type=loss_type,
         class_weights=class_weights,
         focal_gamma=focal_gamma,
+        emd_weight=emd_weight,
         verbose=verbose,
     )
 
