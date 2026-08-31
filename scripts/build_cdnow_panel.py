@@ -1,19 +1,21 @@
 """Build the CDNOW weekly customer-period panel from the raw master file.
 
-CDNOW is the standard public customer-base dataset (Fader & Hardie): 23,570
-customers who made their first purchase in the first quarter of 1997, tracked to
-1998-06-30. The raw `cdnow_master.txt` is whitespace-delimited with four unnamed
-fields — customer id, date `YYYYMMDD`, number of CDs bought, dollar value — and one
-row per purchase occasion.
+CDNOW is the standard public customer-base dataset (Fader & Hardie): customers who
+made their first purchase in the first quarter of 1997, tracked to 1998-06-30. This
+reads the widely circulated 1/10th **sample** — 2,357 customers, 6,696 purchase
+occasions — as `Datasets/cdnow.csv`, whose columns are `Id, Date, CDs, Price` with
+one row per purchase occasion (no customer has two rows on one date). The full
+master file has the same four fields and is read the same way.
 
 Output is the layout every other panel in `Datasets/Dataset_clean/` uses, so
 `prepare_dataset` reads it with no special case::
 
     Id, year, week, Transactions
 
-`Transactions` is the per-customer per-week purchase-occasion count (rows in the
-master file — the dollar value and CD count are dropped, since the models forecast
-counts). CDNOW carries no covariates, so the panel has none: none are fabricated.
+`Transactions` is the per-customer per-week purchase-occasion count — rows of the
+raw file, which is also the number of distinct days on which the customer bought.
+`CDs` and `Price` are dropped: the models forecast counts of occasions, not units or
+money. CDNOW carries no covariates, so the panel has none; none are fabricated.
 
 **Week numbering** comes from `data_preparation.period_calendar`, the package's one
 calendar-time <-> period-index convention, rather than being restated here. That
@@ -27,8 +29,8 @@ observation. The last kept week is therefore the last one whose seven days all f
 within the data window.
 
 Usage:
-    python scripts/build_cdnow_panel.py                     # default paths
-    python scripts/build_cdnow_panel.py --raw path/to/cdnow_master.txt
+    python scripts/build_cdnow_panel.py                  # default paths
+    python scripts/build_cdnow_panel.py --raw path/to/cdnow.csv
 """
 
 from __future__ import annotations
@@ -45,11 +47,11 @@ from panelclv.data_preparation.period_calendar import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RAW = REPO_ROOT / "Datasets" / "cdnow_master.txt"
+DEFAULT_RAW = REPO_ROOT / "Datasets" / "cdnow.csv"
 DEFAULT_OUT = REPO_ROOT / "Datasets" / "Dataset_clean" / "cdnow_customer_week_panel.csv"
 
-# The four fields of the master file, in order. Only the first two are used.
-RAW_COLUMNS = ("Id", "Date", "cds", "dollars")
+# The four fields of the raw file. Only the first two reach the panel.
+RAW_COLUMNS = ("Id", "Date", "CDs", "Price")
 
 # The observation window of the dataset itself, not a modelling choice: CDNOW's first
 # purchases fall in 1997 Q1 and the file ends on 1998-06-30.
@@ -57,22 +59,26 @@ DATA_START = pd.Timestamp("1997-01-01")
 DATA_END = pd.Timestamp("1998-06-30")
 
 
-def read_master(path: Path) -> pd.DataFrame:
-    """Read `cdnow_master.txt` into a (Id, Date) transaction frame."""
+def read_transactions(path: Path) -> pd.DataFrame:
+    """Read the raw CDNOW file into an `(Id, Date)` transaction frame.
+
+    Accepts either the CSV with a header row (`Datasets/cdnow.csv`) or the
+    whitespace-delimited master with no header — the same four fields either way, so
+    the format is detected rather than made a flag the caller has to get right.
+    """
     if not path.exists():
         raise FileNotFoundError(
-            f"CDNOW master file not found at {path}.\n"
-            "Download `cdnow_master.txt` (Fader & Hardie's public CDNOW dataset) and "
-            "place it there, or pass --raw with its location."
+            f"CDNOW transactions not found at {path}.\n"
+            "Place Fader & Hardie's public CDNOW file there, or pass --raw with its "
+            "location."
         )
-    tx = pd.read_csv(
-        path,
-        sep=r"\s+",
-        header=None,
-        names=list(RAW_COLUMNS),
-        dtype={"Id": "int64"},
-    )
-    tx["Date"] = pd.to_datetime(tx["Date"].astype(str), format="%Y%m%d")
+    first_line = path.read_text().split("\n", 1)[0]
+    if "Id" in first_line:                       # the CSV export, with a header
+        tx = pd.read_csv(path, usecols=["Id", "Date"], parse_dates=["Date"])
+    else:                                        # the original master, YYYYMMDD dates
+        tx = pd.read_csv(path, sep=r"\s+", header=None, names=list(RAW_COLUMNS))
+        tx["Date"] = pd.to_datetime(tx["Date"].astype(str), format="%Y%m%d")
+    tx["Id"] = tx["Id"].astype("int64")
     return tx[["Id", "Date"]]
 
 
@@ -149,7 +155,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args()
 
-    panel = build_weekly_panel(read_master(args.raw))
+    panel = build_weekly_panel(read_transactions(args.raw))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     panel.to_csv(args.out, index=False)
     print(f"wrote {args.out}\n")

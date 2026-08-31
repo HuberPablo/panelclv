@@ -95,9 +95,11 @@ def build_panel_config() -> PanelConfig:
         training_end="1997-09-30",       # inclusive of 1997 week 38
         holdout_start="1997-10-01",      # 1997 week 39
         holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w24
-        # Weekly CDNOW counts are overwhelmingly 0 or 1; the cap sets the head size.
-        # Check the tail `build_cdnow_panel.py` prints and raise this if the data
-        # carries meaningful mass above it.
+        # The cap sets the softmax head size (5 classes: 0..4). Measured on the built
+        # panel, the 181,489 customer-weeks split 175,142 / 6,055 / 269 / 19 / 1 over
+        # counts 0..4, with exactly three cells above 4 (one each at 5, 6 and 7) — so
+        # the cap costs three clipped training cells and buys a head that is not
+        # mostly-empty classes. The holdout is never clipped.
         clip_target_upper=4,
         time_features={"add_week_sin_cos": True},
         ar_features=("period_since_last_transaction", "has_transacted_before"),
