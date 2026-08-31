@@ -40,6 +40,7 @@ import pandas as pd
 import pytest
 
 from panelclv.data_preparation import panel_dataset
+from panelclv.studies.runner import _refit_loss_args
 from panelclv.studies import (
     ModelSpec,
     StudySuiteConfig,
@@ -223,3 +224,81 @@ def test_the_suite_aggregates_each_models_studies_into_one_forecast(suite):
     data = suite["data"]
     for path in written:
         assert pd.read_csv(path).shape == (len(data["ids"]), int(data["T_HOLD"]) + 1)
+
+
+# ---------------------------------------------------------------------------
+# The refit's objective. Unit-level, because running a suite per loss to check
+# one dict is minutes of GPU for a fact the helper decides on its own.
+# ---------------------------------------------------------------------------
+
+
+class _FakeStudy:
+    """Just the `best_params` surface `_refit_loss_args` reads."""
+
+    def __init__(self, best_params):
+        self.best_params = best_params
+
+
+def test_the_refit_inherits_the_loss_the_study_was_tuned_under():
+    """A non-default `loss_type` reaches the refit, which is where forecasts come from.
+
+    `refit_best_trial` defaults to cross-entropy, and the runner used to pass it only a
+    device and a checkpoint directory — so a study tuned under `emd` was refit under CE
+    and the forecast came from a model optimising an objective no trial had selected on.
+    Harmless while cross-entropy was the only loss in use; fatal to a loss ablation,
+    whose entire signal is the difference this discarded.
+    """
+    spec = ModelSpec(
+        name="LSTM", model_type="lstm",
+        training={"loss_type": "emd", "n_epochs": 5, "verbose": False},
+    )
+    args = _refit_loss_args(spec, _FakeStudy({}))
+
+    assert args["loss_type"] == "emd"
+    # Training schedule stays the refit's own (ADR-0008: a few big-batch epochs).
+    assert "n_epochs" not in args and "verbose" not in args
+
+
+def test_a_searched_loss_parameter_reaches_the_refit_as_the_chosen_value():
+    """When lambda is searched, the refit gets the winning trial's number, not the spec.
+
+    `training={"emd_weight": (0.0, 10.0)}` is a *range*; handing that tuple to the refit
+    would raise. The value the trial actually used is in `best_params`, so that wins.
+    """
+    spec = ModelSpec(
+        name="LSTM", model_type="lstm",
+        training={"loss_type": "ce_emd", "emd_weight": (0.0, 10.0)},
+    )
+    args = _refit_loss_args(spec, _FakeStudy({"emd_weight": 2.5, "batch_size": 64}))
+
+    assert args["loss_type"] == "ce_emd"
+    assert args["emd_weight"] == 2.5
+    assert "batch_size" not in args        # not a loss control
+
+
+def test_an_unresolvable_search_spec_is_dropped_rather_than_forwarded():
+    """A spec neither searched nor scalar is left out, so the refit keeps its default.
+
+    Passing the raw tuple through would crash the refit *after* the whole search has
+    run — the most expensive possible moment to discover a type error.
+    """
+    spec = ModelSpec(
+        name="LSTM", model_type="lstm",
+        training={"loss_type": "focal", "focal_gamma": (1.0, 3.0, 0.5)},
+    )
+    args = _refit_loss_args(spec, _FakeStudy({}))
+
+    assert args["loss_type"] == "focal"
+    assert "focal_gamma" not in args
+
+
+def test_explicit_refit_kwargs_still_win():
+    """The suite-wide override is applied after the spec's loss, so it takes precedence.
+
+    Ordering, not behaviour of the helper — pinned here because the two dicts are merged
+    in one expression and a swap would silently make `refit_kwargs` inert.
+    """
+    spec = ModelSpec(name="LSTM", model_type="lstm", training={"loss_type": "emd"})
+    merged = {**_refit_loss_args(spec, _FakeStudy({})), **{"loss_type": "cross_entropy"}}
+
+    assert merged["loss_type"] == "cross_entropy"

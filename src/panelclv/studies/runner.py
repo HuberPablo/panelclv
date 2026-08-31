@@ -69,6 +69,35 @@ def run_study_suite(config: StudySuiteConfig) -> Path:
     return root
 
 
+# Loss controls `refit_best_trial` accepts. `n_epochs` / `batch_size` / learning rate
+# are deliberately NOT here: the refit owns those (ADR-0008 — a few big-batch epochs,
+# not the trial's schedule). Only the objective is shared.
+_REFIT_LOSS_KEYS = ("loss_type", "class_weights", "focal_gamma", "emd_weight")
+
+
+def _refit_loss_args(spec: ModelSpec, study: "optuna.Study") -> dict[str, Any]:
+    """The study's loss configuration, in the form the refit takes.
+
+    A training value may be a *search spec* rather than a value (`focal_gamma` over
+    `(1, 3, 0.5)`, `emd_weight` over a set), and the refit needs the number the winning
+    trial actually used. That number is in `study.best_params` whenever the parameter
+    was searched, so it is preferred; the `training` entry is used only when it is
+    already a plain scalar. A spec that is neither is dropped rather than passed on as
+    a tuple the refit cannot use.
+    """
+    args: dict[str, Any] = {}
+    for key in _REFIT_LOSS_KEYS:
+        if key in study.best_params:                 # searched -> the chosen value
+            args[key] = study.best_params[key]
+        elif key in spec.training:
+            value = spec.training[key]
+            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                args[key] = value
+            elif key == "class_weights":             # a tensor, never a search spec
+                args[key] = value
+    return args
+
+
 def _run_neural_model(
     spec: ModelSpec, config: StudySuiteConfig, root: Path
 ) -> list[dict[str, Any]]:
@@ -115,10 +144,19 @@ def _run_neural_model(
         )
 
         # Every forecast comes from a refit on the full calibration window (ADR-0008).
-        # Explicit device/checkpoint_dir first, then user refit_kwargs (may override).
+        # Explicit device/checkpoint_dir first, then the study's own loss, then user
+        # refit_kwargs (may override any of it).
+        #
+        # The loss has to be forwarded. The refit is where the forecast comes from, so a
+        # study tuned under one objective whose refit optimises another is not the model
+        # its trials selected — and `refit_best_trial` defaults to cross-entropy, so
+        # every non-default `loss_type` was silently discarded at exactly the step that
+        # produces the numbers. It cost nothing while `cross_entropy` was the only loss
+        # anyone ran; it invalidates a loss ablation outright.
         refit_args = {
             "device": config.device,
             "checkpoint_dir": str(sdir / "refit_checkpoints"),
+            **_refit_loss_args(spec, study),
             **config.refit_kwargs,
         }
         rollout_model, data_best = refit_best_trial(
