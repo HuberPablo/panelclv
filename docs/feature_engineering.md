@@ -251,11 +251,47 @@ Notes on the conventions, which matter for reproducibility:
 - All counters are integer-valued (the counts are multinomial class indices), so the two
   compute paths (§6) agree **exactly**, not approximately.
 
-**Which ones to prefer.** `cumulative_transactions`, `cumulative_count` and
-`period_since_first_transaction` grow without bound and, over a long holdout, drift past
-the range the model ever saw in calibration — the same extrapolation hazard as `year_idx`.
-`transaction_rate`, `has_transacted_before` and `active_in_last_<K>_periods` are bounded
-and stationary, and carry much of the same information.
+**Which ones to prefer.** Measured on the electronics panel (104 calibration periods, 52
+holdout periods), as the share of holdout cells whose value falls outside the `[min, max]`
+the channel took anywhere in calibration — the region where the shared covariate
+projection extrapolates rather than interpolates:
+
+| feature | escapes calibration range | why |
+| --- | ---: | --- |
+| `period_since_first_transaction` | **88.8%** | capped by the window length while fitted, then keeps counting |
+| `period_since_last_transaction` | **37.7%** | same cap; only customers quiet longer than anyone was in calibration escape |
+| `cumulative_transactions` | 0.04% | unbounded in principle, but the heaviest calibration buyer sets a high maximum |
+| `cumulative_count` | 0.04% | as above |
+| `transaction_rate`, `has_transacted_before`, `active_in_last_<K>_periods` | **0%** | bounded and stationary by construction |
+
+The two families that matter are therefore **not** the bounded and the unbounded ones. The
+hazard is being **capped by the calibration window length**: `period_since_first_transaction`
+and `period_since_last_transaction` cannot exceed `T_CAL` while being fitted, because there
+are only that many periods to count, and they carry on counting through the holdout. The
+cumulative counters grow without bound in principle and stay in range in practice.
+
+Tenure is the extreme case, and `require_calibration_activity=True` makes it worse rather
+than better: every retained customer's clock is already running when the holdout opens, so
+100% of them end past the calibration maximum, moving from a standardised range topping out
+at z = 1.91 to z = 3.46. The drift is one-sided — no holdout cell falls below the
+calibration minimum — so whatever slope was fitted at the sparse top of the range is applied
+to the whole cohort in the same direction.
+
+**What this costs, measured.** A configuration carrying
+`(period_since_last_transaction, cumulative_transactions, period_since_first_transaction)`
+forecast **+220%** aggregate bias against **+23%** for the same model with no AR features,
+with the across-study SD rising from 21 to 160 points. It is not exposure bias: a
+teacher-forced pass, feeding the true counts and the true AR values at every step,
+reproduces it at +169%. Beyond the fitted range the model's predicted rate stops decaying
+and settles near 0.072 while the true rate at long silence is 0.0153, and because silence
+accumulates, that region holds 49.9% of holdout cells against 7.7% of calibration cells —
+so 54% of the total excess prediction comes from it. `tests/test_ar_feature_support.py`
+pins the input-side half of this.
+
+`transaction_rate`, `has_transacted_before` and `active_in_last_<K>_periods` are bounded and
+stationary, and carry much of the same information: a set of nested
+`active_in_last_<K>_periods` flags is a bounded step encoding of exactly the silence the
+recency counter measures.
 
 Standardisation (§5) does **not** rescue an unbounded counter. The mean and standard
 deviation are fitted on the calibration window, so a counter still climbing through the
