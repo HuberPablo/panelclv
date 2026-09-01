@@ -1,9 +1,11 @@
 # Loss functions
 
-What the training loss has to satisfy in this package, what the four selectable
+What the training loss has to satisfy in this package, what the five selectable
 `loss_type` values actually compute, and which changes to the loss could plausibly
 improve a *forecast* — as opposed to improving a *classification* — on the two panels
-this project runs on.
+this project runs on. Two of the changes it proposed have since been run and are
+falsified on CDNOW; the Measured blocks in §6 record that, and the recommendations are
+kept as written so the prediction and the outcome sit side by side.
 
 Read `CLAUDE.md` for the model contract and `CONTEXT.md` for the vocabulary first.
 The short version, because everything below hangs off it: these models are
@@ -155,19 +157,28 @@ exactly 0.
 
 ## 3. What is already implemented
 
-`src/panelclv/models/losses.py`, 202 lines, four selectable strings, one factory. It is
-reached from `training/loop.py:253` (`fit_model`) and `:441` (`refit_full_calibration`),
-configured from `tuning/optuna_tuning.py:316-349`, and surfaced as the `training` dict
-keys `loss_type` / `class_weights` / `focal_gamma` (`studies/config.py:68`).
+`src/panelclv/models/losses.py`, 277 lines, five selectable strings, one factory. It is
+reached from `training/loop.py:260` (`fit_model`) and `:450` (`refit_full_calibration`),
+configured from `tuning/optuna_tuning.py:314-336`, and surfaced as the `training` dict
+keys `loss_type` / `class_weights` / `focal_gamma` / `emd_weight` (`studies/config.py:68`).
 
 | `loss_type` | Lines | What it computes | Intended use |
 |---|---|---|---|
-| `cross_entropy` | `186-187` | `nn.CrossEntropyLoss()` — mean over cells of `−log q_y`. | Default; the only value any archived study has ever used. |
-| `weighted_ce` | `188-194` | `nn.CrossEntropyLoss(weight=class_weights)` — mean over cells of `w_y · (−log q_y)`, normalised by `Σ w_y` over the batch (PyTorch's `reduction='mean'` with weights divides by the summed weight, not by N). Raises if `class_weights` is `None`. | Class imbalance; weights from `compute_class_weights`. |
-| `focal` | `195-196`, class at `34-61` | `mean over cells of α_y · (1 − q_y)^γ · (−log q_y)`. `α` is the optional `class_weights` tensor, `γ` is `focal_gamma` (default 2.0); `γ=0` reduces to weighted CE. | Class imbalance, "focus on hard examples". |
-| `emd` | `197-198`, class at `69-84` | `mean over cells of Σ_k (F_q(k) − 1{y ≤ k})²`, where `F_q = cumsum(softmax(logits))` and the true CDF is `cumsum(one_hot(y))`. | Ordinal structure — "predict 0 when actual is 10 is worse than predict 0 when actual is 1". |
+| `cross_entropy` | `259-260` | `nn.CrossEntropyLoss()` — mean over cells of `−log q_y`. | Default; the value all but four archived study records use. |
+| `weighted_ce` | `261-267` | `nn.CrossEntropyLoss(weight=class_weights)` — mean over cells of `w_y · (−log q_y)`, normalised by `Σ w_y` over the batch (PyTorch's `reduction='mean'` with weights divides by the summed weight, not by N). Raises if `class_weights` is `None`. | Class imbalance; weights from `compute_class_weights`. |
+| `focal` | `268-269`, class at `41-68` | `mean over cells of α_y · (1 − q_y)^γ · (−log q_y)`. `α` is the optional `class_weights` tensor, `γ` is `focal_gamma` (default 2.0); `γ=0` reduces to weighted CE. | Class imbalance, "focus on hard examples". |
+| `emd` | `270-271`, class at `76-91` | `mean over cells of Σ_k (F_q(k) − 1{y ≤ k})²`, where `F_q = cumsum(softmax(logits))` and the true CDF is `cumsum(one_hot(y))`. | Ordinal structure — "predict 0 when actual is 10 is worse than predict 0 when actual is 1". |
+| `ce_emd` | `272-273`, class at `99-130` | `mean over cells of (−log q_y) + λ · Σ_k (F_q(k) − 1{y ≤ k})²`. λ is `emd_weight`, an ordinary searched float; `λ=0` recovers `cross_entropy` bit for bit, and a negative λ raises. | Both at once — the log score's grip on the rare classes plus EMD's control of the CDF residuals (R2). |
 
-`compute_class_weights` (`losses.py:92-166`) is inverse-frequency, normalised so the
+**Three of the five refuse class weights.** `build_criterion` raises if `class_weights`
+is supplied alongside `cross_entropy`, `emd` or `ce_emd` — the members of
+`_PROPER_LOSS_TYPES` (`losses.py:228`), checked at `losses.py:249-257` before any
+dispatch. The three are strictly proper, and weighting them forfeits exactly the property
+§5.5 relies on; the guard exists because accepting and silently dropping the weights left
+a study comparing `weighted_ce` against `ce_emd` confounded on two axes at once. This is
+the enforcement half of R3.
+
+`compute_class_weights` (`losses.py:138-212`) is inverse-frequency, normalised so the
 weights sum to `K`, with absent classes clamped to a count of 1. It respects the
 temporal split (ADR-0001): `training_only=True` slices `targets[:, :val_start_idx-1]`
 so the validation window's class mix never leaks into the loss. Measured on the real
@@ -178,16 +189,25 @@ CDNOW       w = [0.000204, 0.003514, 0.086599, 1.510672, 3.399012]   ratio w4/w0
 electronics w = [0.002614, 0.208044, 0.331173, 0.744379, 1.448880, 2.704577, 1.560333]  ≈ 1,000 : 1
 ```
 
-**None of the three alternatives has ever been used.** Every `loss_type` value recorded
-anywhere under `Studies/` reads `cross_entropy`:
+**Two of the four alternatives have now been used; two never have.** The census as of
+2026-09-01:
 
 ```console
 $ grep -rho '"loss_type":[^,}]*' Studies/ | sort | uniq -c
-   1867 "loss_type": "cross_entropy"
+      2 "loss_type": "ce_emd"
+   1871 "loss_type": "cross_entropy"
+      2 "loss_type": "emd"
 ```
 
-So `weighted_ce`, `focal` and `emd` are implemented, wired, searchable — and entirely
-unevidenced. There is no baseline to beat and no result to defend.
+The `emd` and `ce_emd` records are the loss ablation of R1 and R2
+(`Studies/loss_ablation_cdnow`, run 2026-08-31, three arms × 10 studies on CDNOW); the
+counts are 2 apiece because `loss_type` is recorded once in the suite `config.json` and
+once per arm, not once per study. Their measured outcome is in §6 under R1 and R2, and it
+is negative on this panel.
+
+`weighted_ce` and `focal` remain implemented, wired — and entirely unevidenced. Nothing
+has ever been trained with either, which is a large part of why R3 proposes closing them
+out on the argument in §5.2 rather than on a run.
 
 ### 3.1 What the benchmark this package reproduces actually chose, and why
 
@@ -526,7 +546,7 @@ inflated by **+32%** (CDNOW) and **+50%** (electronics). On a head whose true me
 
 ### 5.5 `emd` — the interesting one: it is the discrete CRPS, and it is proper
 
-The implementation (`losses.py:78-84`) is `Σ_k (F_q(k) − 1{y ≤ k})²`. That is not merely
+The implementation (`losses.py:85-91`) is `Σ_k (F_q(k) − 1{y ≤ k})²`. That is not merely
 "ordinal-aware" — it is term for term the **Ranked Probability Score** (Epstein 1969), the
 discrete-ordinal case of the CRPS. Gneiting & Raftery construct the RPS from the Brier
 score (Eq. 49) and it sits in their catalogue of strictly proper rules
@@ -548,7 +568,7 @@ corresponds to the special case in (49) in which S is the quadratic or Brier sco
 is the Lebesgue measure. If S is the Brier score and ν is a sum of point measures, then
 the ranked probability score (Epstein 1969) emerges." For a distribution on `{0,…,K−1}`
 the CDF is constant on each `[k, k+1)`, so the Lebesgue integral collapses term by term
-onto the discrete sum — which is `losses.py:84`.
+onto the discrete sum — which is `losses.py:91`.
 
 **A property that matters specifically for training, not just for scoring.** Bellemare et
 al. call the same object the Cramér distance and prove (Theorem 2) that it has *unbiased
@@ -783,9 +803,10 @@ string. No code.
 an unbiased estimate of the truth, §5.5), with unbiased minibatch gradients (Bellemare et
 al., Thm. 2), *and* it penalises exactly the `K−1` CDF residuals that sum to the forecast's
 aggregate bias, bounding that bias by `√(K−1)·√(per-cell EMD)` — a guarantee cross-entropy
-does not offer. It is the only one of the three unused `loss_type` values that is not
-provably harmful here, and across all 1,867 archived `loss_type` records it has never been
-tried once.
+does not offer. It is the only one of the three then-unused `loss_type` values that is not
+provably harmful here, and at the time this was written no archived `loss_type` record
+had ever read anything but `cross_entropy`. **It has since been tried — see Measured
+below, where the argument of this paragraph does not survive contact with the panel.**
 
 It is also the change with the least contractual friction available. The softmax head, the
 sampler, the architecture and the metrics are all untouched (C1–C4 hold verbatim); Valendin
@@ -810,11 +831,43 @@ differently and could disagree. Note in the write-up that the arms' Optuna objec
 on different scales, so only the forecast metrics are comparable across arms, never the
 `objective` column.
 
+**Measured — CDNOW, 2026-08-31.** Run by `scripts/run_loss_ablation.py --panel cdnow`:
+three arms, 10 studies each, paired seeds 43–52, 20 Optuna trials per study, 300
+simulations, archived at `Studies/loss_ablation_cdnow`. Across studies, mean ± SD:
+
+| arm | `bias_percent` | `mape_aggregate` | `rmse` |
+|---|---|---|---|
+| `LSTM_ce` | −17.0 ± 39.0 | **41.2 ± 25.6** | 0.149 ± 0.003 |
+| `LSTM_emd` | +3.5 ± 134.4 | 123.5 ± 33.5 | 0.154 ± 0.003 |
+| `LSTM_ce_emd` | +6.5 ± 65.0 | 58.9 ± 48.0 | 0.154 ± 0.010 |
+
+**The `bias_percent` means are a trap and should not be read as a ranking.** `emd`'s +3.5
+looks like the best of the three. It is an artefact of averaging a bimodal distribution
+whose two modes are −100% and +150%: six of its ten studies collapse to a forecast of
+essentially zero (`bias_percent ≤ −99.9`) and the other four overshoot by +126% to +184%.
+Nothing lands in between, and the signed mean cancels the halves against each other.
+`mape_aggregate`, which cannot cancel, is the honest column — 123.5 against
+cross-entropy's 41.2.
+
+Paired per-seed, which is what the SD above makes necessary, `emd` is worse than
+cross-entropy on `mape_aggregate` in **9 of 10 seeds**, by 82.3 points on average. `rmse`
+separates nothing (0.149 vs 0.154), exactly as §4.1 predicts it cannot.
+
+**Verdict: R1 is falsified on CDNOW.** The prediction was a reduction in `|bias_percent|`
+and in `mape_aggregate`; the measurement is a large increase in both, from a training run
+that collapses to the zero forecast more often than not. The risk this section itself
+flagged — "RPS is a quadratic rule and under-weights small probabilities, so it may
+under-fit classes 2+ on the 97%-zero head and *lower* the forecast" — is precisely the
+failure observed, in six of ten studies. Wheatcroft (2019) should be cited accordingly.
+**Electronics has not been run**, and per this section's own instruction a result on one
+panel is not a result on the other.
+
 ---
 
 ### R2 — Add `cross_entropy + λ·emd` as a fifth `loss_type` and search λ
 
-**Change.** One new branch in `build_criterion` (`models/losses.py:186-198`) returning a
+**Change.** One new branch in `build_criterion` (implemented: the dispatch arm is
+`models/losses.py:272-273`, the module `CrossEntropyPlusEMDLoss` at `99-130`) returning a
 module that sums `nn.CrossEntropyLoss()` and `SquaredEMDLoss()` with a coefficient, plus
 one new training key (`emd_weight`, mirroring how `focal_gamma` is plumbed through
 `tuning/optuna_tuning.py:314-326` and `trials/refit.py:47-49`). λ becomes an ordinary
@@ -834,6 +887,25 @@ of one searched dimension and a small code change. Same metrics, same caveats.
 searched range. Because λ=0 is inside the range, also report the distribution of the
 selected λ across studies: if the search consistently picks λ≈0 that is itself the
 result, and it retires the whole line of enquiry cleanly.
+
+**Measured — CDNOW, 2026-08-31.** The third arm of the same ablation. `mape_aggregate`
+58.9 ± 48.0 against cross-entropy's 41.2 ± 25.6, and worse on the paired per-seed
+comparison in **8 of 10 seeds**, by 17.7 points on average. It lands where the argument
+said it would — between plain `emd` and plain CE — but on the wrong side of the baseline.
+
+**The λ distribution is the cleaner result, and it is the one this test named as
+decisive.** Searched over `[0, 10]`, the selected λ across the ten studies runs
+0.016 / 0.052 / 1.335 (min / median / max), with nine of ten below 0.33. The search
+pushes λ toward zero — that is, toward plain cross-entropy — which is exactly the outcome
+called out above: "if the search consistently picks λ≈0 that is itself the result, and it
+retires the whole line of enquiry cleanly." On CDNOW it does.
+
+One honest qualification. λ=0 is inside the range and recovers the baseline exactly, so
+in principle the arm cannot lose except through search noise — yet it did lose, by 17.7
+points. With 20 trials over a six-dimensional space the search does not reliably find
+λ≈0, so the gap measures the cost of spending a search dimension on λ, not a defect in
+the loss. That is still a cost, and it is the argument for retiring the line rather than
+re-running it wider.
 
 ---
 
@@ -916,16 +988,22 @@ Measurement gaps first, then reading gaps.
   *population minimiser* on the measured class mix, computed on the simplex — not about
   what a finite LSTM/Transformer trained by AdamW on 63k–70k cells converges to. The
   direction of each effect is established; the magnitude in a real study is not. No
-  training run was performed for this document.
+  training run was performed for this document as first written. **R1 and R2 have since
+  been run on CDNOW** (2026-08-31) and are falsified there — see the Measured blocks in
+  §6. R3's argument remains unrun by design and R4 is untested, and no recommendation has
+  been run on electronics at all.
 - **The exposure-bias mechanism of §4.3.** The *literature* is verified (Bengio et al.,
   Huszár, Wen et al.); the claim that the compounding runs *upward on this data* is
   inferred from the code path and the sign of the archived bias (neural +39%/+11% vs
   Pareto/NBD −53%), not demonstrated.
-- **Any CDNOW baseline at all.** `ls Studies/` returns 18 entries and none is a CDNOW
-  suite: `scripts/run_cdnow_embedding_ablation.py` exists but has never produced an
-  archive. Every archived number in §4 is electronics. The CDNOW arguments rest on the
-  panel's measured statistics (§2.1) and the loss minimisers (§5.0), never on an observed
-  CDNOW forecast.
+- **Any CDNOW baseline beyond the loss ablation's own control arm.** `ls Studies/` now
+  returns 19 entries, of which exactly one is CDNOW: `Studies/loss_ablation_cdnow`. Its
+  `LSTM_ce` arm is the first archived CDNOW forecast this project has (10 studies,
+  `mape_aggregate` 41.2 ± 25.6, `bias_percent` −17.0 ± 39.0), and it exists only as that
+  ablation's control. `scripts/run_cdnow_embedding_ablation.py` still has never produced
+  an archive. Every archived number in §4 is electronics, and the CDNOW arguments in §5
+  rest on the panel's measured statistics (§2.1) and the loss minimisers (§5.0), not on
+  that one arm.
 - **Whether the archived electronics suite is comparable to today's config.** Its
   `config.json` records `validation_start = 2000-01-01` and `seq_cols` including
   `week_sin`/`week_cos`; the current `scripts/run_studies.py` uses `2000-07-01` and no time
