@@ -1,6 +1,6 @@
 # 03 — The frozen benchmark's widths are constructor-overridable
 
-**Status:** needs-triage
+**Status:** done
 
 ## Doc claim
 
@@ -59,3 +59,38 @@ docstring and in ADR-0004, so "may not change" is qualified rather than contradi
 Option (a) is the smaller change and matches how the frozen widths are described everywhere
 else; (b) is only right if there is a reason the constructor arguments are load-bearing that
 I did not find.
+
+## Comments
+
+Closed with fix option **(a)**, extended to the private backbone as well. `memory_units` and
+`dense_units` are gone from both `ValendinLSTMModel.__init__` and
+`_ValendinLSTMBackbone.__init__`; the backbone reads `_MEMORY_UNITS` / `_DENSE_UNITS`
+directly.
+
+A pure deletion, as the ticket predicted — every construction site already used the
+three-argument form: `registry/model_registry.py:280`, `tests/test_valendin_lstm.py:43` and
+`:152`, and `scripts/validate_valendin_lstm.py:197`. The ADR-0004 gate was checked first, as
+the ticket asks: it passes only `seq_cols`, `embedded_cols`, `target_col`, so the deletion
+does not touch it and the parameter count it prints is unchanged. Nothing in `src/`,
+`tests/`, `scripts/`, `notebooks/` or `grids/` passed either width; the `dense_units=` hits
+in the test suite are all `MultinomialLSTMModel`, the developed model, which searches its
+widths by design.
+
+Option (b) was considered and dropped: it would have meant documenting the arguments as
+existing for a use that does not exist anywhere in the repo.
+
+The two constants now carry the reason they are read rather than passed —
+"a default is only a default: an argument that can be passed is an architecture that can be
+changed, which is the same unfreezing the registry refuses to allow the search space to do."
+
+No doc changed. ADR-0004's "widths ... may not change" and the registry comment at
+`model_registry.py:363-367` were already right; this is the code moving to meet them.
+
+`tests/test_valendin_lstm.py::test_the_widths_are_not_constructor_arguments` pins it from
+both sides — neither class accepts a width, and a constructed model still measures 128/128.
+It is the constructor half of what
+`test_model_registration.py::test_valendin_architecture_is_not_searched` already pins for the
+search space; together they mean 128/128 is the only shape the class can take, not merely
+the shape every path happens to ask for.
+
+`pytest -q`: **367 passed**.

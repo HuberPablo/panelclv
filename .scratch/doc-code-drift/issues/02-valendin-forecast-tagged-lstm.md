@@ -1,6 +1,6 @@
 # 02 — A Valendin-benchmark forecast is saved into a directory named `lstm_…`
 
-**Status:** needs-triage
+**Status:** wontfix
 
 A stored result that does not name its own model is the failure ADR-0004 already legislated
 against once.
@@ -68,3 +68,28 @@ cannot disagree with the weights being rolled out.
 `src/panelclv/studies/config.py:55-57` restates the four registry keys in prose. The
 validation itself reads `MODEL_TYPES` (`studies/config.py:164`), so nothing breaks — but it
 is a prose copy of the list ADR-0006 exists to keep singular.
+
+## Comments
+
+Closed **wontfix**. The branch is latent: `studies/runner.py:166-179` calls the forecaster
+without `save_predictions`, then writes through `layout.prediction_path`, so no archived
+result under `Studies/` or `FOR_ANALYSIS/` is mislabelled, and the live notebook path passes
+`run_name` explicitly. Nothing in the repo parses a run-directory name back into a model
+type — the name is write-only — so the only cost is to a human reading the folder.
+
+Recorded for whoever reopens it: the collision is worse than the mislabelling. `lstm` and
+`valendin_lstm` share `forecast_recurrent`, so with no `run_name` both resolve to
+`{tag}_n{N}_seed{S}` with tag `"lstm"`, and `create_run_directory` reuses an existing folder
+silently (`predictions/run_directory.py:39`) — the second forecast overwrites the first's
+`predictions.csv` with no error.
+
+Three more hardcoded tags found while triaging, all outside the ticket's claim that these are
+the only two left in `src/`: `_run_monte_carlo`'s own `model_type: str = "model"` default
+(`models/monte_carlo_forecasting.py:353`), `benchmarks/pareto_nbd.py:487`'s
+`tag = ... else "pareto"` against the registry key `pareto_nbd`, and the docstring at
+`models/monte_carlo_forecasting.py:466-467` claiming `run_name` "defaults to the model type",
+which for `valendin_lstm` names a different model.
+
+The fix direction, if it is ever taken, is (b): `models/__init__.py:45-47` already records
+that there are three rollout model classes but only two rollout functions, so a rollout
+cannot derive its own model type — the caller holds it, from `rollout_for(model_type)`.

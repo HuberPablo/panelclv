@@ -60,6 +60,10 @@ from torch import nn
 from panelclv.models.embedders import ValendinEmbedder
 
 # The paper's sizes: `memory_units = 128`, `dense_units = 128` in the notebook.
+# Read directly by the backbone rather than reaching it as a constructor argument.
+# ADR-0004 freezes a benchmark's widths, and a default is only a default: an argument
+# that can be passed is an architecture that can be changed, which is the same
+# unfreezing the registry refuses to allow the search space to do.
 _MEMORY_UNITS = 128
 _DENSE_UNITS = 128
 
@@ -79,8 +83,6 @@ class _ValendinLSTMBackbone(nn.Module):
         seq_cols: Sequence[str],
         embedded_cols: dict[str, int],
         target_col: str = "Transactions",
-        memory_units: int = _MEMORY_UNITS,
-        dense_units: int = _DENSE_UNITS,
     ) -> None:
         super().__init__()
 
@@ -111,11 +113,11 @@ class _ValendinLSTMBackbone(nn.Module):
 
         self.lstm = nn.LSTM(
             input_size=self.embedder.output_dim,
-            hidden_size=memory_units,
+            hidden_size=_MEMORY_UNITS,
             batch_first=True,
         )
-        self.dense = nn.Linear(memory_units, dense_units)
-        self.output_layer = nn.Linear(dense_units, self.num_target_classes)
+        self.dense = nn.Linear(_MEMORY_UNITS, _DENSE_UNITS)
+        self.output_layer = nn.Linear(_DENSE_UNITS, self.num_target_classes)
 
     def forward(self, x: torch.Tensor, state=None):
         encoded_input = self.embedder(x)                 # (B, T, 12) on the demo data
@@ -137,16 +139,12 @@ class ValendinLSTMModel(nn.Module):
         seq_cols: Sequence[str],
         embedded_cols: dict[str, int],
         target_col: str = "Transactions",
-        memory_units: int = _MEMORY_UNITS,
-        dense_units: int = _DENSE_UNITS,
     ) -> None:
         super().__init__()
         self.backbone = _ValendinLSTMBackbone(
             seq_cols=seq_cols,
             embedded_cols=embedded_cols,
             target_col=target_col,
-            memory_units=memory_units,
-            dense_units=dense_units,
         )
         self.seq_cols: list[str] = self.backbone.seq_cols
         self.target_col: str = self.backbone.target_col

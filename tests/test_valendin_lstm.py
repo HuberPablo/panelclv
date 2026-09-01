@@ -15,6 +15,7 @@ torch = pytest.importorskip("torch")
 from panelclv.benchmarks.valendin_lstm import (  # noqa: E402
     RolloutValendinLSTMModel,
     ValendinLSTMModel,
+    _ValendinLSTMBackbone,
 )
 
 # The reference notebook's banking demo: 52 week-of-year classes and 12 transaction
@@ -154,6 +155,29 @@ def test_rejects_a_numerical_covariate():
             EMBEDDED_COLS,
             TARGET,
         )
+
+
+def test_the_widths_are_not_constructor_arguments():
+    """ADR-0004 freezes the benchmark's widths, so there is nothing to pass.
+
+    `test_model_registration.py::test_valendin_architecture_is_not_searched` pins the
+    other half: Optuna cannot reach a width either. Together they mean the published
+    128/128 is the only shape this class can take, rather than merely the shape every
+    path in the package happens to ask for.
+    """
+    import inspect
+
+    for cls in (ValendinLSTMModel, _ValendinLSTMBackbone):
+        accepted = set(inspect.signature(cls.__init__).parameters)
+        assert not accepted & {"memory_units", "dense_units"}, (
+            f"{cls.__name__} accepts a width. ADR-0004 says a benchmark's widths "
+            f"may not change, and an argument that can be passed is an architecture "
+            f"that can be changed."
+        )
+
+    model = ValendinLSTMModel(SEQ_COLS, EMBEDDED_COLS, TARGET)
+    assert model.backbone.lstm.hidden_size == 128       # the paper's memory_units
+    assert model.backbone.dense.out_features == 128     # the paper's dense_units
 
 
 # ---------------------------------------------------------------------------
