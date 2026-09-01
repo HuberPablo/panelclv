@@ -243,7 +243,7 @@ discounted.
 ### The five losses and what each differentiates
 
 Selected by the `loss_type` string and built once per fit by `build_criterion`
-(`models/losses.py:220-251`). Writing `q = softmax(logits)` and `y` for the true class:
+(`models/losses.py:231-277`). Writing `q = softmax(logits)` and `y` for the true class:
 
 | `loss_type` | Loss per cell | Gradient reaches the logits through |
 | --- | --- | --- |
@@ -295,11 +295,16 @@ Both terms reach the same logits; autograd accumulates the two contributions int
 in the registry search space and resolved by Optuna like any other hyperparameter, so a
 study chooses how ordinal it wants to be.
 
-One thing the table does not say and should: **when `loss_type="ce_emd"`, class weights
-are silently not applied.** `build_criterion` does not forward `class_weights` into that
-branch, so the CE term there is unweighted even if weights were computed. This is a real
-behavioural detail, not a bug to fix in passing; it is recorded here because a reader
-comparing `weighted_ce` against `ce_emd` would otherwise assume they share a term.
+**Three of the five refuse class weights outright.** `build_criterion` raises if
+`class_weights` is supplied alongside `cross_entropy`, `emd` or `ce_emd`, rather than
+accepting and dropping them. Weighting a strictly proper loss forfeits the property the
+rollout depends on: with inverse-frequency weights `w_k ∝ 1/n_k` and `p_k = n_k/N` the
+product `w_k p_k` is constant in k, so the minimiser becomes the **uniform** distribution
+over the K classes — a forecast mean of 2.0 against a true 0.0598 on CDNOW
+(`docs/loss-functions.md` §5.2). Since the rollout samples from `q` and averages, there is
+nothing downstream that could undo it. `weighted_ce` already raises when weights are
+*missing*, so the pairing cannot be got wrong from either side, and a study comparing it
+against `ce_emd` cannot silently become weighted-versus-unweighted as well.
 
 ### Class weights are a constant, not a parameter
 
@@ -376,7 +381,7 @@ only its length is capped. Its position is the textbook one and the only correct
 after `backward()`, so there is something to clip, and before `step()`, so the optimiser
 sees the clipped values. The default is `grad_clip=1.0`.
 
-**`optimizer.step()` applies AdamW** (`training/loop.py:261-263`):
+**`optimizer.step()` applies AdamW** (`training/loop.py:266-268`):
 
 ```python
     optimizer = optim.AdamW(
@@ -582,7 +587,7 @@ only the suffix positions are averaged into the number. The pass runs inside
 of the slicing; the slicing is about what is *measured*, not about what is learned.
 
 **Selection happens on that number, and the chosen weights are put back**
-(`training/loop.py:329-334`, then `:355-361`):
+(`training/loop.py:334-339`, then `:360-366`):
 
 ```python
         improved = (val_metrics["loss"] + 1e-4) < best_val_loss
@@ -703,8 +708,5 @@ here was measured.
   writing. `docs/loss-functions.md` already carries stale ones — its loss table predates
   the insertion of `CrossEntropyPlusEMDLoss` — so treat any number here as a pointer to a
   named construct, and trust the name over the number.
-- **The `ce_emd` weighting behaviour noted in §3** (class weights not forwarded into that
-  branch) is read from `build_criterion`'s dispatch. Whether that is intended or merely
-  untested is not established here.
 - **The `FocalLoss` `gather(1, ...)` fragility in §8** is a latent hazard, not an observed
   failure. Every current call site reshapes first, so no run has been affected.

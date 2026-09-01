@@ -216,6 +216,17 @@ def compute_class_weights(
 # Factory
 # ---------------------------------------------------------------------------
 
+# The loss types that are strictly proper: uniquely minimised by the true
+# conditional distribution. That property is what makes the forecast correct,
+# because the rollout samples from `q` and averages, so the average converges to
+# the true conditional mean only if `q` is honest. Class weighting forfeits it —
+# Gneiting & Raftery's transformation rule preserves properness under
+# `S* = cS + h(w)` only for a *constant* `c`, and `w_y * log q_y` scales by a
+# factor that depends on the outcome. Weighting these is therefore a mistake
+# rather than a preference, so `build_criterion` refuses the pairing instead of
+# dropping the weights and letting a study look like a clean comparison.
+_PROPER_LOSS_TYPES = frozenset({"cross_entropy", "emd", "ce_emd"})
+
 
 def build_criterion(
     loss_type: str = "cross_entropy",
@@ -228,8 +239,23 @@ def build_criterion(
 
     `class_weights` is consumed by `weighted_ce` and (optionally) `focal`.
     `focal_gamma` is consumed by `focal` only. `emd_weight` is consumed by
-    `ce_emd` only. Other args are ignored where they don't apply.
+    `ce_emd` only.
+
+    Supplying `class_weights` alongside a strictly proper loss is rejected
+    rather than ignored — see `_PROPER_LOSS_TYPES` for why. `weighted_ce`
+    already raises when weights are missing; this is the same check from the
+    other side, so neither pairing can be got wrong silently.
     """
+    if class_weights is not None and loss_type in _PROPER_LOSS_TYPES:
+        raise ValueError(
+            f"loss_type={loss_type!r} is strictly proper and must not be given "
+            f"class_weights. Inverse-frequency weighting moves the minimiser to "
+            f"the uniform distribution over the K classes, and the rollout samples "
+            f"from that distribution — on CDNOW it means a forecast mean of 2.0 "
+            f"against a true 0.0598 (docs/loss-functions.md 5.2). Pass "
+            f"loss_type='weighted_ce' if the reweighting is genuinely intended, or "
+            f"drop class_weights if it is not."
+        )
     if loss_type == "cross_entropy":
         return nn.CrossEntropyLoss()
     if loss_type == "weighted_ce":

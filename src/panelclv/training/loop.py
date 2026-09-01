@@ -238,6 +238,11 @@ def fit_model(
     "emd"            Squared Earth Mover's Distance — ordinal-aware.
     "ce_emd"         `CE + emd_weight * squared EMD`. `emd_weight=0` is plain CE.
 
+    `class_weights` belongs to "weighted_ce" and "focal" only. Passing it with one of
+    the strictly proper losses ("cross_entropy", "emd", "ce_emd") raises rather than
+    being ignored, because weighting them distorts the distribution the rollout
+    samples from — see `models.losses._PROPER_LOSS_TYPES`.
+
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.
 

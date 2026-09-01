@@ -22,7 +22,11 @@ import numpy as np
 import pytest
 import torch
 
-from panelclv.models.losses import build_criterion, compute_class_weights
+from panelclv.models.losses import (
+    _PROPER_LOSS_TYPES,
+    build_criterion,
+    compute_class_weights,
+)
 
 
 def _fake_data(seed=0, n=5, t=4, num_classes=3, val_start_idx=4):
@@ -174,7 +178,13 @@ def test_every_loss_type_returns_a_finite_scalar_that_backpropagates(loss_type):
     """
     logits, targets = _logits_and_targets()
     logits.requires_grad_(True)
-    weights = torch.ones(logits.shape[-1])
+    # Weights go only to the two losses that consume them: `build_criterion`
+    # rejects them alongside a strictly proper loss rather than ignoring them.
+    weights = (
+        torch.ones(logits.shape[-1])
+        if loss_type in ("weighted_ce", "focal")
+        else None
+    )
 
     criterion = build_criterion(loss_type, class_weights=weights, focal_gamma=2.0)
     loss = criterion(logits, targets)
@@ -259,6 +269,29 @@ def test_ce_emd_rejects_a_negative_weight():
     """A negative lambda breaks the properness the loss is chosen for, so it raises."""
     with pytest.raises(ValueError, match="emd_weight"):
         build_criterion("ce_emd", emd_weight=-1.0)
+
+
+@pytest.mark.parametrize("loss_type", sorted(_PROPER_LOSS_TYPES))
+def test_a_proper_loss_refuses_class_weights(loss_type):
+    """Weighting a strictly proper loss is rejected, not silently dropped.
+
+    Inverse-frequency weighting moves the cross-entropy minimiser to the uniform
+    distribution over the K classes, and the rollout samples from that — a mean of
+    2.0 against a true 0.0598 on CDNOW (`docs/loss-functions.md` 5.2). Dropping the
+    weights instead would leave a study comparing `weighted_ce` against `ce_emd`
+    confounded on two axes at once, weighted-vs-unweighted as well as the loss
+    itself, with nothing in the results to show it.
+    """
+    weights = torch.ones(4)
+
+    with pytest.raises(ValueError, match="strictly proper"):
+        build_criterion(loss_type, class_weights=weights)
+
+
+def test_a_proper_loss_is_fine_without_class_weights():
+    """The guard triggers on the weights, not on the loss type."""
+    for loss_type in sorted(_PROPER_LOSS_TYPES):
+        assert build_criterion(loss_type) is not None
 
 
 def test_an_unknown_loss_type_is_rejected_by_name():
