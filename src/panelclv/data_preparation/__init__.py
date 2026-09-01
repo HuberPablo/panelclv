@@ -5,6 +5,9 @@ Modules:
                                ``data`` dict (calibration/holdout/samples/targets/...).
   - ``ar_features``            autoregressive target-derived feature builders
                                (recency / frequency / tenure / rate).
+  - ``cluster_features``       behavioural clusters: k-means over the (t_x, x, T)
+                               triple at the last calibration period, giving one
+                               STATIC categorical label per customer.
   - ``period_calendar``        the one calendar-time <-> period-index conversion: the
                                week-numbering convention and the days-per-period table.
   - ``target_channel``         the one statement of where the target sits on the

@@ -72,7 +72,7 @@ different covariates needs a different `PanelConfig`, not a code edit.
 Channels are laid out in a fixed group order (`_SCHEMA_GROUP_ORDER`):
 
 ```
-target → time → known_future → observed_past → static → ar_features
+target → time → known_future → observed_past → static → ar_features → cluster_features
 ```
 
 De-duplicated, first-occurrence-wins. Fixing the order means two configurations that
@@ -204,9 +204,15 @@ come from `period_calendar` — the anchor and the feature cannot drift apart.
 
 ---
 
-## 4. Autoregressive target-derived features
+## 4. Target-derived features
 
-This is the family that makes the recency/frequency structure of the BTYD literature
+Two families are derived from the target's own past, and they differ in one thing: what
+happens to them during the rollout. **Autoregressive features** are recomputed at every
+step from the count the model just sampled. **Behavioural clusters** are computed once
+from calibration and then frozen. The first half of this section covers the AR family;
+"The frozen kind" at the end covers clusters.
+
+The AR family is what makes the recency/frequency structure of the BTYD literature
 available to a neural model without breaking the rollout. A "transaction" is defined as
 `target > 0`.
 
@@ -265,6 +271,53 @@ holdout rather than about the architecture.
 rollout), add a branch in `_render` and a name in `parse_ar_feature`. The three must stay
 consistent — `tests/test_ar_features.py` asserts the precompute and the incremental path
 produce identical columns, which is the test to extend alongside.
+
+### The frozen kind: behavioural clusters
+
+`PanelConfig.cluster_features` declares a **behavioural cluster**: customers are
+partitioned by how they behaved over the calibration window, and each customer's group
+index becomes a channel. One name is supported, `kmeans_<K>` (`K ≥ 2`), and the name is
+also the column name — so `cluster_features=("kmeans_8",)` puts `kmeans_8` in `seq_cols`
+and an archived `config.json` records the algorithm and K without a lookup table.
+
+Customers are clustered on the **Pareto/NBD sufficient statistics** read at the last
+calibration period — recency `t_x`, frequency `x`, observation age `T` — standardised,
+then partitioned by k-means. That triple is not an arbitrary summary: it is what the
+Pareto/NBD likelihood conditions on, and it is what `grids/seasonal_4x4x10_ar.py` already
+hands the neural models as three continuous AR channels. Clustering on the same triple
+makes the two directly comparable — the same information reaching the model once as three
+real-valued channels and once as a single category.
+
+Three properties follow from the label being frozen, and each is asserted in
+`tests/test_cluster_features.py`:
+
+- **It needs no rollout machinery.** `simulate_recurrent_path` overwrites only the target
+  channel and the AR channels, so a static channel rides through every holdout step
+  untouched. There is nothing to advance and therefore nothing to get wrong — which is
+  the whole reason to prefer a frozen label over a re-clustered one.
+- **It cannot escape its support.** Unlike `period_since_first_transaction`, a cluster
+  index takes exactly the same `K` values in the holdout as in calibration, by
+  construction. The extrapolation failure catalogued above simply does not apply.
+- **It is deterministic.** `KMeans` runs with a fixed `random_state` and `n_init=10`, so
+  labels are a property of the panel rather than a per-study draw. This keeps
+  `base_seed + i` meaning what `studies.config` says it means — the Optuna sampler and the
+  Monte Carlo forecast, nothing else — instead of hiding a second variance component
+  inside a suite that reports across-study SD.
+
+**The label is embedded automatically**, with cardinality pinned to `K`. This is not the
+caller's choice as it is for an AR feature: a group index is categorical by definition,
+and omitting it from `embedded_cols` would send it through `standardize_covariates` into
+a z-score, imposing an ordering the labels do not have — silently, since no shape check
+can catch it.
+
+**One deviation is deliberate.** The label is fitted on the *full* calibration window,
+which includes the temporal validation window (ADR-0001) that early stopping later scores
+on, so it has "seen" those periods. Every other calibration-derived quantity uses that
+same window — `resolve_embedded_cols` sizes static cardinalities off it, Pareto/NBD is
+fitted on it, the ADR-0008 refit trains on it — and a label computed on a different window
+than all of them would be a subtler inconsistency than the bias it avoids. The bias is
+bounded: an unsupervised 3-feature partition reveals nothing about the target beyond what
+the model already reads in those same periods.
 
 ---
 

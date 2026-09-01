@@ -200,6 +200,7 @@ FIXTURE_PANEL_CONFIG = {
     "static": [],
     "time_features": {"add_year_idx": True, "add_week_sin_cos": True},
     "ar_features": [],
+    "cluster_features": [],
     "embedded_cols": {"Transactions": "auto"},
 }
 

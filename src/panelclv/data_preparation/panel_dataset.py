@@ -5,7 +5,7 @@ with ONE ROW PER (customer, period) and returns the `data` dict consumed by the
 training loop (`samples`/`targets`) and the Monte-Carlo simulator
 (`calibration`/`holdout`). All model-facing arrays are (N, T, F) float32; the
 channel order is fixed: target → time → known_future → observed_past → static →
-ar_features.
+ar_features → cluster_features.
 
 `config` is a `PanelConfig` — the single validated object that bundles the
 layout, calendar toggles, feature roles, embeddings and AR features.
@@ -45,8 +45,14 @@ Feature roles (→ `.schema`) — TFT-style; ONLY listed columns enter the tenso
     them and feeding it would leak), `static_covariates` (one value per
     customer, already broadcast across that customer's rows).
 AR features (→ `.ar_features`, recency / frequency / tenure / rate) are appended
-    last; being causal functions of the target's own past, their holdout values
-    are recomputed from the SAMPLED target during the rollout, so they leak nothing.
+    after the roles; being causal functions of the target's own past, their holdout
+    values are recomputed from the SAMPLED target during the rollout, so they leak
+    nothing.
+Behavioural clusters (→ `.cluster_features`) come last: k-means over the
+    (t_x, x, T) triple at the last calibration period gives each customer one
+    categorical label, constant across BOTH windows. Being static it needs no
+    rollout machinery — the simulator rewrites only the target and AR channels —
+    and each is embedded automatically (cardinality pinned to K).
 Embeddings (→ `.embedded_cols`): which columns to embed and their cardinalities
     (pinned int or `"auto"`, resolved here against the data).
 
@@ -81,7 +87,12 @@ from panelclv.configs.panel_config import (
     PanelConfig,
     normalize_embedded_cols,
 )
+from panelclv.configs.cluster_feature_names import (
+    parse_cluster_feature,
+    validate_cluster_features,
+)
 from panelclv.data_preparation.ar_features import compute_ar_feature_columns
+from panelclv.data_preparation.cluster_features import compute_cluster_labels
 from panelclv.data_preparation.period_calendar import (
     WEEKS_PER_YEAR,
     week_of_year,
@@ -103,6 +114,7 @@ _SCHEMA_GROUP_ORDER: list[str] = [
     "observed_past_time_varying_inputs",
     "static_covariates",
     "ar_features",
+    "cluster_features",
 ]
 
 
@@ -625,6 +637,7 @@ def prepare_dataset(
             "Build one with PanelConfig(...) — see panelclv.configs.panel_config."
         )
     ar_features = list(config.ar_features)
+    cluster_features = list(config.cluster_features)
     schema = config.schema
     time_features = config.time_features
     # The user's choice of which columns to embed, normalized to a plain
@@ -704,6 +717,22 @@ def prepare_dataset(
         for n in ar_features:
             panel[n] = np.float32(0)
 
+    # 2c) Behavioural cluster columns. Zero placeholders for the same reason as the AR
+    # columns above — the column-existence check (step 4) and both window slices need
+    # the column to exist — but filled differently: a cluster label is STATIC, so step
+    # 6c writes the SAME value into the calibration and holdout rows of a customer. The
+    # holdout placeholder is therefore overwritten, unlike an AR feature's, which the
+    # rollout regenerates per step.
+    if cluster_features:
+        validate_cluster_features(cluster_features)
+        collide = [n for n in cluster_features if n in panel.columns]
+        if collide:
+            raise ValueError(
+                f"cluster_features names collide with existing panel columns: {collide}"
+            )
+        for n in cluster_features:
+            panel[n] = np.float32(0)
+
     # 3) Schema → seq_cols + target index.
     # target_col is declared once in DATA_CONFIG. If schema omits the 'target'
     # group, fill it from target_col; if present, it must match.
@@ -742,6 +771,20 @@ def prepare_dataset(
     # covariates unless the caller also embeds them).
     if ar_features:
         schema["ar_features"] = list(ar_features)
+
+    # Register the cluster columns, and embed them. Embedding is not the caller's
+    # choice here as it is for an AR feature: a cluster index is categorical by
+    # definition, and leaving it out of embedded_cols would send it through
+    # `standardize_covariates` into a z-score — imposing an ordering on labels that
+    # have none, and silently, since no shape check can catch it. The cardinality is
+    # PINNED to K rather than left "auto" so it is the number the declaration asked
+    # for, not whatever the largest label the fit happened to produce.
+    if cluster_features:
+        schema["cluster_features"] = list(cluster_features)
+        embedded_cols = dict(embedded_cols or {})
+        for n in cluster_features:
+            _, k = parse_cluster_feature(n)
+            embedded_cols[n] = k
 
     seq_cols = get_seq_cols(schema)
     # The one derivation, made here and recorded in the returned dict as `target_idx`.
@@ -891,6 +934,32 @@ def prepare_dataset(
         )
     ids = ids_train
     N = len(ids)
+
+    # 6c) Fill the behavioural cluster columns. Done here because the uniform-period
+    # check above is what guarantees every customer's calibration target is the same
+    # length, so it stacks into the (N, T_CAL) matrix the clustering reads; and done
+    # BEFORE resolve_embedded_cols (step 7b), which validates the pinned cardinality
+    # against the labels actually present.
+    #
+    # The label is computed from the CLIPPED calibration target alone and written to
+    # BOTH slices — one constant value per customer, spanning calibration and holdout.
+    # That is what makes it a static covariate: `simulate_recurrent_path` overwrites
+    # only the target and AR channels, so this one rides through the rollout untouched.
+    for n in cluster_features:
+        train_panel = train_panel.sort_values(
+            sort_cols, kind="stable"
+        ).reset_index(drop=True)
+        positions_by_id = train_panel.groupby(id_col, sort=False).indices
+        cluster_ids = list(positions_by_id)
+        target_values = train_panel[target_col].to_numpy()
+        # (n_customers, T_CAL), rows in `cluster_ids` order.
+        calibration_target = np.stack(
+            [target_values[positions_by_id[i]] for i in cluster_ids]
+        )
+        labels = compute_cluster_labels(calibration_target, n)
+        label_by_id = dict(zip(cluster_ids, labels))
+        train_panel[n] = train_panel[id_col].map(label_by_id).astype(np.float32)
+        holdout_panel[n] = holdout_panel[id_col].map(label_by_id).astype(np.float32)
 
     # 7) NaN check on the columns we're about to reshape.
     for label, frame in (("train_panel", train_panel), ("holdout_panel", holdout_panel)):

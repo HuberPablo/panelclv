@@ -41,6 +41,8 @@ supplies per-frequency defaults. The target is declared once, as `target_col`.
         time_features={"add_year_idx": True, "add_week_sin_cos": True},  # derive year_idx + week_sin/cos
         # --- autoregressive target-derived features (leak-free; default ()) ---
         ar_features=("period_since_last_transaction",),  # recency/activity, recomputed during rollout
+        # --- behavioural clusters (per-customer label from calibration; default ()) ---
+        cluster_features=("kmeans_8",),    # k-means on (t_x, x, T); embedded automatically
         # --- embeddings (which cols to embed; int | "auto"; default ()) ---
         embedded_cols={"Transactions": "auto", "Gender": "auto"},  # categorical cols → learned embeddings
     )
@@ -66,6 +68,21 @@ during the holdout rollout, so they stay leak-free. Supported names:
     transaction_rate                cumulative_transactions / max(tenure, 1), an
                                     empirical per-period purchase rate.
 
+`cluster_features` names **behavioural clusters**: customers are partitioned by
+their calibration behaviour — the (t_x, x, T) Pareto/NBD triple at the last
+calibration period — and each customer's group index becomes a static, embedded
+column. Supported names:
+
+    kmeans_<K>                      k-means into K clusters, K >= 2, e.g.
+                                    "kmeans_8". The name is also the column name.
+
+Unlike an AR feature, a cluster label is **frozen**: it is computed once from
+calibration and stays constant through every holdout period, so the rollout
+carries it untouched. Each declared name is added to `embedded_cols`
+automatically with cardinality K — a cluster index is categorical by definition,
+and standardising it would impose an ordering the labels do not have. See
+`data_preparation.cluster_features`.
+
 `require_calibration_activity` (the Valendin cohort filter, on by default)
 restricts the panel to customers active in the calibration window, governing
 both the LSTM and the Pareto/NBD benchmark.
@@ -84,8 +101,8 @@ The `.data_config` and `.schema` properties expose the dict forms the existing
 `.embedded_cols` field (normalized to `{col: int | "auto"}` by `prepare_dataset`).
 
 Depends only on pandas (to parse the window dates) plus the sibling
-`ar_feature_names` grammar — no other third-party libraries, and nothing from a
-subpackage above this one.
+`ar_feature_names` and `cluster_feature_names` grammars — no other third-party
+libraries, and nothing from a subpackage above this one.
 """
 
 from __future__ import annotations
@@ -97,6 +114,7 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 
 from panelclv.configs.ar_feature_names import validate_ar_features
+from panelclv.configs.cluster_feature_names import validate_cluster_features
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +285,12 @@ class PanelConfig:
     # during the holdout rollout, so no leakage.
     ar_features: Sequence[str] = ()
 
+    # --- behavioural clusters (per-customer categorical label) ---
+    # e.g. ("kmeans_8",); k-means over the (t_x, x, T) triple at the last calibration
+    # period. The label is STATIC — frozen at calibration and constant across the
+    # holdout — so the rollout carries it untouched, unlike an ar_feature.
+    cluster_features: Sequence[str] = ()
+
     # --- embeddings (which columns to embed; values int | "auto") ---
     embedded_cols: Mapping[str, int | str] | Sequence[str] = ()
 
@@ -284,9 +308,13 @@ class PanelConfig:
         # `_as_col_tuple` is forgiving: a bare string like
         # ``known_future="year_idx"`` is treated as a 1-element tuple, which
         # avoids the classic ``("year_idx")``-is-a-string Python gotcha.
-        for attr in ("time", "known_future", "observed_past", "static", "ar_features"):
+        for attr in (
+            "time", "known_future", "observed_past", "static",
+            "ar_features", "cluster_features",
+        ):
             object.__setattr__(self, attr, _as_col_tuple(getattr(self, attr)))
         validate_ar_features(self.ar_features)  # fail early on a bad feature name
+        validate_cluster_features(self.cluster_features)
 
         # Time-index layout depends on frequency.
         if self.time_cols is not None:
@@ -462,6 +490,7 @@ class PanelConfig:
             "static": list(self.static),
             "time_features": dict(self.time_features),
             "ar_features": list(self.ar_features),
+            "cluster_features": list(self.cluster_features),
             "embedded_cols": dict(normalize_embedded_cols(self.embedded_cols)),
         }
 

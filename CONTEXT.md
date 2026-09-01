@@ -43,6 +43,18 @@ each step from the counts the model itself sampled. That recomputation is what m
 rollout leak-free.
 _Avoid_: lagged feature, history feature, target encoding
 
+**Behavioural cluster**:
+A derived covariate that groups customers by how they behaved across the calibration
+window, and hands the model the group index as a category. Like an AR feature it comes
+from the target's own past; unlike one it is **frozen** — computed once and constant
+for that customer through every holdout period, so a rollout carries it rather than
+recomputing it. A customer never changes cluster mid-forecast.
+Not to be confused with the **customer groups** of the segment analysis, which are
+derived from calibration *and holdout* activity and exist only to break a results
+table apart. Those are a way of reading a forecast; a behavioural cluster is an input
+to one.
+_Avoid_: segment, group, cohort, customer type
+
 ### The time windows
 
 **Calibration window**:
