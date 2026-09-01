@@ -88,8 +88,8 @@ flowchart TD
 is the **single** declaration of every column role, window date and embedding.
 `prepare_dataset` accepts nothing else — pass a dict and it raises `TypeError`.
 
-Priority 3 in `CLAUDE.md` lives here: columns are named in `PanelConfig`, never in
-model code. Model code only ever sees positional feature axes.
+`CLAUDE.md`'s dataset-agnostic priority lives here: columns are named in
+`PanelConfig`, never in model code. Model code only ever sees positional feature axes.
 
 This is the golden fixture's config, complete:
 
@@ -723,7 +723,8 @@ For each neural model, for `i` in `1..n_studies_per_model`:
 
 1. `seed = base_seed + i`, and a study directory `Optuna_Studies/study_{i:02d}`.
 2. `training` is augmented with that seed and a per-study `checkpoint_dir` — **the
-   runner owns the seed**, so a `ModelSpec` cannot accidentally pin one.
+   runner owns the seed**, so a `ModelSpec` cannot accidentally pin one. It reaches
+   the Optuna sampler and the Monte Carlo forecast; it does not seed training.
 3. `run_optuna_study(..., sampler=TPESampler(seed=seed), append_timestamp=False)`.
 4. `refit_best_trial` — the only route to a forecast-ready model (ADR-0008).
 5. `registry.rollout_for(model_type)` runs the rollout at `n_simulations`.

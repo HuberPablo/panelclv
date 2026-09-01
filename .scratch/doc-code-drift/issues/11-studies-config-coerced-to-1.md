@@ -1,6 +1,6 @@
 # 11 — `studies/config.py`: "Coerced to 1 for the deterministic Pareto/NBD baseline" — nothing coerces
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Doc claim
 
@@ -50,3 +50,25 @@ in every future `config.json`.
 
 Issue `01` — the other false claim in this same docstring, four lines below
 (`studies/config.py:116-118`, "for its sampler and training").
+
+## Comments
+
+Closed with fix option **(a)**, alongside issue `01` — the two false lines sit four lines
+apart in the same `StudySuiteConfig` docstring and were corrected in one pass.
+
+`n_studies_per_model` now reads:
+
+> How many independent Optuna studies to run per neural model (each gets its own seed).
+> Ignored for Pareto/NBD, which runs exactly one fit because a single MCMC fit is what the
+> model is; the archived record still stores the value that was passed in.
+
+Option (b) — having `_model_record` (`studies/runner.py:269`) write `1` for a non-neural
+model — was **not** taken. The trade-off was put explicitly: (b) makes the archive
+self-describing, (a) leaves a misleading number in every future `config.json`. (a) was
+chosen because the session's standing decision was to correct prose and move no behaviour,
+and because changing what is written into `config.json` needs `studies/suite_reader.py` and
+the 19 existing archives checked for readers of the uncoerced value first.
+
+The docstring now says the number survives into the record, so a reader of a Pareto/NBD
+`config.json` is warned rather than misled. Reopening (b) is still worthwhile if the archive
+reader ever grows to trust that field.

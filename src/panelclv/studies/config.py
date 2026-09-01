@@ -110,12 +110,15 @@ class StudySuiteConfig:
         The models to run.
     n_studies_per_model
         How many independent Optuna studies to run per neural model (each gets its
-        own seed). Coerced to 1 for the deterministic Pareto/NBD baseline.
+        own seed). Ignored for Pareto/NBD, which runs exactly one fit because a single
+        MCMC fit is what the model is; the archived record still stores the value
+        that was passed in.
     n_simulations
         Monte Carlo paths per forecast.
     base_seed
-        Study ``i`` uses ``base_seed + i`` for its sampler and training, so the
-        studies are genuine independent replications.
+        Study ``i`` uses ``base_seed + i`` for its Optuna sampler and its Monte Carlo
+        forecast, so the studies are independent replications. It does not seed
+        training.
     device, refit_kwargs, overwrite
         Passed through to the trainer / forecaster; ``overwrite`` allows reusing an
         existing suite folder.

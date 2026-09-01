@@ -19,10 +19,12 @@ asserted differently — see `test_pareto_fit_is_shaped_and_finite`.
 
 Three distinct properties are asserted, and they fail for different reasons:
 
-- **Determinism** — the same config and seed produce bit-identical predictions. This is
-  priority #2 in ``CLAUDE.md`` ("same config and seed gives the same result"), and
-  nothing else in the suite tests it. Asserted as exact equality, because an unseeded
-  RNG or an order-dependent step breaks it on any machine.
+- **Determinism** — the same config and seed produce bit-identical predictions, *given*
+  a seeded global torch RNG, which this file sets itself (``torch.manual_seed`` below).
+  The package does not seed training — see ``CLAUDE.md``'s reproducibility priority — so
+  what this asserts is that the pipeline adds no nondeterminism of its own, and nothing
+  else in the suite tests that. Exact equality, because an order-dependent step breaks
+  it on any machine.
 - **Regression** — the pinned numbers below still come out. This is asserted with a
   relative tolerance rather than exact equality: the run is bit-reproducible within one
   environment (verified across processes), but CPU float reduction order is not

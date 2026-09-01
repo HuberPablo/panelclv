@@ -82,7 +82,7 @@ TRAINING_CONTROLS: frozenset[str] = frozenset({
     "n_epochs", "patience",          # training control (scalar, or a search spec)
     "checkpoint_dir", "verbose",     # bookkeeping
     "loss_type", "class_weights", "focal_gamma", "emd_weight",  # loss configuration
-    "grad_clip", "log_wandb", "seed",              # optimiser / logging / RNG
+    "grad_clip", "log_wandb", "seed",   # optimiser / logging / Optuna sampler seed
 })
 
 

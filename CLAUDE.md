@@ -31,11 +31,15 @@ When choices conflict, resolve in this order:
 
 1. **Correctness** — benchmarks reproduce their source; models train and roll out as
    described in `docs/adr/`.
-2. **Reproducibility** — same config and seed gives the same result, and results
-   never depend on the order notebook cells were run in.
-3. **Dataset-agnostic interfaces** — a model that runs end-to-end on a new panel with
+2. **Dataset-agnostic interfaces** — a model that runs end-to-end on a new panel with
    no code edits beats a better model welded to one dataset. Columns are named in
    `PanelConfig`, never in model code.
+3. **Reproducibility** — every seed the package owns (the Optuna search, the Monte
+   Carlo forecast, the synthetic panels) derives from one config value, and a result's
+   output path derives from config and seed. Model training is not seeded: weight
+   init, `DataLoader` shuffling and dropout draw on the global torch RNG, which the
+   package never sets. A suite therefore reports a distribution across replications
+   rather than one number.
 4. **Simplicity** — the smallest design satisfying the above.
 
 ## Where things live

@@ -1,6 +1,6 @@
 # 01 — Training is unseeded; `training["seed"]` reaches only the Optuna sampler
 
-**Status:** needs-triage
+**Status:** done
 
 Reproducibility is priority #2 in this repo, and it does not hold on the production path.
 
@@ -96,3 +96,56 @@ and must go either way.
 ## Related
 
 Issue `11` is the other false claim in the same `StudySuiteConfig` docstring.
+
+## Comments
+
+Closed by fix option **(b)** — the prose is corrected, no behaviour moves. Decided in a
+grilling session; two facts found there set the direction, neither of them in the ticket
+above:
+
+- **The notebooks already seed deliberately.** `notebooks/Study.ipynb` cell 2 and
+  `notebooks/Pareto_Datasets.ipynb` call `torch.manual_seed` + `torch.cuda.manual_seed_all`
+  under a comment naming this exact gap. The package's de facto position was "the entry
+  point owns the global RNG" — undocumented, and honoured only by the notebooks.
+- **The archive is already unreproducible, so (a) would have cost less than the ticket
+  says.** `scripts/run_studies.py`, `scripts/run_loss_ablation.py`,
+  `scripts/run_cdnow_embedding_ablation.py`, `scripts/run_pnbd_grid.py` and both
+  `grids/*.py` never seed torch. `Studies/loss_ablation_cdnow`, `seasonal_4x4x10__*` and
+  `pnbd_study_*` were all produced that way and do not reproduce today under any seed.
+
+The correction ran wider than the three sites listed above, because the same claim was
+false in five more places:
+
+| Site | Change |
+|---|---|
+| `CLAUDE.md:28-40` | Reproducibility demoted 2 → 3 and restated as the seeded/unseeded boundary. The "results never depend on the order notebook cells were run in" clause is deleted, not reworded: `_run_monte_carlo` seeds the *global* torch RNG, so a forecast advances it and cell order is part of the result by design. |
+| `studies/config.py` `base_seed` | "for its sampler and training" → the sampler and the Monte Carlo forecast; "It does not seed training." |
+| `studies/config.py` `n_studies_per_model` | issue `11`'s line, closed here with its option (a) — see that ticket. |
+| `tuning/optuna_tuning.py:85` | comment "RNG" → "Optuna sampler seed". |
+| `docs/running-a-model.md:724-726` | "the runner owns the seed" now says *which* seed. |
+| both notebooks' cell 2 | comment block rewritten: says what the two lines buy (a fresh-kernel top-to-bottom run) and what they do not (cell re-execution; anything under `scripts/` or `grids/`). Code untouched. |
+| `tests/test_golden_end_to_end.py:22-25` | quoted the deleted sentence as what it proves. Restated: it pins bit-identical behaviour *given* a seeded RNG that the test sets itself at `:207`, so it guards the pipeline's wiring, not a determinism the package provides. |
+
+The priority order was cited **by number** in five live files, and demoting reproducibility
+would have swapped 2 and 3 under all of them. Rather than renumber, every citation now names
+the priority instead — `tests/test_output_paths.py:3`, `predictions/run_directory.py:7`,
+`docs/running-a-model.md:91`, `tests/test_ar_feature_support.py:37` and the golden test. The
+list can be reordered from here without a rename. (`predictions/`'s claim is *true* — a run
+folder does derive from config and seed — so only its citation moved.)
+
+**Decisions taken and not taken.** The promise is scoped to same process / same machine /
+same build; `torch.use_deterministic_algorithms(True)` was not added, because ROCm's cost for
+it is unmeasured and `VastAI/Rules.md:266-274` already declines to promise bit-identity. The
+`Studies/` archive is left as it is, with no new provenance fields. No ADR.
+
+**What carries it instead:** `tests/test_training_is_unseeded.py` — one parametrised case per
+module under `training/`, `tuning/`, `trials/`, `studies/`, asserting none of them sets the
+global RNG. This is the class of claim `test_docs_are_current.py:16-18` says it cannot catch
+(false without naming anything that moved), so it is pinned by a test instead. Verified to
+fail by temporarily seeding `fit_model`, then reverted.
+
+**Fix option (a) remains open.** Seeding the training path is still the change that would make
+the stronger claim true; it is now a deliberate act that must move `CLAUDE.md`, the `base_seed`
+docstring and that test together, rather than something that can drift in.
+
+`pytest -q`: **366 passed** (350 before, plus this test's 16 cases), 31.99s.

@@ -4,8 +4,8 @@ A prediction dump lands in ``base_dir/<run name>``, where the run name is derive
 the caller from its config and its seed — never from the wall clock. That is what
 makes an earlier run findable: the same config and the same seed name the same
 folder, so a reader holding the config can *construct* the path instead of having to
-remember what time the run was started (``CLAUDE.md`` priority 2 — reproducibility,
-and a path is part of a result).
+remember what time the run was started (``CLAUDE.md``'s reproducibility priority — a
+path is part of a result).
 
 The wall-clock time is still worth having, so it moves out of the folder name and
 into ``run_metadata.json`` beside the predictions: provenance you can read, never a

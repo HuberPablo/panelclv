@@ -54,11 +54,17 @@ against the file on disk:
 `docs/loss-functions.md` is the most current doc in the repo. Those findings are **not**
 in the issue list and should not be re-chased.
 
+One later finding *does* touch it — issue `22`, that "paired per-seed" pairs the sampler and
+the MC draws but not the weights. That is a consequence of `01`, traced from
+`scripts/run_loss_ablation.py` never seeding torch, not a re-run of the discarded pass; every
+number the doc quotes still reproduces from `Studies/loss_ablation_cdnow`.
+
 ## What is in `issues/`
 
-21 tickets, ordered by impact. Each carries the doc claim with `file:line`, the code reality
+22 tickets, ordered by impact. Each carries the doc claim with `file:line`, the code reality
 with `file:line`, and — where the fix direction is genuinely open — both options rather than
-a verdict.
+a verdict. Ticket `22` was filed later, as a consequence of resolving `01`, and is the only
+one not produced by the original pass.
 
 | # | Ticket | Kind |
 |---|---|---|
@@ -83,6 +89,7 @@ a verdict.
 | 19 | Triage labels and the `Status:` vocabulary | convention |
 | 20 | README and `running-a-model` accuracy batch | doc false |
 | 21 | `week_*` column names on a non-weekly panel | naming |
+| 22 | The loss ablation's "paired on seed" pairs the sampler, not the weights | doc imprecise |
 
 Four are behaviour or packaging rather than prose (`01`–`04`). Those are written as
 **divergences, not change requests**: each lays out both directions — change the code, or

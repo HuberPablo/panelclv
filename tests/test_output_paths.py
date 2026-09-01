@@ -1,7 +1,7 @@
 """Where a run lands is derivable from its config and its seed.
 
-Reproducibility — ``CLAUDE.md`` priority 2 — covers *where* a result is written, not
-only what is in it. Three writers used to stamp ``datetime.now()`` into a folder name,
+``CLAUDE.md``'s reproducibility priority covers *where* a result is written, not only
+what is in it. Three writers used to stamp ``datetime.now()`` into a folder name,
 which cost two things at once: finding an earlier run meant knowing what minute it had
 been started, and re-running the same config wrote a second folder beside the first
 instead of over it.
