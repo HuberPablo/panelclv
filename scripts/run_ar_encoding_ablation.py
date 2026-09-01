@@ -107,33 +107,57 @@ N_SIMULATIONS = 300    # Monte Carlo paths per forecast (docs/loss-functions.md 
 # Tenure and `cumulative_transactions` are dropped rather than left searchable: the
 # Optuna objective is teacher-forced validation loss, which is blind to the rollout
 # drift, which is why the search selected them in the first place.
-BOUNDED_32 = (
-    "active_in_last_2_periods",
-    "active_in_last_4_periods",
-    "active_in_last_8_periods",
-    "active_in_last_16_periods",
-    "active_in_last_32_periods",
-    "has_transacted_before",
+def bounded_flags(deepest: int) -> tuple[str, ...]:
+    """Nested activity flags up to `deepest`, plus `has_transacted_before`.
+
+    A bounded step encoding of the same silence `period_since_last_transaction`
+    measures: the flags are all 0 beyond the deepest bin, so no holdout value can leave
+    the range the weights were fitted on. `active_in_last_1_periods` is omitted because
+    the target channel already carries the previous count.
+
+    `deepest` must be < the panel's calibration length. At or above it the flag can never
+    be 0 while fitting -- silence has nowhere to accumulate -- so the column is an exact
+    duplicate of `has_transacted_before` in calibration and diverges from it only in the
+    holdout, which is precisely the failure this encoding exists to remove.
+    `check_arm_depth` enforces that against the built dataset.
+    """
+    ks = [k for k in (2, 4, 8, 16, 32, 52) if k <= deepest]
+    return tuple(f"active_in_last_{k}_periods" for k in ks) + ("has_transacted_before",)
+
+
+# The unbounded set under test: today's `config_pareto`, and the failure being fixed.
+UNBOUNDED = (
+    "period_since_last_transaction",
+    "cumulative_transactions",
+    "period_since_first_transaction",
 )
 
-ARMS: dict[str, tuple[str, ...]] = {
-    "no_ar": (),
-    "ar_unbounded": (
-        "period_since_last_transaction",
-        "cumulative_transactions",
-        "period_since_first_transaction",
-    ),
-    "ar_bounded_32": BOUNDED_32,
-    "ar_bounded_52": BOUNDED_32 + ("active_in_last_52_periods",),
+# Two bounded arms per panel, with the deepest bin at roughly 31% and 50% of the
+# calibration window. The K values differ between panels because the windows do
+# (electronics 104 periods, CDNOW 39); holding K fixed instead would make the deeper
+# CDNOW arm degenerate, which is the trap `bounded_flags` documents.
+PANEL_DEPTHS: dict[str, tuple[int, int]] = {
+    "electronics": (32, 52),
+    "cdnow":       (16, 32),
 }
 
-# Shard -> base seed. Study i of a shard draws `base_seed + i`, so at N_STUDIES = 20
-# shard "a" covers seeds 43-62 and shard "b" covers 63-82: disjoint, and an arm's 40
-# replications are 40 distinct seeds rather than two runs of the same twenty.
-#
-# The gap between the two base seeds must be >= N_STUDIES. At the previous setting
-# (52) raising N_STUDIES from 10 to 20 would have overlapped the ranges and quietly
-# made half the replications duplicates of each other.
+
+def arms_for(panel: str) -> dict[str, tuple[str, ...]]:
+    """`{arm name: ar_features}` for one panel. Only this mapping differs between arms.
+
+    Tenure and `cumulative_transactions` are dropped from the bounded arms rather than
+    left searchable: the Optuna objective is teacher-forced validation loss, which is
+    blind to the rollout drift, which is why the search selected them in the first place.
+    """
+    shallow, deep = PANEL_DEPTHS[panel]
+    return {
+        "no_ar": (),
+        "ar_unbounded": UNBOUNDED,
+        f"ar_bounded_{shallow}": bounded_flags(shallow),
+        f"ar_bounded_{deep}": bounded_flags(deep),
+    }
+
+
 SHARDS: dict[str, int] = {"a": 42, "b": 62}
 
 
@@ -166,9 +190,55 @@ def electronics_config(ar_features: tuple[str, ...]) -> PanelConfig:
     )
 
 
+def cdnow_config(ar_features: tuple[str, ...]) -> PanelConfig:
+    """The CDNOW panel exactly as `run_loss_ablation.py` reads it, `ar_features` varying.
+
+    A much harsher test of the same hazard than electronics: the holdout is nearly as
+    long as the calibration window (38 vs 39 periods, against 52 vs 104), so the capped
+    counters drift proportionally further -- recency escapes its fitted range on 56.9% of
+    holdout cells here against 37.7% there -- and the per-cell rate falls 2.52x between
+    the windows rather than 1.60x.
+    """
+    return PanelConfig(
+        id_col="Id",
+        target_col="Transactions",
+        frequency="weekly",
+        time_cols=("year", "week"),
+        training_start="1997-01-01",
+        validation_start="1997-08-06",   # 1997 week 31 - last 8 calibration weeks
+        training_end="1997-09-30",       # inclusive of 1997 week 38
+        holdout_start="1997-10-01",      # 1997 week 39
+        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w24
+        clip_target_upper=4,             # 5-class head; 3 cells in 181,489 exceed it
+        ar_features=ar_features,
+        embedded_cols={"Transactions": "auto"},
+    )
+
+
 PANELS = {
     "electronics": (CLEAN / "electronics_customer_week_panel.csv", electronics_config),
+    "cdnow":       (CLEAN / "cdnow_customer_week_panel.csv", cdnow_config),
 }
+
+
+def check_arm_depth(arm: str, data: dict) -> None:
+    """Refuse an `active_in_last_K` channel that cannot vary on this panel.
+
+    Silence cannot exceed `T_CAL - 1` while fitting, so a flag with K at or above the
+    calibration length is 1 for every customer who has ever transacted -- an exact copy
+    of `has_transacted_before` -- and only becomes a distinct signal out in the holdout,
+    where nothing constrained it. Cheap to check, silent and expensive to miss.
+    """
+    t_cal = int(data["T_CAL"])
+    bad = [c for c in data["seq_cols"]
+           if c.startswith("active_in_last_")
+           and int(c.split("_")[3]) >= t_cal]
+    if bad:
+        raise ValueError(
+            f"arm {arm!r}: {bad} cannot vary on a panel with T_CAL={t_cal}. Such a flag "
+            f"duplicates 'has_transacted_before' in calibration and diverges from it only "
+            f"in the holdout. Lower the depth in PANEL_DEPTHS[{data.get('panel_name', '?')!r}]."
+        )
 
 # Everything that is NOT the ablation. Identical in every arm, so the only thing moving
 # is the feature set. `embedding_dim` is deliberately absent: the default `valendin`
@@ -223,7 +293,7 @@ def score_suite(root: Path, data: dict, base_seed: int) -> list[dict[str, object
     is what lets the watchdog be a budget bound rather than an all-or-nothing gamble.
 
     It also means this does not depend on the persisted `panel_config`: `data` is rebuilt
-    from this script's own `ARMS` mapping, which is the same declaration the suite was
+    from this script's own `arms_for` mapping, which is the same declaration the suite was
     created from.
 
     Alignment follows `studies.suite_metrics`: predictions are stored in the cohort's own
@@ -272,7 +342,8 @@ def report(panel: str, suffix: str | None = None) -> None:
     panel_path, build_config = PANELS[panel]
 
     rows: list[dict[str, object]] = []
-    for arm, ar_features in ARMS.items():
+    arms = arms_for(panel)
+    for arm, ar_features in arms.items():
         data = None
         for shard, base_seed in SHARDS.items():
             root = STUDIES_BASE / suite_name(panel, arm, shard, suffix)
@@ -316,7 +387,7 @@ def report(panel: str, suffix: str | None = None) -> None:
         mape_sd=("mape_aggregate", lambda s: s.std(ddof=1)),
         rmse_mean=("rmse", "mean"),
     )
-    order = [a for a in ARMS if a in summary.index]
+    order = [a for a in arms if a in summary.index]
     print(summary.loc[order].round(3).to_string())
 
     print(
@@ -339,7 +410,9 @@ def report(panel: str, suffix: str | None = None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--panel", choices=sorted(PANELS), default="electronics")
-    parser.add_argument("--arm", choices=sorted(ARMS))
+    # Not an argparse `choices`: the arm names depend on --panel (the bounded arms
+    # take their depth from the calibration window), so it is validated below.
+    parser.add_argument("--arm")
     parser.add_argument("--shard", choices=sorted(SHARDS))
     parser.add_argument("--n-studies", type=int, default=N_STUDIES)
     parser.add_argument("--n-trials", type=int, default=N_TRIALS)
@@ -361,6 +434,13 @@ def main() -> None:
     if not args.arm or not args.shard:
         parser.error("--arm and --shard are required unless --report is given")
 
+    arms = arms_for(args.panel)
+    if args.arm not in arms:
+        parser.error(
+            f"--arm {args.arm!r} is not defined for panel {args.panel!r}; "
+            f"choose from {sorted(arms)}"
+        )
+
     panel_path, build_config = PANELS[args.panel]
     if not panel_path.exists():
         raise FileNotFoundError(
@@ -370,7 +450,9 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     panel = pd.read_csv(panel_path)
-    data_full = panel_dataset.prepare_dataset(panel, build_config(ARMS[args.arm]))
+    data_full = panel_dataset.prepare_dataset(panel, build_config(arms[args.arm]))
+    data_full["panel_name"] = args.panel
+    check_arm_depth(args.arm, data_full)
 
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     config = StudySuiteConfig(
@@ -395,7 +477,7 @@ def main() -> None:
 
     root = run_study_suite(config)
     print(f"\nStudy suite written to: {root}")
-    print(f"arm={args.arm}  shard={args.shard}  ar_features={ARMS[args.arm]}")
+    print(f"arm={args.arm}  shard={args.shard}  ar_features={arms[args.arm]}")
 
     table = study_metrics(root, panel_path, standard_deviation=True)
     print(f"\nForecast metrics (mean over {args.n_studies} studies, +- SD):")
