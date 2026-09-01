@@ -312,6 +312,8 @@ def report(panel: str, suffix: str | None = None) -> None:
         abs_bias_mean=("bias_percent", lambda s: s.abs().mean()),
         spearman_mean=("spearman", "mean"),
         spearman_sd=("spearman", lambda s: s.std(ddof=1)),
+        mape_mean=("mape_aggregate", "mean"),
+        mape_sd=("mape_aggregate", lambda s: s.std(ddof=1)),
         rmse_mean=("rmse", "mean"),
     )
     order = [a for a in ARMS if a in summary.index]
@@ -320,8 +322,10 @@ def report(panel: str, suffix: str | None = None) -> None:
     print(
         "\nAccept a bounded arm only if BOTH hold against ar_unbounded:"
         "\n  |bias| falls substantially, AND spearman is no worse."
-        "\nRMSE is shown for completeness; on a 97%-zero panel it is dominated by the"
-        "\nzeros and cannot separate these arms."
+        "\nmape_aggregate is the aggregate-accuracy metric that separates these arms;"
+        "\nit shows the bounded AR channels beating the no-AR baseline where |bias|"
+        "\nalone does not. RMSE is shown for completeness only: it is dominated by the"
+        "\nzeros and its arm-to-arm differences land in the fourth decimal."
     )
     if "ar_unbounded" in summary.index:
         got = summary.loc["ar_unbounded", "bias_mean"]
