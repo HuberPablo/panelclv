@@ -93,7 +93,7 @@ CLEAN = REPO_ROOT / "Datasets" / "Dataset_clean"
 # Matches the archived electronics suites so the `ar_unbounded` arm is comparable with
 # what is already on disk -- which is this script's own sanity check (see `report`).
 N_TRIALS = 50
-N_STUDIES = 10         # per shard; two shards per arm gives 20 replications
+N_STUDIES = 20         # per shard; two shards per arm gives 40 replications
 N_SIMULATIONS = 300    # Monte Carlo paths per forecast (docs/loss-functions.md §6 floor)
 
 # The feature sets under test. Only this mapping differs between arms.
@@ -127,10 +127,14 @@ ARMS: dict[str, tuple[str, ...]] = {
     "ar_bounded_52": BOUNDED_32 + ("active_in_last_52_periods",),
 }
 
-# Shard -> base seed. Study i of a shard draws `base_seed + i`, so shard "a" covers seeds
-# 43-52 and shard "b" covers 53-62: disjoint, and the 20 replications of an arm are 20
-# distinct seeds rather than two runs of the same ten.
-SHARDS: dict[str, int] = {"a": 42, "b": 52}
+# Shard -> base seed. Study i of a shard draws `base_seed + i`, so at N_STUDIES = 20
+# shard "a" covers seeds 43-62 and shard "b" covers 63-82: disjoint, and an arm's 40
+# replications are 40 distinct seeds rather than two runs of the same twenty.
+#
+# The gap between the two base seeds must be >= N_STUDIES. At the previous setting
+# (52) raising N_STUDIES from 10 to 20 would have overlapped the ranges and quietly
+# made half the replications duplicates of each other.
+SHARDS: dict[str, int] = {"a": 42, "b": 62}
 
 
 def electronics_config(ar_features: tuple[str, ...]) -> PanelConfig:
