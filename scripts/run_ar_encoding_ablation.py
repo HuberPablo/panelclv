@@ -75,6 +75,7 @@ import torch
 from panelclv.configs.panel_config import PanelConfig
 from panelclv.data_preparation import panel_dataset
 from panelclv.data_preparation.target_channel import holdout_actuals
+from panelclv.models import compute_forecast_metrics
 from panelclv.studies import (
     ModelSpec,
     StudySuiteConfig,
@@ -206,25 +207,35 @@ def spearman(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.corrcoef(rx, ry)[0, 1])
 
 
-def discrimination_by_study(root: Path, data: dict) -> dict[int, float]:
-    """Per-study Spearman between per-customer predicted and actual holdout totals.
+def score_suite(root: Path, data: dict, base_seed: int) -> list[dict[str, object]]:
+    """Score every stored forecast in one suite root, one row per replication.
 
-    The level and the ranking are different questions: an arm can fix `bias_percent` by
-    predicting the cohort mean for everyone, which is worthless for the customer-level
-    forecast the thesis is about. This is the number that catches that.
+    Deliberately reads `Predictions/Prediction_*.csv` rather than the suite's
+    `results.csv`. `run_study_suite` saves each study's forecast inside its loop
+    (`studies/runner.py:174`) but writes `results.csv`, `metrics.csv` and `config.json`
+    only after the last one, so a shard killed by its watchdog leaves completed
+    replications that none of those three files describe. Scoring the predictions
+    directly makes a partial shard count for exactly the replications it finished, which
+    is what lets the watchdog be a budget bound rather than an all-or-nothing gamble.
+
+    It also means this does not depend on the persisted `panel_config`: `data` is rebuilt
+    from this script's own `ARMS` mapping, which is the same declaration the suite was
+    created from.
 
     Alignment follows `studies.suite_metrics`: predictions are stored in the cohort's own
     order, and the ids are asserted against the rebuilt cohort so row i of the forecast
     and row i of the actuals are the same customer.
     """
-    actual_totals = holdout_actuals(data).sum(axis=1)          # (N,)
+    actual = holdout_actuals(data)                              # (N, T_HOLD)
+    actual_totals = actual.sum(axis=1)
     ref_ids = np.asarray(data["ids"])
 
-    out: dict[int, float] = {}
     model_dir = root / "LSTM"
     predictions = model_dir / "Predictions"
     if not predictions.is_dir():
-        return out
+        return []
+
+    rows: list[dict[str, object]] = []
     for path in sorted(predictions.glob("Prediction_*.csv")):
         study = int(path.stem.split("_")[-1])
         values, ids = load_model_predictions(model_dir, study=study)
@@ -233,8 +244,15 @@ def discrimination_by_study(root: Path, data: dict) -> dict[int, float]:
                 f"{root.name} study {study}: prediction ids do not match the rebuilt "
                 f"cohort — is this the panel the suite was built from?"
             )
-        out[study] = spearman(values.sum(axis=1), actual_totals)
-    return out
+        rows.append(
+            {
+                "study": study,
+                "seed": base_seed + study,
+                **compute_forecast_metrics(actual, values),
+                "spearman": spearman(values.sum(axis=1), actual_totals),
+            }
+        )
+    return rows
 
 
 def report(panel: str, suffix: str | None = None) -> None:
@@ -252,37 +270,32 @@ def report(panel: str, suffix: str | None = None) -> None:
     rows: list[dict[str, object]] = []
     for arm, ar_features in ARMS.items():
         data = None
-        for shard in SHARDS:
+        for shard, base_seed in SHARDS.items():
             root = STUDIES_BASE / suite_name(panel, arm, shard, suffix)
-            if not (root / "results.csv").exists():
+            if not (root / "LSTM" / "Predictions").is_dir():
                 continue
-            # Rebuild this arm's dataset once, lazily: only needed for the Spearman, and
-            # only for arms that actually have results on disk.
+            # Rebuild this arm's dataset once, lazily: only needed to score, and only for
+            # arms that actually have forecasts on disk.
             if data is None:
                 panel_df = pd.read_csv(panel_path)
                 data = panel_dataset.prepare_dataset(
                     panel_df, build_config(ar_features), verbose=False
                 )
-            rho = discrimination_by_study(root, data)
-            results = pd.read_csv(root / "results.csv")
-            for _, r in results[results.model_type == "lstm"].iterrows():
-                rows.append(
-                    {
-                        "arm": arm,
-                        "shard": shard,
-                        "seed": r["seed"],
-                        "bias_percent": r["bias_percent"],
-                        "rmse": r["rmse"],
-                        "spearman": rho.get(int(r["study"]), float("nan")),
-                    }
-                )
+            for row in score_suite(root, data, base_seed):
+                rows.append({"arm": arm, "shard": shard, **row})
 
     if not rows:
         print("No finished suites found. Run the arms first.")
         return
 
     per_study = pd.DataFrame(rows)
-    print(f"\n{len(per_study)} replications across {per_study.arm.nunique()} arms\n")
+    # Replications per (arm, shard), so a shard the watchdog cut short is visible as a
+    # short count rather than silently shrinking an arm's sample.
+    coverage = per_study.groupby(["arm", "shard"]).size().unstack(fill_value=0)
+    print(f"\n{len(per_study)} replications across {per_study.arm.nunique()} arms")
+    print("\nreplications per shard (10 expected each):")
+    print(coverage.to_string())
+
 
     # Distribution across replications, not a pooled point estimate: a single mean hides
     # exactly the across-study spread this ablation exists to measure.
