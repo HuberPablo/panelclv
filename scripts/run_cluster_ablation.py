@@ -58,6 +58,11 @@ pools whatever finished, so the table declares the space and the budget decides 
 of it gets explored. `no_cluster`, `cluster_8` and `ar_unbounded` are the minimum that
 answers the question.
 
+Both panels `run_ar_encoding_ablation.py` uses are registered, and `--panel` selects one.
+CDNOW is the sharper test: its holdout is nearly as long as its calibration window, so the
+unbounded counters drift further there (recency escapes on 56.9% of holdout cells against
+37.7% on electronics) and a bounded encoding has more to fix.
+
 ## Why one suite per arm
 
 The arms differ in `PanelConfig` (`cluster_features` / `ar_features`), and
@@ -203,9 +208,44 @@ def electronics_config(arm: Arm) -> PanelConfig:
     )
 
 
+def cdnow_config(arm: Arm) -> PanelConfig:
+    """The CDNOW panel exactly as `run_ar_encoding_ablation.cdnow_config` reads it.
+
+    The harsher test of the same hazard, and therefore the sharper test of this
+    ablation's claim. CDNOW's holdout is nearly as long as its calibration window (38 vs
+    39 periods, against 52 vs 104 on electronics), so the unbounded counters drift
+    proportionally further — recency escapes its fitted range on 56.9% of holdout cells
+    here against 37.7% there. If a bounded categorical encoding fixes the level anywhere,
+    it should show most clearly here.
+    """
+    return PanelConfig(
+        id_col="Id",
+        target_col="Transactions",
+        frequency="weekly",
+        time_cols=("year", "week"),
+        training_start="1997-01-01",
+        validation_start="1997-08-06",   # 1997 week 31 - last 8 calibration weeks
+        training_end="1997-09-30",       # inclusive of 1997 week 38
+        holdout_start="1997-10-01",      # 1997 week 39
+        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w24
+        clip_target_upper=4,             # 5-class head; 3 cells in 181,489 exceed it
+        ar_features=arm.ar_features,
+        cluster_features=arm.cluster_features,
+        embedded_cols={"Transactions": "auto"},
+    )
+
+
 PANELS = {
     "electronics": (CLEAN / "electronics_customer_week_panel.csv", electronics_config),
+    "cdnow":       (CLEAN / "cdnow_customer_week_panel.csv", cdnow_config),
 }
+
+# NOTE: unlike `run_ar_encoding_ablation.PANEL_DEPTHS`, K does NOT vary by panel. That
+# script's K is a WINDOW LENGTH — `active_in_last_K_periods` degenerates if K approaches
+# the calibration window, so it must shrink for CDNOW's 39 periods. Here K is a NUMBER OF
+# GROUPS, which depends on cohort size and heterogeneity rather than window length, and
+# CDNOW's cohort is the larger of the two. The same K values are therefore comparable
+# across both panels, which is what lets the arms be read side by side.
 
 # Everything that is NOT the ablation. Identical in every arm, so the only thing moving is
 # the feature encoding. `embedding_dim` is deliberately absent: the default `valendin`
