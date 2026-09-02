@@ -3,17 +3,33 @@
 
 Why this exists instead of a one-line `vastai search offers`:
 
-    The panelclv workload is CPU-bound, not GPU-bound. The electronics panel is
-    829 customers x 208 periods, so at batch 256 an epoch is ~4 batches — far too
-    small to fill any modern GPU. And `run_monte_carlo_forecast` loops simulations
-    sequentially in Python (600 sims x 52 autoregressive steps = ~31k tiny forward
-    passes), which is dominated by kernel-launch latency, i.e. by CPU single-thread
-    speed. VRAM demand is trivial: one simulation path is (829, 52) float32 = 172 KB.
+    The panelclv workload is CPU-bound, not GPU-bound. An epoch is a handful of
+    batches, and `run_monte_carlo_forecast` loops simulations sequentially in Python
+    — thousands of tiny autoregressive forward passes dominated by kernel-launch
+    latency. VRAM demand is trivial.
 
-    So the right filter is "any GPU that works, on the fastest CPU I can get" —
-    the opposite of a normal GPU search. vast's API can filter the numeric CPU
-    fields, but CPU *generation* only shows up as a model-name string in the
-    results, so this script filters server-side and then ranks client-side.
+    MEASURED, 2026-09-02, seven machines timed on identical work (see
+    VastAI/machine_benchmarks.csv):
+
+      * CPU *generation* decides throughput. AMD Zen 2/3 (EPYC Rome, Ryzen 5000)
+        averaged 169 s/study against 249 s for Xeon E5 v3/v4 — a 1.48x ratio,
+        r = +0.94 with the family.
+      * GPU tier barely matters. An RTX 3080 on a Xeon E5-2620 v4 ran 262 s/study;
+        an RTX 3060 on an EPYC 7452 ran 175 s. Two tiers of GPU lost to the CPU.
+      * `cpu_ghz` carries no usable signal once generation is known: r = +0.21. It
+        was the secondary sort key here, spending rank on a field that does not
+        predict anything. (A smaller sample of the same data gave r = +0.61, which
+        reads as "clock is actively harmful" — that was an artifact of every
+        high-clock machine in it happening to be a Xeon. Generation is the effect;
+        clock only correlates with it.)
+      * `cpu_cores_effective` carries no signal either: r = +0.30, and the slow group
+        alone spans 4 to 32 cores.
+
+    So: filter on feasibility, rank on CPU generation, and ignore clock and cores.
+    Generation only shows up as a model-name string, so that part is client-side.
+
+    This script cannot tell you which individual offer is cheapest per unit work —
+    only a stopwatch can. `VastAI/survey_machines.py` is that stopwatch.
 
 Usage:
     python vast_search.py                      # default search, top 15
@@ -35,17 +51,20 @@ import shutil
 import subprocess
 import sys
 
-# Minimum CUDA the host driver must advertise. panelclv itself pins nothing —
-# pyproject declares a bare `torch` — so this floor exists only to exclude hosts
-# too old for the CUDA family the PyTorch wheels are built against.
+# Minimum CUDA the host driver must advertise: the runtime of the image
+# vast_launch.sh pins (vastai/pytorch:2.10.0-cu128-cuda-12.9). Keep the two in step.
 #
-# Deliberately NOT raised to match the launcher's image tag (currently a cu128 /
-# CUDA 12.9 build). CUDA 12 is minor-version compatible: a 12.x runtime runs on
-# any 12.x driver, so requiring the host to advertise 12.9 would drop machines
-# that run the image fine. The cheap check is downstream anyway — the CUDA probe
-# in vast_onstart.sh aborts provisioning if the GPU is not visible, which costs
-# minutes rather than a lost run.
-IMAGE_CUDA = "12.4"
+# This was 12.4, on the argument that CUDA 12 minor-version compatibility lets a 12.x
+# runtime run on any 12.x driver. That argument is wrong, and renting on it costs a
+# machine every time: minor-version compatibility still requires the driver to be at
+# least as new as the runtime. MEASURED 2026-09-02 — an RTX 3060 whose host advertised
+# CUDA 12.8 failed against this image with
+#
+#     Error 804: forward compatibility was attempted on non supported HW
+#
+# and never provisioned (F2). 12.8 < 12.9 by one minor version and it still failed, so
+# the floor is exact, not approximate.
+IMAGE_CUDA = "12.9"
 
 
 # --- CPU ranking table --------------------------------------------------------
@@ -94,6 +113,28 @@ CPU_TIERS: list[tuple[str, int]] = [
 TIER_LABEL = {3: "current", 2: "recent", 1: "older", 0: "ancient", -1: "unknown"}
 
 
+# GPU architectures the pinned image has no kernels for. PyTorch dropped Maxwell and
+# Pascal from its CUDA 12.8+ builds at 2.8, and the wheels in this image ship sm_75 and
+# up. A card below that provisions cleanly, passes vast_onstart.sh's
+# `torch.cuda.is_available()` check — which only initialises CUDA and says nothing about
+# whether a kernel exists for the device — and then dies at the first kernel launch with
+# "no kernel image is available for execution on the device".
+#
+# Matched on the model name because vast publishes no compute-capability field. This
+# excludes roughly a third of the verified sub-$0.06 market, so it is the single biggest
+# filter here. It is also the least directly tested: the failure is documented by
+# PyTorch, but every Pascal offer available when this was written sat on a host that
+# refused the ssh key (F3), so the "no kernel image" error has not been reproduced
+# in-market. It costs nothing to keep — every Pascal offer in that market was also on a
+# Xeon E5 v3/v4, the CPU family measured 1.48x slower, so none of them was a machine
+# worth renting anyway.
+UNSUPPORTED_GPU = re.compile(
+    r"(GTX\s*(9|10)\d{2}|TITAN\s*[XV]|\bP100\b|\bP40\b|\bP4\b|\bM40\b|\bM60\b|"
+    r"Quadro\s*[PM]\d|\bV100\b|\bK80\b)",
+    re.I,
+)
+
+
 def cpu_tier(cpu_name: str) -> int:
     """Map a vast CPU model string to a generation tier. -1 when unrecognised."""
     name = (cpu_name or "").lower()
@@ -125,6 +166,10 @@ def build_query(args: argparse.Namespace) -> str:
         f"cuda_max_good>={IMAGE_CUDA}",
 
         # -- CPU: the part that decides how long your sweep takes -------------
+        # Cores are NOT that part. Measured r = +0.30 against seconds-per-study, and
+        # the slowest group spans 4 to 32 cores; the fastest EPYC measured had 8.
+        # The floor is kept only to drop listings reporting absurdly little CPU, and
+        # defaults low enough not to exclude anything real.
         f"cpu_cores_effective>={args.min_cores}",
         # UNITS ARE ASYMMETRIC, verified against the live API: the query threshold
         # is in GB, the cpu_ram field in the JSON response is in MB. `cpu_ram>=32`
@@ -180,24 +225,24 @@ def fetch_offers(vastai: str, query: str, verbose: bool) -> list[dict]:
 
 
 def score(offer: dict) -> tuple:
-    """Sort key: best machine for panelclv first.
+    """Sort key: CPU generation first, then price. Nothing else.
 
-    Ranks on CPU generation, then clock, then cores, and only then on price —
-    because at these prices ($0.05-0.40/hr) a full sweep costs a few dollars
-    either way, so wall-clock is worth far more than cents per hour.
-    Returned negated where higher-is-better, so plain ascending sort works.
+    Clock and core count were in this key until they were measured. Both had to go:
+    against seconds-per-study, clock scores r = +0.21 and cores r = +0.30, while the
+    generation family scores r = +0.94. Sorting on a field with no signal is not
+    neutral — it reorders machines that generation had correctly grouped.
     """
     tier = cpu_tier(offer.get("cpu_name", ""))
-    ghz = float(offer.get("cpu_ghz") or 0)
-    cores = float(offer.get("cpu_cores_effective") or 0)
     price = float(offer.get("dph_total") or 99)
-    return (-tier, -ghz, -cores, price)
+    return (-tier, price)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-price", type=float, default=0.40, help="max $/hr (default 0.40)")
-    ap.add_argument("--min-cores", type=int, default=8, help="min effective CPU cores (default 8)")
+    ap.add_argument("--min-cores", type=int, default=2,
+                    help="min effective CPU cores (default 2 — cores do not predict "
+                         "throughput here, so this only drops broken listings)")
     ap.add_argument(
         "--max-bandwidth-cost", type=float, default=0.01,
         help="max $/GB for downloads (default 0.01). Billed separately from $/hr; "
@@ -228,6 +273,16 @@ def main() -> None:
         print(json.dumps(offers[0], indent=2, sort_keys=True))
         return
 
+    # The search API cannot express "sm_75 or newer", so this is a client-side pass.
+    unsupported = [o for o in offers if UNSUPPORTED_GPU.search(str(o.get("gpu_name") or ""))]
+    offers = [o for o in offers if o not in unsupported]
+    if unsupported:
+        print(f"\ndropped {len(unsupported)} offers whose GPU has no kernels in this image "
+              f"(torch 2.8+ cu128 ships sm_75+): "
+              f"{', '.join(sorted({str(o.get('gpu_name')) for o in unsupported}))}")
+    if not offers:
+        sys.exit("No offers left after dropping unsupported GPUs.")
+
     offers.sort(key=score)
 
     hdr = f"{'ID':>10}  {'$/hr':>6}  {'CPU':<34} {'gen':<8} {'GHz':>4} {'cores':>5} {'RAM':>5}  {'GPU':<16} {'rel':>6}  loc"
@@ -251,9 +306,13 @@ def main() -> None:
         )
 
     print(
-        "\nPick from the top rows, not the cheapest row: a 'current'/'recent' CPU is\n"
-        "worth several times its price premium here, because a full sweep costs only\n"
-        "a few dollars either way but can differ by days in wall-clock.\n\n"
+        "\nRows are ranked by CPU GENERATION, then price. Prefer AMD Zen 2/3 (EPYC\n"
+        "Rome/Milan, Ryzen 5000) over Xeon E5 v3/v4: measured, that is a 1.48x\n"
+        "difference in throughput at the same GPU, and it dwarfs the GPU tier. The\n"
+        "clock column is shown but does not predict speed. The listed $/hr is the\n"
+        "GPU only; the instance is billed\n"
+        "$/hr + disk_gb * storage_cost / 730, about +$0.006/hr at the 20 GB the\n"
+        "launcher should rent.\n\n"
         "Then, from the repo root:  ./VastAI/vast_launch.sh <ID>\n\n"
         "Use the launcher rather than a bare `vastai create instance`: create only\n"
         "ALLOCATES — the container does not boot, the image is not pulled and\n"

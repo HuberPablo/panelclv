@@ -18,7 +18,7 @@
 #
 # Override any of these by exporting them first:
 #   VAST_IMAGE    docker image                (default: vast-native pytorch)
-#   VAST_DISK     disk GB                     (default: 40)
+#   VAST_DISK     disk GB                     (default: 20)
 #   VAST_KEY      private key path            (default: ~/.ssh/id_ed25519)
 #   VAST_ONSTART  provisioning script         (default: VastAI/vast_onstart.sh)
 
@@ -28,7 +28,15 @@ OFFER="${1:?usage: vast_launch.sh <OFFER_ID>}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${VAST_IMAGE:-vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312}"
-DISK="${VAST_DISK:-40}"
+# Disk is billed on top of the offer price, at disk_gb * storage_cost / 730 per hour
+# (F15). This was 40 GB, which costs ~$0.011/hr — a 23% markup on a $0.041/hr offer, and
+# more than the difference between the best and worst machine choice measured in §7.
+#
+# 20 GB is ample: the image layers live on the HOST, outside the instance's writable
+# overlay, so a provisioned 20 GB box reports 23 MB used. What actually lands in the
+# overlay is the repo, the panels (megabytes) and Studies/ output (~435 MB for a
+# 160-dataset sweep).
+DISK="${VAST_DISK:-20}"
 KEY="${VAST_KEY:-$HOME/.ssh/id_ed25519}"
 ONSTART="${VAST_ONSTART:-$SCRIPT_DIR/vast_onstart.sh}"
 

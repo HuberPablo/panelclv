@@ -198,29 +198,84 @@ a single machine running the whole grid would have produced.
 
 ## 7. Choosing machines
 
-**The workload is CPU-bound, not GPU-bound.** A synthetic panel is 1000 × 156, so
-an epoch is a handful of batches, and `run_monte_carlo_forecast` loops simulations
-sequentially in Python — thousands of tiny autoregressive forward passes dominated
-by kernel-launch latency. VRAM demand is trivial.
+**The workload is CPU-bound, not GPU-bound.** A synthetic panel is 1000 x 156, so an
+epoch is a handful of batches, and `run_monte_carlo_forecast` loops simulations
+sequentially in Python — thousands of tiny autoregressive forward passes dominated by
+kernel-launch latency. VRAM demand is trivial.
 
-So the selection rule is **the cheapest GPU that works, on the fastest
-single-thread CPU available** — the opposite of a normal GPU search.
-`vast_search.py` already encodes this: it filters server-side on the numeric CPU
-fields and ranks client-side on a CPU-generation tier table, because vast exposes
-CPU generation only as a model-name string. Use it; do not hand-pick from
-`vastai search offers`.
+What follows was **measured** on 2026-09-02, not reasoned from specs. Ten machines were
+rented and timed on one real arm of the CDNOW AR-encoding ablation
+(`--arm ar_bounded_16 --shard a`, full trial and simulation counts), and the results
+live in `VastAI/machine_benchmarks.csv`. `VastAI/survey_machines.py` is the instrument;
+re-run it when the market has moved or the workload changes.
 
-Rent with `vast_launch.sh <OFFER_ID>`, which exists because `create` alone is not
-enough — it does the create, attaches the SSH key *before* first boot, starts the
-container, and polls `cur_state` until the box is genuinely up. Offers go stale in
-minutes; a reaped instance means the offer was taken between search and create, so
-take the next row rather than retrying the same one.
+### The quantity to minimise is $/study, not $/hr
 
-The image is pinned in `vast_launch.sh`
-(`vastai/pytorch:2.10.0-cu128-cuda-12.9-mini-py312`). Keeping every worker on one
-image keeps floating-point behaviour comparable across shards.
+    $/study = billed_dph * seconds_per_study / 3600
 
----
+`billed_dph`, not the offer's price — see F15. An offer quotes GPU rental only; the
+instance is billed `offer + disk_gb * storage_cost / 730`, about $0.011/hr at 40 GB,
+which is a 23% markup on a $0.041 offer.
+
+| CPU | gen | GPU | billed $/hr | s/study | $/study |
+| --- | --- | --- | ---: | ---: | ---: |
+| Ryzen 9 5900X | Zen 3 | RTX 2080 Ti | 0.0911 | 154 | 0.00390 |
+| **EPYC 7452** | Zen 2 | RTX 3060 | 0.0655 | 175 | **0.00318** |
+| **EPYC 7402** | Zen 2 | RTX 3060 | 0.0644 | 178 | **0.00319** |
+| Xeon E5-2620 v4 | Broadwell | RTX 3080 | 0.0456 | 262 | 0.00332 |
+| Xeon E5-2667 v3 | Haswell | RTX 3060 Ti | 0.0578 | 223 | 0.00357 |
+| Xeon E5-2637 v4 | Broadwell | RTX 3060 | 0.0644 | 243 | 0.00435 |
+| Xeon E5-1660 v3 | Haswell | RTX 3060 | 0.0618 | 261 | 0.00448 |
+| Xeon E5-2686 v4 | Broadwell | RTX 4060 | 0.0644 | 257 | 0.00460 |
+
+The first row is the fleet these were compared against, running the same command at the
+same seed. **An RTX 3060 on an EPYC Rome is the buy: 18% cheaper per replication at
+1.13x the wall-clock.**
+
+### What predicts throughput, and what does not
+
+Across the eight machines above, against seconds-per-study:
+
+| field | r | verdict |
+| --- | ---: | --- |
+| CPU family is Xeon E5 v3/v4 | **+0.94** | this is the whole effect |
+| `cpu_ghz` | +0.21 | no usable signal |
+| `cpu_cores_effective` | +0.30 | no usable signal |
+
+AMD Zen 2/3 averaged 169 s/study against 249 s for Xeon E5 v3/v4 — **1.48x**, with the
+GPU varying freely inside both groups.
+
+**GPU tier is close to irrelevant here.** An RTX 3080 on a Xeon E5-2620 v4 ran 262
+s/study; an RTX 3060 on an EPYC 7452 ran 175. Two tiers of GPU lost to the CPU. This
+corrects `.scratch/worker-scheduling/spec.md`, which read the first fleet as "throughput
+tracks the GPU tier" — in that fleet the fast GPUs happened to sit on EPYCs, and holding
+one variable fixed separates them.
+
+**Clock is not the signal, and the old rule's second half was wrong.** This section used
+to say "the cheapest GPU that works, on the fastest single-thread CPU available", and
+`vast_search.py` sorted on `cpu_ghz`. Generation is what matters; clock only correlates
+with it in samples where all the fast-clocked machines are one family.
+
+### Rent 20 GB, not 40
+
+The image layers live on the host, outside the instance's writable overlay — a box rented
+with 20 GB reports `23M used, 20G avail` once provisioned. Nothing here needs 40: the
+panels are megabytes and a full grid shard writes ~435 MB. This is ~$0.006/hr, about 11%
+of a cheap machine's total, and **larger than the gap between the best and worst machine
+choice above.**
+
+### What the survey does not establish
+
+- **Per-machine rankings are not resolved.** At 4 studies per box the individual 95% CIs
+  span roughly +/-25% and overlap freely. Rank CPU *families*; do not read the table as an
+  ordering of individual offers.
+- **One workload.** Everything above is the LSTM on CDNOW. The transformer on the
+  synthetic grid may rank machines differently, though it is weak corroboration that the
+  first grid fleet's fastest machine was also an EPYC.
+- **The seed costs more than the machine.** On one box, `--shard a` ran 262 s/study and
+  `--shard b` 144 s — **1.82x** from `base_seed` alone. Never compare timings across
+  shards, and note that this makes an arm's two shards unequal work (section 5 splits
+  them as though they were equal).
 
 ## 8. Cost and lifecycle
 

@@ -287,3 +287,64 @@ magnitude above the others.
   image pulls to save wall-clock on a job one box finishes in an afternoon. Worker count
   should be chosen against the *provisioning* cost, not just the compute, which sharpens
   §8's "worker count is chosen from measured per-dataset wall-clock".
+
+---
+
+## F15 — The offer price is not the rental price
+
+**Symptom.** A fleet costs consistently more per hour than the offers said it would, by
+roughly the same amount on every machine regardless of GPU.
+
+**Cause.** An offer's `dph_total` prices the GPU rental only. The instance is billed
+
+    dph_total(instance) = dph_total(offer) + disk_gb * storage_cost / 730
+
+`storage_cost` is $/GB/month. At the 40 GB `vast_launch.sh` requests by default and a
+typical `storage_cost` of $0.20, that is **$0.011/hr** — which on a $0.041/hr offer is a
+**23% markup**, and is enough to reverse a comparison between two machines whose measured
+throughput differs by less than that.
+
+Verified against the invoice: instance 49620391 billed a `GPU charge` at rate $0.0507
+and a separate `storage charge` at rate $0.0111, summing to the $0.0618 `dph_total` the
+API reported, against an offer that advertised $0.0521.
+
+**Check.** Compare `dph_total` from `vastai search offers` with `dph_total` from
+`vastai show instances` for the same machine, or read the two charge lines in
+`vastai show invoices --raw`.
+
+**Fix.** Two, both applied:
+
+- **Rent less disk.** The image layers live on the *host*, outside the instance's
+  writable overlay: a provisioned box rented with 20 GB reports `23M used, 20G avail`.
+  Nothing in this workload needs 40 GB — the panels are megabytes and a full grid shard
+  writes ~435 MB. `survey_machines.py` defaults to `--disk 20`, saving ~$0.006/hr, which
+  is about 11% of a cheap machine's total cost and larger than the difference between the
+  best and worst machine choice.
+- **Rank on the billed price.** `survey_machines.py` records `offer_dph` and `dph_total`
+  separately and computes `$/study` from the latter.
+
+---
+
+## F16 — A vast API hiccup read as "the instance is gone", and destroyed three healthy boxes
+
+**Symptom.** Three independent probes, on three unrelated hosts, all logged
+`instance reaped by vast` and destroyed their machines within four seconds of each other.
+All three boxes had been `running` minutes earlier and were provisioning normally.
+
+**Cause.** A helper that looked an instance up in `vastai show instances --raw` wrapped
+the whole call in `try/except` and returned `None` on any failure. `None` was also what it
+returned when the API answered correctly and simply did not list that instance — i.e.
+when it had genuinely been reaped. One transient API error therefore looked exactly like
+simultaneous reaping of every machine, and the caller's response to reaping is to destroy
+and give up.
+
+Three machines can't vanish in the same second. Simultaneity across independent hosts is
+the signature: suspect the thing they share (the API client) rather than the things they
+don't (the hosts).
+
+**Fix.** Distinguish "the API did not answer" from "the API says it is gone". The lookup
+now returns a distinct `API_ERROR` sentinel, and callers retry it rather than treating it
+as absence. The same rule applies to SSH: a timeout or dropped connection to a rented box
+means "ask again", not "this machine is broken" — an otherwise healthy RTX 3070 was
+destroyed two minutes after provisioning because a 180 s timeout on its first
+`import torch` escaped as a fatal error.
