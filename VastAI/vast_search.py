@@ -18,6 +18,7 @@ Why this exists instead of a one-line `vastai search offers`:
 Usage:
     python vast_search.py                      # default search, top 15
     python vast_search.py --max-price 0.25     # cap $/hr
+    python vast_search.py --max-bandwidth-cost 0.005   # cap $/GB egress
     python vast_search.py --min-cores 16 --top 30
     python vast_search.py --show-fields        # dump one raw offer to see the schema
 
@@ -144,6 +145,12 @@ def build_query(args: argparse.Namespace) -> str:
         # Sized by the IMAGE PULL (several GB), not by the data: the synthetic
         # grid is regenerated on the box from base_seed rather than transferred.
         "inet_down>=100",
+        # Bandwidth is billed PER GB, separately from $/hr, and the image pull is the
+        # biggest transfer a worker makes. A host may price egress far above the
+        # ~$0.004/GB median; one at $0.039/GB turned a single crash-looping instance's
+        # repeated image pulls into a $5.37 line item (F14 in known_failures.md). The
+        # $/hr ceiling does not bound this, so it needs its own.
+        f"inet_down_cost<{args.max_bandwidth_cost}",
 
         f"dph_total<{args.max_price}",
     ]
@@ -191,6 +198,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-price", type=float, default=0.40, help="max $/hr (default 0.40)")
     ap.add_argument("--min-cores", type=int, default=8, help="min effective CPU cores (default 8)")
+    ap.add_argument(
+        "--max-bandwidth-cost", type=float, default=0.01,
+        help="max $/GB for downloads (default 0.01). Billed separately from $/hr; "
+             "the median host is ~$0.004/GB and the image pull is several GB per worker",
+    )
     # The panels are tiny (1000 customers x 156 weeks of float32 is ~1 MB), so
     # the real ceiling is the Optuna study plus the MC buffers — hundreds of MB.
     # 8 GB is already generous; 32 was cargo-culted from GPU-training defaults.

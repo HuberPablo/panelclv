@@ -249,6 +249,13 @@ agent shortlists offers with their `$/hr` and waits for a human pick.
 The ceiling is per machine, not per fleet: ten boxes at $0.09/hr is authorized,
 one at $0.11/hr is not.
 
+**The ceiling bounds `$/hr` only.** Bandwidth is a separate meter, billed per GB,
+and the image pull is the largest transfer a worker makes — so a box inside the
+hourly ceiling can still run up a bill many times its rental. One did: $5.37 of
+downloads on an instance that never finished provisioning (F14). `vast_search.py`
+now carries its own `--max-bandwidth-cost` ceiling, and worker count has to be
+weighed against the per-worker image pull, not just the compute.
+
 Two constraints the ceiling does not express, which still apply:
 
 - **Take the CPU generation, not the cheapest row.** `vast_search.py` labels each

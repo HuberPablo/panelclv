@@ -238,3 +238,52 @@ line matches and `pkill` kills its own shell.
 
 **Fix.** Kill by PID (`kill "$PID"`), or split the kill and the restart into two
 separate commands. The bracket trick protects the pattern, not the rest of the line.
+
+---
+
+## F14 — Bandwidth is billed per GB, and a crash-looping box re-pulls the image
+
+**Symptom.** A fleet that produced nothing still emptied the account. The invoice
+shows one instance far above all the others:
+
+```
+Instance 49577975 download charge: quantity 137.400 GB  rate $0.039/GB  = $5.367
+```
+
+Ten rented boxes, none of which finished provisioning, cost $6.67 — of which 80% was
+that single line. GPU charges across all ten came to $0.36.
+
+**Cause.** Two things compounding.
+
+*Bandwidth is a separate meter.* vast bills `inet_down_cost` per GB on top of `$/hr`,
+and the image pull (several GB) is the largest transfer a worker ever makes. Hosts
+price egress independently: the median is ~$0.004/GB and the worst offer on a typical
+search is ~$0.026/GB, but the host above charged $0.039/GB. `Rules.md` §8's "$0.10/hr
+ceiling" bounds the hourly rate and says nothing about this, and `vast_search.py`
+filtered `inet_down>=100` — download *speed*, not price.
+
+*A box that never provisions keeps re-pulling.* 137 GB is roughly twenty pulls of the
+pinned image. The instance was restart-looping, and every restart replays the image
+pull and the `onstart` `apt`/`pip` downloads. Nothing in the launcher noticed: the
+health check only asks whether `/root/.onstart_done` exists yet, which is false for a
+slow box and for a looping one alike.
+
+*The window made it worse.* The health wait had been lengthened from 15 to 35 minutes
+precisely so that slow-but-progressing boxes were not destroyed (an earlier run killed
+nine of them). That fix handed the crash-looper 35 minutes to keep downloading.
+
+**Check.** `vastai show instances` reporting `actual_status: exited` after creation, or
+a box still not healthy while others rented at the same moment are running. Bill it back
+with `vastai show invoices --raw` and look for a `download charge` line an order of
+magnitude above the others.
+
+**Fix.** Three, all needed:
+
+- `vast_search.py` now filters `inet_down_cost<--max-bandwidth-cost` (default $0.01/GB).
+- Treat `exited` as terminal. A box seen in that state has failed and is re-pulling on
+  every restart; destroy it rather than waiting out the health window.
+- **Rent fewer boxes.** The image pull is per worker and dominates a short job. The
+  electronics ablation used ~3.5 box-hours of compute spread over seven machines — seven
+  image pulls to save wall-clock on a job one box finishes in an afternoon. Worker count
+  should be chosen against the *provisioning* cost, not just the compute, which sharpens
+  §8's "worker count is chosen from measured per-dataset wall-clock".
