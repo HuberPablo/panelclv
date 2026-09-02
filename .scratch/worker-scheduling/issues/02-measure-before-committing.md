@@ -79,7 +79,15 @@ Also settled, and not anticipated by this ticket:
   s/study, **1.82x**. Any calibration must fix the shard, and §5's equal split of an arm
   across two shards is not an equal split of work.
 
-Remaining from this ticket: raise `IMAGE_CUDA` to 12.9 (verified above), and add the GPU
-architecture filter — torch 2.8+ cu128 ships sm_75+ only, which disqualifies roughly a
-third of the sub-$0.06 market. Both are in `survey_machines.py` already; folding them into
-`vast_search.py` is the outstanding work.
+Both remaining items are now done in `vast_search.py`:
+
+- `IMAGE_CUDA` raised 12.4 -> 12.9, verified by the error-804 failure above.
+- GPU architecture filter added, verified by execution rather than release notes. A
+  rented GTX 1070 on a *current* driver (580.173.02, CUDA 13.0 — so not F2) reported
+  `capability (6, 1)`, returned True from `torch.cuda.is_available()`, and then failed
+  the first kernel launch with `no kernel image is available for execution on the
+  device`. Recorded as F17. That `is_available()` returns True is the whole reason the
+  filter cannot live in `vast_onstart.sh`'s health check.
+
+This ticket is complete apart from the caching-and-threshold question, which the
+measurements argue should stay open until a family has several rows.

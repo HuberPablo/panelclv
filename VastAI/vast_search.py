@@ -122,12 +122,15 @@ TIER_LABEL = {3: "current", 2: "recent", 1: "older", 0: "ancient", -1: "unknown"
 #
 # Matched on the model name because vast publishes no compute-capability field. This
 # excludes roughly a third of the verified sub-$0.06 market, so it is the single biggest
-# filter here. It is also the least directly tested: the failure is documented by
-# PyTorch, but every Pascal offer available when this was written sat on a host that
-# refused the ssh key (F3), so the "no kernel image" error has not been reproduced
-# in-market. It costs nothing to keep — every Pascal offer in that market was also on a
-# Xeon E5 v3/v4, the CPU family measured 1.48x slower, so none of them was a machine
-# worth renting anyway.
+# filter here — and it is verified by execution, not inferred from release notes. A
+# rented GTX 1070 on a CURRENT driver (580.173.02, advertising CUDA 13.0, so not F2):
+#
+#     capability (6, 1)
+#     torch.AcceleratorError: CUDA error: no kernel image is available for execution
+#
+# `capability` printed before the crash, i.e. `torch.cuda.is_available()` returned True
+# on a card the wheels cannot run. That is precisely why the check in vast_onstart.sh
+# does not catch this and the filter has to live here.
 UNSUPPORTED_GPU = re.compile(
     r"(GTX\s*(9|10)\d{2}|TITAN\s*[XV]|\bP100\b|\bP40\b|\bP4\b|\bM40\b|\bM60\b|"
     r"Quadro\s*[PM]\d|\bV100\b|\bK80\b)",

@@ -348,3 +348,34 @@ as absence. The same rule applies to SSH: a timeout or dropped connection to a r
 means "ask again", not "this machine is broken" — an otherwise healthy RTX 3070 was
 destroyed two minutes after provisioning because a 180 s timeout on its first
 `import torch` escaped as a fatal error.
+
+---
+
+## F17 — A supported-looking GPU with no kernels: `torch.cuda.is_available()` lies
+
+**Symptom.** A box provisions cleanly, `nvidia-smi` lists the GPU, `vast_onstart.sh`
+completes and touches `/root/.onstart_done` — and then training dies at the first CUDA
+op with
+
+    torch.AcceleratorError: CUDA error: no kernel image is available for execution on the device
+
+**Cause.** PyTorch dropped Maxwell and Pascal from its CUDA 12.8+ builds at 2.8. The
+pinned image (`vastai/pytorch:2.10.0-cu128-cuda-12.9`) ships cubins for sm_75 and newer
+only, so a GTX 9xx/10xx, Titan X/Xp or P100 has no kernel to run.
+
+This is **not** F2. F2 is an old *driver* (error 804) and fails during provisioning.
+Here the driver is current and CUDA initialises fine; only the compiled architecture is
+missing. Verified on a rented GTX 1070 with driver 580.173.02 advertising CUDA 13.0:
+
+    capability (6, 1)
+    torch.AcceleratorError: CUDA error: no kernel image is available ...
+
+**Why the health check misses it.** `vast_onstart.sh` gates on
+`torch.cuda.is_available()`, which only asks whether a device and driver exist. On that
+GTX 1070 it returned **True** — `get_device_capability()` printed before the crash. A
+check that catches this has to *launch a kernel*, not query for a device.
+
+**Fix.** `vast_search.py` drops these cards client-side (`UNSUPPORTED_GPU`), because
+vast's query language has no compute-capability predicate. `survey_machines.py` also
+runs a real matmul before committing a shard. Roughly a third of the verified sub-$0.06
+market is excluded by this, all of it correctly.

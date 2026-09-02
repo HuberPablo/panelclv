@@ -269,6 +269,11 @@ choice above.**
 - **Per-machine rankings are not resolved.** At 4 studies per box the individual 95% CIs
   span roughly +/-25% and overlap freely. Rank CPU *families*; do not read the table as an
   ordering of individual offers.
+- **A third of the cheap market cannot run the image at all.** torch 2.8+ cu128 ships
+  sm_75 and up, so every Pascal and Maxwell card is out. Verified on a rented GTX 1070
+  with a current driver: `torch.cuda.is_available()` returned True and the first kernel
+  launch failed with `no kernel image is available for execution on the device`. The
+  health check in `vast_onstart.sh` cannot catch this, so `vast_search.py` filters it.
 - **One workload.** Everything above is the LSTM on CDNOW. The transformer on the
   synthetic grid may rank machines differently, though it is weak corroboration that the
   first grid fleet's fastest machine was also an EPYC.
