@@ -277,21 +277,64 @@ at z = 1.91 to z = 3.46. The drift is one-sided — no holdout cell falls below 
 calibration minimum — so whatever slope was fitted at the sparse top of the range is applied
 to the whole cohort in the same direction.
 
-**What this costs, measured.** A configuration carrying
-`(period_since_last_transaction, cumulative_transactions, period_since_first_transaction)`
-forecast **+220%** aggregate bias against **+23%** for the same model with no AR features,
-with the across-study SD rising from 21 to 160 points. It is not exposure bias: a
-teacher-forced pass, feeding the true counts and the true AR values at every step,
-reproduces it at +169%. Beyond the fitted range the model's predicted rate stops decaying
-and settles near 0.072 while the true rate at long silence is 0.0153, and because silence
-accumulates, that region holds 49.9% of holdout cells against 7.7% of calibration cells —
-so 54% of the total excess prediction comes from it. `tests/test_ar_feature_support.py`
-pins the input-side half of this.
+**What this costs, and what fixes it — measured on both panels.** A configuration
+carrying `(period_since_last_transaction, cumulative_transactions,
+period_since_first_transaction)` was ablated against a bounded replacement at two depths,
+40 replications per arm, by `scripts/run_ar_encoding_ablation.py`. `|bias|` is the mean
+per-replication magnitude; `rho` is the Spearman rank correlation between per-customer
+predicted and actual holdout totals, i.e. how well the forecast separates heavy customers
+from light ones.
+
+| panel | arm | `ar_features` | \|bias\|% | MAPE | rho |
+| --- | --- | --- | ---: | ---: | ---: |
+| electronics | no_ar | none | 22.4 | 56.1 | 0.027 |
+| `T_CAL`=104 | unbounded | recency + cum_txn + tenure | **235.5** | **240.7** | 0.227 |
+| `T_HOLD`=52 | bounded_32 | flags to K=32 | 22.5 | 48.6 | **0.267** |
+| | bounded_52 | flags to K=52 | **14.3** | **45.4** | 0.202 |
+| cdnow | no_ar | none | 14.6 | 24.1 | 0.437 |
+| `T_CAL`=39 | unbounded | recency + cum_txn + tenure | **335.0** | **345.7** | 0.255 |
+| `T_HOLD`=38 | bounded_16 | flags to K=16 | **14.5** | **22.0** | **0.438** |
+| | bounded_32 | flags to K=32 | 46.2 | 55.4 | 0.300 |
+
+Three things the two panels agree on:
+
+- **The unbounded set is catastrophic, and worse where the drift is worse.** CDNOW has the
+  higher recency escape fraction (56.9% vs 37.7%) and the steeper between-window rate drop
+  (2.52x vs 1.60x), and it is the panel with the larger blow-up. One CDNOW replication
+  reached +2530% bias.
+- **It is not exposure bias.** A teacher-forced pass on electronics — true counts *and*
+  true AR values fed at every step, so no sampling and no feedback — reproduces the bias at
+  +169%. The fitted conditional is wrong before any rollout happens. Beyond the fitted
+  range the predicted rate stops decaying and settles near 0.072 while the true rate at
+  long silence is 0.0153; because silence accumulates, that region holds 49.9% of holdout
+  cells against 7.7% of calibration cells, so 54% of the excess comes from it.
+- **A bounded encoding removes it entirely**, returning `|bias|` to the no-AR baseline or
+  below on both panels.
+
+They disagree on what the AR channels then *buy*, which is worth knowing before assuming
+the features earn their place. On electronics the bounded arms improve ranking sharply over
+no AR features at all (0.267 vs 0.027); on CDNOW they do not (0.438 vs 0.437), because the
+target's own history already ranks that panel well. The gain there is confined to MAPE
+(22.0 vs 24.1).
+
+**Choose the deepest bin against the calibration window, not by copying a number.** The
+losing CDNOW arm is instructive: K=32 on a 39-period window leaves only **3.5%** of
+calibration cells beyond the deepest bin, while **68.9%** of holdout cells fall there — the
+same sparsity that breaks the unbounded counters, reproduced inside a nominally bounded
+encoding. The arms that won leave 26.6% (electronics K=52) and 33.7% (CDNOW K=16) of
+calibration cells beyond the deepest threshold. `check_arm_depth` in the ablation script
+rejects only the degenerate case `K >= T_CAL`, where the flag is an exact duplicate of
+`has_transacted_before` in calibration; the sparser failure above it is a judgement the
+caller still has to make.
 
 `transaction_rate`, `has_transacted_before` and `active_in_last_<K>_periods` are bounded and
 stationary, and carry much of the same information: a set of nested
 `active_in_last_<K>_periods` flags is a bounded step encoding of exactly the silence the
-recency counter measures.
+recency counter measures. Each flag takes only 0 or 1 and both values occur in calibration,
+so however far the counter runs in the holdout the model reads an input it was fitted on —
+gaps of 87 and 200 periods produce the identical all-zero vector. What is given up is
+resolution past the deepest threshold, where the true rate is already flat.
+`tests/test_ar_feature_support.py` pins the input-side half of this.
 
 Standardisation (§5) does **not** rescue an unbounded counter. The mean and standard
 deviation are fitted on the calibration window, so a counter still climbing through the
@@ -629,8 +672,13 @@ drift.
 - **`observed_past` covariates are unsupported.** See §2 for the two honest routes.
 - **No per-feature scaling.** Continuous channels are projected raw; prefer bounded AR
   features, or pre-scale in the panel, when magnitudes differ by orders of magnitude.
-- **Unbounded counters extrapolate.** `cumulative_*` and tenure leave their calibration
-  range during a long holdout; `transaction_rate` exists as the bounded alternative.
+- **Window-capped counters extrapolate.** `period_since_first_transaction` and
+  `period_since_last_transaction` cannot exceed the calibration length while being fitted
+  and keep counting through the holdout, so they leave their fitted range (§4: 88.8% and
+  37.7% of holdout cells on electronics). `cumulative_*` is unbounded in principle but
+  stays in range in practice (0.04%). The measured replacement is a set of nested
+  `active_in_last_<K>_periods` flags; `transaction_rate` is the bounded stand-in for the
+  frequency counters.
 - **Uniform panels only.** Every customer must have an identical number of periods in
   each window; ragged panels must be padded upstream (`notebooks/archive/dataset_building.ipynb`).
 - **Static covariates must already be broadcast** to every row of a customer and must be
