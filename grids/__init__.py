@@ -7,13 +7,25 @@ declarations, so each lives in its own module here and is selected by name:
     python scripts/generate_pnbd_grid.py --grid seasonal_4x4x10
     python scripts/run_pnbd_grid.py      --grid seasonal_4x4x10 --model lstm --shard 1/4
 
+A grid may also declare **arms** (``Arm``): feature and embedding configurations that
+every model is trained under, crossed with the panels. A shard then spans the whole
+(arm x dataset) product, and each pair gets its own output tree.
+
 Why Python modules and not YAML/JSON
 ------------------------------------
 ``ModelSpec.search_space`` distinguishes a categorical ``{64, 128, 256}`` from a range
 ``(1e-4, 1e-2, "log")`` by Python type. No data format carries that distinction without
 a bespoke schema and a parser to match, and the registry already declares search spaces
-as Python literals. A grid module is a declaration, not a program: constants and one
-``GRID = GridSpec(...)``, nothing executable.
+as Python literals. A grid module is a declaration, not a program: constants, one
+``GRID = GridSpec(...)``, and no control flow that a reader has to execute in their head
+to know what the grid is.
+
+A **cross product is still a declaration**, and ``seasonal_4x4x10`` builds its twelve
+arms as one. The three axes are named tables directly above it, so the comprehension
+adds no information a reader has to derive — it only spares them checking twelve
+hand-copied rows for the cell that went missing. The line to hold is that a grid module
+never *computes* what it declares: axes yes, a loop that reads a file or picks a value
+no.
 
 Why the name matters
 --------------------
@@ -29,7 +41,7 @@ the workers need.
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -39,6 +51,34 @@ from panelclv.studies import ModelSpec
 # Repo root = the parent of grids/. Every path below hangs off it, so the only
 # machine-specific thing is where the repo was cloned.
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class Arm:
+    """One configuration of the feature and embedding axes, held fixed across the grid.
+
+    An arm is *not* a model and *not* a dataset: it is a third axis crossed with both.
+    The same 160 panels are trained by the same model types under each arm, so a
+    difference between two arms is attributable to the axes below and nothing else.
+
+    Two of the three fields change what the panel carries and one changes how the model
+    reads it, which is why they are declared together here rather than split across
+    ``PanelConfig`` and ``ModelSpec``: an arm is the unit a result is reported against,
+    so it has to be one object.
+
+    ``ar_features`` and ``cluster_features`` are ``PanelConfig`` fields, so each arm
+    needs its own ``prepare_dataset`` (``GridSpec.panel_for``). ``embedder`` is a
+    search-space key both neural entries declare, so it is a *pin* rather than new code
+    — ``run_pnbd_grid.py`` merges it over the model's declared space.
+    """
+
+    name: str
+    ar_features: tuple[str, ...] = ()
+    cluster_features: tuple[str, ...] = ()
+    # Which strategy turns features into a vector (ADR-0005). The registry default is
+    # "valendin", which is what the archived seasonal_4x4x10 run used, since that grid
+    # never overrode it.
+    embedder: str = "valendin"
 
 
 @dataclass(frozen=True)
@@ -84,6 +124,10 @@ class GridSpec:
     n_simulations: int = 200
     # The models to train on every dataset, with their search spaces and trial counts.
     models: tuple[ModelSpec, ...] = ()
+    # The feature/embedding configurations every model is trained under. Empty means
+    # the grid has no arm axis: models train on `panel` as declared, and every path
+    # keeps the un-suffixed shape the archived suites are stored in.
+    arms: tuple[Arm, ...] = ()
     # Workers to rent per model *type*: how many vast.ai boxes that model's datasets
     # are split across. 0 means "not on vast" — run it on the orchestrator instead
     # (the right setting for pareto_nbd, which is one MCMC fit and needs no GPU).
@@ -95,16 +139,49 @@ class GridSpec:
         """Where this grid's generated panels live."""
         return REPO_ROOT / "Datasets" / "Synthetic" / self.name
 
-    def train_base(self, model_name: str) -> Path:
-        """Where one model's trained suites live.
+    def train_base(self, model_name: str, arm_name: str | None = None) -> Path:
+        """Where one model's trained suites live, under one arm.
 
-        Each model gets its own root because two workers training *different* models on
-        the *same* dataset would otherwise both target
-        ``<train_base>/<combo>__<dataset>/``, and ``create_suite_root`` refuses a folder
-        that already exists. Splitting on model here is what lets the shards be merged
-        by plain copy (VastAI/Rules.md §4).
+        Each (model, arm) pair gets its own root because two workers training a
+        *different* model or a *different* arm on the *same* dataset would otherwise
+        both target ``<train_base>/<combo>__<dataset>/``, and ``create_suite_root``
+        refuses a folder that already exists. Splitting the tree here is what lets the
+        shards be merged by plain copy (VastAI/Rules.md §4).
+
+        ``arm_name=None`` keeps the un-suffixed ``<grid>__<Model>/`` path the archived
+        seasonal_4x4x10 suites are stored under. A grid with no arms must not silently
+        move its own history, and the reader in `evaluation` joins on that path.
         """
-        return REPO_ROOT / "Studies" / f"{self.name}__{model_name}"
+        leaf = f"{self.name}__{model_name}"
+        if arm_name is not None:
+            leaf = f"{leaf}__{arm_name}"
+        return REPO_ROOT / "Studies" / leaf
+
+    def arm(self, name: str) -> Arm:
+        """The arm declared under this name, or a message listing the declared ones."""
+        for a in self.arms:
+            if a.name == name:
+                return a
+        raise SystemExit(
+            f"grid {self.name!r} declares no arm {name!r}. "
+            f"Available: {', '.join(a.name for a in self.arms) or '(none)'}"
+        )
+
+    def panel_for(self, arm: Arm | None) -> PanelConfig:
+        """This grid's ``PanelConfig`` as one arm reads it.
+
+        Only the two target-derived axes move. Everything else — window dates, clipping,
+        cohort rule, time features — is the grid's, so two arms differ in what the panel
+        carries and in nothing else. That is what makes a difference between them
+        attributable.
+        """
+        if arm is None:
+            return self.panel
+        return replace(
+            self.panel,
+            ar_features=arm.ar_features,
+            cluster_features=arm.cluster_features,
+        )
 
     @property
     def n_cells(self) -> int:
@@ -113,6 +190,17 @@ class GridSpec:
     @property
     def n_panels(self) -> int:
         return self.n_cells * self.n_datasets
+
+    @property
+    def n_suites_per_model(self) -> int:
+        """Suites one model owes across the whole grid: every arm on every panel.
+
+        Named for suites, not studies, because ``StudySuiteConfig.n_studies_per_model``
+        already means something else — how many independent Optuna studies one model
+        runs *inside* one suite, which a grid pins to 1. Two different quantities under
+        one name is how a budget gets miscounted by the arm factor.
+        """
+        return self.n_panels * max(len(self.arms), 1)
 
 
 def load_grid(name: str) -> GridSpec:

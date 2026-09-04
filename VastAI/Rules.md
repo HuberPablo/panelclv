@@ -110,9 +110,9 @@ because it needs no such check.
 
 ---
 
-## 4. One model per worker, and each model gets its own tree
+## 4. Every (model, arm) pair gets its own tree
 
-A trained grid is one study suite per dataset, with `n_studies_per_model=1`:
+A trained grid is one study suite per dataset per arm, with `n_studies_per_model=1`:
 
 ```
 <train_base>/<combo>__<dataset>/results.csv
@@ -120,19 +120,29 @@ A trained grid is one study suite per dataset, with `n_studies_per_model=1`:
 
 Two workers running **different models on the same dataset** would both target
 `<train_base>/Dataset_10_20__Dataset_1/`, and `create_suite_root` refuses a
-pre-existing folder. So the model axis gets its own root:
+pre-existing folder. The same collision happens between two *arms* of one model. So
+both axes go into the root:
 
 ```
-Studies/seasonal_4x4x10__LSTM/<combo>__<dataset>/
-Studies/seasonal_4x4x10__Transformer/<combo>__<dataset>/
+Studies/seasonal_4x4x10__LSTM__no_ar-no_cluster-valendin/<combo>__<dataset>/
+Studies/seasonal_4x4x10__Transformer__ar_bounded-kmeans_8-projected/<combo>__<dataset>/
 Studies/seasonal_4x4x10__ParetoNBD/<combo>__<dataset>/
 ```
 
-Within one model's tree every worker writes disjoint `<combo>__<dataset>/`
+A grid declaring **no** arms keeps the un-suffixed `Studies/<grid>__<Model>/` path —
+`GridSpec.train_base(model, arm=None)`. That is not a courtesy: the archived
+`seasonal_4x4x10` suites are stored under it and `docs/insights-study.md` cites it, so
+adding an arm axis must not move a grid's own history.
+
+Within one (model, arm) tree every worker writes disjoint `<combo>__<dataset>/`
 directories, so **collecting results is a plain copy** — rsync each worker's tree
 into the matching local tree and the shards reassemble themselves. There is no
 merge step and no merge code anywhere in this design; if you find yourself writing
 one, the split has gone wrong.
+
+**A probe is not a result.** `run_pnbd_grid.py --n-trials/--n-simulations` trains at a
+budget the grid does not declare, so it refuses to run without `--suite-suffix`, which
+moves its output to `<train_base>__<suffix>/`. That tree is deleted, never collected.
 
 ---
 
@@ -157,9 +167,26 @@ budget declared a few lines above it; separating them is how the two drift apart
   pure NumPy/SciPy, no Optuna stage and no GPU need. It runs locally while the
   rented workers churn.
 
-Worker `i` of `N` takes manifest rows `i::N` — **strided, not a contiguous block**,
+Worker `i` of `N` takes work items `i::N` — **strided, not a contiguous block**,
 so no worker draws only the sparse low-rate corner and a lost worker costs an even
 slice of every cell rather than four whole cells.
+
+**A work item is an (arm, dataset) pair, not a dataset.** A grid that declares arms
+(`grids.Arm` — the feature and embedding configurations every model is trained under)
+multiplies its work by the arm count: `seasonal_4x4x10`'s 12 arms x 160 panels is 1,920
+suites per model. Twenty-four (model, arm) pairs against a ten-worker ceiling (§8) means
+a worker cannot own a pair, so it takes a stride of the whole product and trains a little
+of every arm.
+
+**The product is ordered arm-major, and that is load-bearing.** Striding `i::N` over an
+arm-major list gives worker `i` exactly `160/N` datasets from every arm. Order it
+dataset-major instead and the stride walks the arms in steps of `N mod A`: at ten workers
+and twelve arms that is a step of ten, whose orbit covers only six arms, so each worker
+sees half of them and a lost worker guts those six and leaves the rest untouched. An arm
+missing entirely is not a noisier result, it is no result — which is why this matters more
+than the cell-coverage argument above.
+
+`--arm <name>` narrows a run to one arm, for a probe or a targeted resume.
 
 Split counts are set per model because the models are not the same size of job: a
 100-trial Optuna search per dataset is worth many workers, and a single MCMC fit
@@ -167,8 +194,13 @@ is worth none.
 
 **Trial budget: 20 Optuna trials per dataset per neural model**, the figure
 `Pareto_Datasets.ipynb` used for the existing 4x4x10 grids — not the 100 a
-single-panel suite uses, because this budget is paid 160 times over. It buys a
+single-panel suite uses, because this budget is paid 160 times over *per arm*. It buys a
 tuned model per dataset, not an exhaustively tuned one.
+
+The budget must be **equal across arms and across models**, or a difference between two
+of them is attributable to search effort rather than to the axis under test. That is why
+the LSTM and the Transformer both declare 20: the grid module briefly carried 10 for the
+LSTM, which would have made the model comparison unequal.
 
 **Shards must be resumable.** A worker skips any `<combo>__<dataset>/` that already
 exists, so a box that dies mid-run is restarted rather than rewound, and re-running
@@ -179,15 +211,26 @@ a completed shard is a no-op.
 ## 6. Aggregation concatenates tables, never files
 
 Both grid readers take a `train_base` and return a long table keyed by `model`,
-skipping datasets with nothing trained yet. So the per-model trees are combined
+skipping datasets with nothing trained yet. So the per-(model, arm) trees are combined
 *after* reading, not on disk:
 
 ```python
 results = pd.concat([
-    collect_grid_results(dataset_dir, f"Studies/{grid}__{m}")
-    for m in ("LSTM", "Transformer", "ParetoNBD")
+    collect_grid_results(spec.dataset_dir, spec.train_base(m, a.name), arm=a.name)
+    for m in ("LSTM", "Transformer")
+    for a in spec.arms
+] + [
+    # Pareto/NBD has no arm axis: it reads the panel, not the engineered features.
+    collect_grid_results(spec.dataset_dir, spec.train_base("ParetoNBD"))
 ])
 ```
+
+**Pass `arm=`.** Every arm trains the same models on the same panels, so without the
+label their rows are identical in every field you could group by — `model` reads "LSTM"
+for all twelve. The tree is what identifies the arm, so the label has to come from the
+caller; `collect_grid_results` cannot recover it from anything stored inside. Omitting
+the argument returns exactly the frame the archived reads return, which is what keeps
+`make_grid_figures.py` and the pre-arm suites working untouched.
 
 Everything downstream — `cell_summary`, `compare_models_table`, `plot_pattern`,
 `plot_diff_grid`, and `synthetic_grid`'s latent-truth measures — consumes that

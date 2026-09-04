@@ -101,6 +101,7 @@ def collect_grid_results(
     train_base: str | Path | None = None,
     *,
     metrics: Sequence[str] = DEFAULT_METRICS,
+    arm: str | None = None,
 ) -> pd.DataFrame:
     """Read every trained dataset's metrics into one long table tagged by grid cell.
 
@@ -114,13 +115,22 @@ def collect_grid_results(
         Defaults to ``Studies/<dataset_dir name>``, the convention the training loop uses.
     metrics
         Which metrics to pull from each suite's ``results.csv``.
+    arm
+        Label for the arm this tree was trained under, added as an ``arm`` column.
+        A grid's arms all train the same models on the same panels, so their rows are
+        otherwise identical in every field the caller could group by — ``model`` says
+        "LSTM" for all twelve of them. The label has to come from the caller because it
+        is the tree that identifies the arm, not anything stored inside it.
+
+        Omit it for a grid with no arm axis and the column is absent, so an archived
+        read returns exactly the frame it always did.
 
     Returns
     -------
     DataFrame with one row per (model, dataset): the grid coordinates
     (``mean_transaction_rate``, ``churn_rate``), the ``combo`` / ``dataset`` labels,
-    the ``model`` name, and one column per requested metric. Datasets with no
-    ``results.csv`` yet (not trained) are skipped.
+    the ``model`` name, optionally the ``arm``, and one column per requested metric.
+    Datasets with no ``results.csv`` yet (not trained) are skipped.
     """
     dataset_dir, train_base = _resolve_grid(dataset_dir, train_base)
 
@@ -143,6 +153,8 @@ def collect_grid_results(
                 "dataset": g.dataset,
                 "model": r.model,
             }
+            if arm is not None:
+                row["arm"] = arm
             for m in metrics:
                 row[m] = getattr(r, _METRIC_SOURCE[m])
             rows.append(row)
