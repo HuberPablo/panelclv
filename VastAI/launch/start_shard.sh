@@ -27,10 +27,23 @@ ARM="${6:-}"
 ARM_FLAG=""
 [ -n "$ARM" ] && ARM_FLAG="--arm $ARM"
 
+# What to push and what to run. Both default to the grid's values, so a grid launch is
+# byte-identical to what it was; a real-panel ablation overrides them rather than
+# copying this script. A sibling script would duplicate ~85 generic lines -- the
+# provisioning wait, the health check, the SSH options, the .shard_spec/.shard_exit
+# marker protocol -- and that duplication is where drift lives.
+#
+#   DATA_SRC=Datasets/Dataset_clean DATA_DST=Datasets/Dataset_clean \
+#   RUNNER_CMD="scripts/run_real_panel_arms.py --model transformer --shard 3/7" \
+#     ./VastAI/launch/start_shard.sh <HOST> <PORT> real_panel_arms transformer 3/7
+DATA_SRC="${DATA_SRC:-Datasets/Synthetic/$GRID}"
+DATA_DST="${DATA_DST:-Datasets/Synthetic/$GRID}"
+RUNNER_CMD="${RUNNER_CMD:-scripts/run_pnbd_grid.py --grid $GRID --model $MODEL --shard $SHARD $ARM_FLAG}"
+
 KEY="${VAST_KEY:-$HOME/.ssh/id_ed25519}"
 REPO_DIR=/root/panelclv
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCAL_DATA="$(dirname "$(dirname "$SCRIPT_DIR")")/Datasets/Synthetic/$GRID"
+LOCAL_DATA="$(dirname "$(dirname "$SCRIPT_DIR")")/$DATA_SRC"
 
 # Rented boxes reuse IPs and get a fresh host key each time, so a changed fingerprint
 # is expected rather than suspicious — keep them out of the real known_hosts.
@@ -72,9 +85,9 @@ fi
 # transfer, and a re-run skips what is already there (VastAI/Rules.md §3).
 [ -d "$LOCAL_DATA" ] || { say "FATAL: no local data at $LOCAL_DATA"; exit 1; }
 say "pushing $(du -sh "$LOCAL_DATA" | cut -f1) of panels"
-ssh "${SSH_OPTS[@]}" "root@$HOST" "mkdir -p $REPO_DIR/Datasets/Synthetic"
+ssh "${SSH_OPTS[@]}" "root@$HOST" "mkdir -p $REPO_DIR/$(dirname "$DATA_DST")"
 rsync -az --partial -e "ssh ${SSH_OPTS[*]}" \
-      "$LOCAL_DATA/" "root@$HOST:$REPO_DIR/Datasets/Synthetic/$GRID/"
+      "$LOCAL_DATA/" "root@$HOST:$REPO_DIR/$DATA_DST/"
 
 # --- 3. start the shard ------------------------------------------------------
 say "starting shard"
@@ -96,7 +109,7 @@ echo '$ARM' > /root/.shard_arm
 # unconditional done-marker made a shard that crashed in seconds indistinguishable
 # from one that trained for hours — the health check read "done" and moved on.
 setsid nohup bash -c "
-    \$PY scripts/run_pnbd_grid.py --grid $GRID --model $MODEL --shard $SHARD $ARM_FLAG
+    \$PY $RUNNER_CMD
     echo \$? > /root/.shard_exit
 " > /root/shard.log 2>&1 &
 sleep 2

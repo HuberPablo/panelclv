@@ -19,6 +19,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 export PATH="$HOME/venvs/panelclv/bin:$PATH"
 INTERVAL="${1:-300}"
 GRID="${2:-seasonal_4x4x10}"   # which grid to reconcile against once the fleet empties
+# The completeness gate. reconcile_grid.py expands a GridSpec, so a real-panel
+# ablation overrides this with its own equivalent:
+#   RECONCILE_CMD="scripts/run_real_panel_arms.py --check-complete"
+RECONCILE_CMD="${RECONCILE_CMD:-scripts/reconcile_grid.py --grid $GRID}"
 KEY="$HOME/.ssh/id_ed25519"
 SSH=(ssh -n -i "$KEY" -o StrictHostKeyChecking=accept-new
      -o UserKnownHostsFile="$HOME/.ssh/known_hosts_vast" -o BatchMode=yes -o ConnectTimeout=15)
@@ -57,7 +61,7 @@ for i in d:
     # shell matches its own command line (F13).
     state=$("${SSH[@]}" -p "$port" "root@$ip" '
       if [ -f /root/.shard_exit ]; then echo "exit=$(cat /root/.shard_exit)";
-      elif pgrep -f "[r]un_pnbd_grid" >/dev/null 2>&1; then echo running;
+      elif pgrep -f "[r]un_(pnbd_grid|real_panel_arms)" >/dev/null 2>&1; then echo running;
       else echo none; fi' 2>/dev/null | tail -1)
     case "$state" in
       running|none|"") continue ;;
@@ -115,7 +119,7 @@ for i in d:
   # how a run ends with an empty fleet, every shard exit=0, and nine suites missing
   # (F19). Once the fleet is empty there is no worker left to ask, so ask the grid.
   if [ "${n_live:-1}" = "0" ]; then
-    if python scripts/reconcile_grid.py --grid "$GRID" > VastAI/state/reconcile.txt 2>&1; then
+    if python $RECONCILE_CMD > VastAI/state/reconcile.txt 2>&1; then
       log "fleet empty and $GRID reconciles — the run is complete"
     else
       log "fleet empty but $GRID is INCOMPLETE — see VastAI/state/reconcile.txt"

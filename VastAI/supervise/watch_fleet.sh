@@ -80,7 +80,7 @@ for i in json.load(sys.stdin):
     probe=$("${SSH[@]}" -p "$port" "root@$ip" '
       done=no; test -f /root/.onstart_done && done=yes
       # Bracketed pattern: unbracketed, pgrep matches the very shell running it (F13).
-      run=no; pgrep -f "[r]un_pnbd_grid" >/dev/null 2>&1 && run=yes
+      run=no; pgrep -f "[r]un_(pnbd_grid|real_panel_arms)" >/dev/null 2>&1 && run=yes
       ex=none; test -f /root/.shard_exit && ex=$(cat /root/.shard_exit)
       sz=0; test -f /root/shard.log && sz=$(stat -c %s /root/shard.log)
       n=$(find /root/panelclv/Studies -name results.csv 2>/dev/null | wc -l)

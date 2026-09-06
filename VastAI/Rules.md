@@ -317,9 +317,25 @@ choice above.**
   with a current driver: `torch.cuda.is_available()` returned True and the first kernel
   launch failed with `no kernel image is available for execution on the device`. The
   health check in `vast_onstart.sh` cannot catch this, so `vast_search.py` filters it.
-- **One workload.** Everything above is the LSTM on CDNOW. The transformer on the
-  synthetic grid may rank machines differently, though it is weak corroboration that the
+- **One workload for machine RANKING.** Everything above is the LSTM on CDNOW. The
+  transformer may rank machines differently, though it is weak corroboration that the
   first grid fleet's fastest machine was also an EPYC.
+- **The transformer costs 5.5x the LSTM, measured.** Each suite writes `config.json` at
+  creation and `results.csv` at the end, so the mtime gap is its wall-clock. Over the
+  2,080 archived `seasonal_4x4x10` suites (100 trials, 200 simulations, 888x156 panels):
+  median **76.9 s** per LSTM suite, **423.3 s** per transformer suite, 22.7 s per
+  Pareto/NBD fit. This replaces the 18x that `grids/seasonal_4x4x10.py` carried, which
+  was a CPU-only figure and self-labelled provisional — the 8:2 worker split it justified
+  was roughly right for the wrong reason.
+- **And the transformer's cost is the ROLLOUT, not the search.** Fitting the 10-trial and
+  100-trial runs of the same configuration splits a suite into a fixed cost and a
+  per-trial cost: LSTM ~22 s + 0.58 s/trial, transformer **~297 s + 1.11 s/trial**. Some
+  73% of a transformer suite is the refit plus the Monte Carlo rollout, because
+  `simulate_attention_path` is stateless and re-reads a growing context at every step for
+  every path. **`n_simulations` is therefore the largest lever on a transformer budget,
+  and `n_trials` is nearly free.** (The split is fitted across two fleet epochs, so
+  hardware confounds it; probe two `--n-simulations` values on the target box to
+  measure it exactly.)
 - **The seed costs more than the machine.** On one box, `--shard a` ran 262 s/study and
   `--shard b` 144 s — **1.82x** from `base_seed` alone. Never compare timings across
   shards, and note that this makes an arm's two shards unequal work (section 5 splits

@@ -191,24 +191,56 @@ than restarting, and files already transferred are skipped. No cleanup needed.
 
 ---
 
-## F11 — The Valendin benchmark cannot take engineered time features
+## F11 — The Valendin benchmark cannot take ANY non-embedded channel
+
+**Widened 2026-09-06.** This entry said "engineered time features". That is one
+instance of the rule, not the rule, and reading it narrowly is what let the defect
+survive a second grid. AR features trip the identical guard.
 
 **Symptom.** The shard crashes immediately with
 
-    ValueError: ValendinEmbedder has no covariate path, but seq_cols carries
-    2 non-embedded column(s): ['week_sin', 'week_cos']
+    ValueError: The Valendin benchmark reads embedded features only, but seq_cols
+    carries 2 non-embedded column(s): ['week_sin', 'week_cos']. The published model
+    has no covariate path (ADR-0004).
 
-**Cause.** Not a bug — ADR-0004 freezes the published architecture, which reads
-embedded features only. A grid whose `PanelConfig` sets
-`time_features={"add_week_sin_cos": True}` puts plain numeric columns into
-`seq_cols`, and the frozen embedder correctly refuses them.
+**Cause.** Not a bug. `benchmarks/valendin_lstm.py:99` computes
+`[c for c in seq_cols if c not in embedded_cols]` and refuses a non-empty result —
+ADR-0004 freezes the published architecture, which reads embedded features only.
+Three kinds of column land in `seq_cols` unembedded:
 
-**Fix.** A design decision, not a repair: either drop `valendin_lstm` from that
-grid, or drop the engineered time features from the grid's `PanelConfig` — which
-changes what *every* model in the grid sees, so it is not a per-model workaround.
-Using `ProjectedEmbedder` instead would unfreeze the benchmark and is not an
-option. **Check this before renting:** a grid that pairs `valendin_lstm` with
-`add_week_sin_cos` will burn a worker to discover it.
+| source | embedded? | Valendin can read it? |
+|---|---|---|
+| the target, and `embedded_cols` entries | yes | yes |
+| `cluster_features` (`kmeans_K`) | yes, automatically | yes |
+| `time_features` (`week_sin`, `week_cos`, `year_idx`) | no | **no** |
+| `ar_features` (counters and `active_in_last_K` flags) | no | **no** |
+
+So the eligibility rule is: **ValendinLSTM runs iff the built dataset has zero
+non-embedded `seq_cols`** — which means no AR features *and* no engineered time
+features. Cluster features are free.
+
+**How it cost two grids.** `seasonal_4x4x10` declared `valendin_lstm` and set
+`add_week_sin_cos`, so every one of its arms refused it, and the arm axis added AR
+features that would have refused it anyway. Both runs finished reporting success with
+zero ValendinLSTM results, because "declared and empty" and "not owed" look identical
+on disk. `scripts/reconcile_grid.py` reports the first as `ABSENT`; nothing reported
+that it was *expected*.
+
+**Fix.** A design decision, not a repair. Either drop `valendin_lstm` from the arms it
+cannot read, or add an arm it can — one with no AR features and `time_features=None`.
+Using `ProjectedEmbedder` instead would unfreeze the benchmark and is not an option.
+
+`scripts/run_real_panel_arms.py` does this properly and is the pattern to copy:
+`refuses(model_type, data)` is the one authority, it keys off the **built** dataset
+rather than the arm declaration, and three callers use it — the work list (so an
+ineligible pair is not schedulable), the preflight (so it is caught locally), and
+`--check-complete` (which reports such a cell `n/a` with the reason, not `missing`).
+`tests/test_real_panel_arms.py` asserts the work list and the predicate agree in both
+directions.
+
+**Check this before renting.** A grid that pairs `valendin_lstm` with any unembedded
+channel will burn a worker to discover it — or worse, will not, and will simply
+produce nothing.
 
 ---
 

@@ -31,7 +31,7 @@ for i in d:
     set -- $row; id=$1; ip=$2; port=$3
     out=$("${SSH[@]}" -p "$port" "root@$ip" "
       if [ ! -d /root/panelclv/.git ]; then echo NOREPO; exit 0; fi
-      if [ -f /root/.shard_exit ] || pgrep -f "[r]un_pnbd_grid" >/dev/null 2>&1; then
+      if [ -f /root/.shard_exit ] || pgrep -f \"[r]un_(pnbd_grid|real_panel_arms)\" >/dev/null 2>&1; then
         echo \"RUNNING \$(git -C /root/panelclv rev-parse --short HEAD)\"; exit 0; fi
       cur=\$(git -C /root/panelclv rev-parse HEAD)
       if [ \"\$cur\" != \"$WANT\" ]; then

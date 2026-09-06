@@ -69,8 +69,9 @@ python scripts/generate_pnbd_grid.py --grid seasonal_4x4x10
 python scripts/preflight_grid_arms.py --grid seasonal_4x4x10
 ```
 
-`ValendinLSTM` cannot take engineered time features (F11); a grid that declares both
-crashes every worker on its first suite.
+`ValendinLSTM` cannot take **any** non-embedded channel — engineered time features and
+AR features alike (F11). A grid that declares both crashes every worker on its first
+suite, or, worse, quietly owes results it can never produce.
 
 ## Renting and running
 
@@ -195,6 +196,40 @@ money is lost here.
   `offer + disk_gb * storage_cost / 730` — about +23% at 40 GB on a cheap offer, which is
   why the launcher rents 20 GB (F15).
 - Provisioning is billed too, ~5–10 min per box, so more workers is not linearly faster.
+
+## The other kind of run: a real-panel ablation
+
+Everything above is a *grid* — one synthetic panel per cell, `n_studies_per_model=1`,
+replication across datasets. `scripts/run_real_panel_arms.py` is the other shape: two
+real panels, replication across **studies** (20 per suite), and the same arm axis the
+seasonal grid uses. The fleet mechanics are identical; four things differ.
+
+- **The unit of work is one (model, panel, arm) suite**, and there are 32 of them, so
+  parallelism is capped at 32 and the critical path is one transformer suite. Past about
+  15 workers a larger fleet buys nothing — see the makespan table in the run's plan
+  before renting more.
+- **The data push is ~8 MB, not 340 MB** (two CSVs in `Datasets/Dataset_clean/`), so F10
+  effectively goes away. The image pull does not, and it remains the dominant cost line.
+- **Pareto/NBD and the preflight run on the orchestrator**, not on rented boxes. Do both
+  before renting: the preflight is the F11 gate and costs nothing, and the benchmark is
+  the row every arm is read against.
+- **Completeness is `--check-complete`, not `reconcile_grid.py`**, which expands a
+  `GridSpec` and cannot describe this run. It reports a fourth state, `n/a`, for a model
+  that *cannot* run an arm — the distinction whose absence let two grids finish with no
+  ValendinLSTM results and nobody notice (F11).
+
+```bash
+PYTHONPATH=src python scripts/run_real_panel_arms.py --preflight          # gate, free
+PYTHONPATH=src python scripts/run_real_panel_arms.py --model pareto_nbd   # both panels
+# then, per rented box:
+python scripts/run_real_panel_arms.py --model transformer --shard 3/7
+# and afterwards:
+python scripts/run_real_panel_arms.py --check-complete
+python scripts/run_real_panel_arms.py --report --panel cdnow
+```
+
+`PYTHONPATH=src` is needed only where the package is not installed; a rented worker's
+`vast_onstart.sh` does `pip install -e`, so it runs bare there.
 
 ## When something breaks
 
