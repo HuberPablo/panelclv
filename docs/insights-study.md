@@ -494,6 +494,60 @@ transaction history — it would need exogenous calendar or promotional covariat
 panel does not carry. That is the concrete answer to "could a better architecture do
 better on CDNOW": not without different inputs.
 
+### Electronics tracks a real seasonal shape, and that changes who can compete
+
+`figures/real_panel_arms__electronics__weekly_aggregate.png` is a different picture from
+CDNOW's, and a more informative one.
+
+The actual weekly series does not decay smoothly: it dips through weeks 8-20 and climbs
+steeply over weeks 45-51. Mean 28.2, sd 17.7 against a Poisson 5.3 — about 3x
+overdispersed, but here the excess is **structured** rather than white, and the LSTM and
+Transformer both reproduce the shape.
+
+**Pareto/NBD does not compete on this panel at all.** It draws a flat line near 10
+against an actual averaging 28 and peaking at 73 — its correlation with the weekly actual
+is **0.015**. The -62.6% bias is not a level error to be corrected; the model is not
+tracking.
+
+**And the frozen benchmark is structurally blind here.** ValendinLSTM draws a flat line
+too, and the reason is F11 rather than the architecture: it is only ever eligible in the
+`-no_tf` arms, because `week_sin`/`week_cos` are non-embedded channels it refuses
+(ADR-0004). Correlation of each ensemble's weekly curve with the actual, with and without
+the engineered time features:
+
+| arm | model | time features | corr |
+|---|---|---|---|
+| `ar_bounded-kmeans_8` | LSTM | yes | **0.568** |
+| `no_ar-no_cluster` | Transformer | yes | **0.558** |
+| `no_ar-kmeans_8` | Transformer | yes | 0.502 |
+| `no_ar-kmeans_8` | LSTM | yes | 0.334 |
+| `no_ar-kmeans_8-no_tf` | Transformer | no | 0.305 |
+| `no_ar-kmeans_8-no_tf` | ValendinLSTM | no | 0.176 |
+| `no_ar-no_cluster-no_tf` | LSTM | no | 0.128 |
+| `no_ar-no_cluster-no_tf` | Transformer | no | −0.018 |
+| `no_ar-no_cluster-no_tf` | ValendinLSTM | no | −0.006 |
+| — | Pareto/NBD | n/a | 0.015 |
+
+Removing the calendar pair collapses shape tracking for **every** model, not only the
+benchmark: the Transformer falls 0.558 to −0.018 on the same feature cell, the LSTM 0.206
+to 0.128. So the flat benchmark line is the input design, exactly as on CDNOW — and it is
+the design F11 forces on it.
+
+**This is a limitation of the `-no_tf` workaround, and the write-up must carry it.**
+Comparing ValendinLSTM's −34.7% on electronics against the LSTM's −1.6% is not
+like-for-like: the LSTM figure comes from an arm with calendar covariates the benchmark
+cannot read. The honest comparison holds the arm fixed:
+
+| electronics, `-no_tf` arms | LSTM | ValendinLSTM |
+|---|---|---|
+| `no_ar-no_cluster-no_tf` | +19.5% | +34.7% |
+| `no_ar-kmeans_8-no_tf` | +9.9% | +18.1% |
+
+The benchmark still loses, by roughly half as much, and the sentence the thesis should
+write is "the frozen architecture cannot consume calendar covariates" — a property of
+ADR-0004 — rather than "the benchmark forecasts worse". On CDNOW, which engineers no time
+features for anyone, no such asymmetry exists and the benchmark wins outright.
+
 Two things follow. First, this is the concrete reason `CONTEXT.md` defines **tracking**
 separately from aggregate bias, and the reason `compute_forecast_metrics` returns three
 numbers rather than one. **Never rank models on `bias_percent` alone.** Second, a model
