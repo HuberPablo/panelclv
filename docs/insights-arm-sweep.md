@@ -27,9 +27,10 @@ heatmaps as figures, is published at
 4. [What the arm axis moved](#4-what-the-arm-axis-moved)
 5. [Per cell: where each architecture fails](#5-per-cell-where-each-architecture-fails)
 6. [The shape of the miss](#6-the-shape-of-the-miss)
-7. [Every tree, pooled](#7-every-tree-pooled)
-8. [What this says to build next](#8-what-this-says-to-build-next)
-9. [What this does not establish](#9-what-this-does-not-establish)
+7. [Does anything here detect death?](#7-does-anything-here-detect-death)
+8. [Every tree, pooled](#8-every-tree-pooled)
+9. [What this says to build next](#9-what-this-says-to-build-next)
+10. [What this does not establish](#10-what-this-does-not-establish)
 
 ---
 
@@ -178,7 +179,7 @@ the more of the prediction it carries, the less rests on channels that drift out
 during the rollout. Both arms it rescues remain worse than the corresponding `ar_bounded`
 arm, which reaches the same end by construction rather than by competition.
 
-So `kmeans_8` improves exactly one thing, and that thing is the arm §8 recommends dropping.
+So `kmeans_8` improves exactly one thing, and that thing is the arm §9 recommends dropping.
 
 ---
 
@@ -359,10 +360,10 @@ worst replicate beats the benchmark's best — and it wins the whole `rate = 0.3
 | Pareto/NBD | 30.3 | 30.8 | 32.0 | **35.0** |
 | LSTM `ar_bounded` | **11.8** | **12.6** | **19.3** | 35.4 |
 
-The pooled MAPE in §7 (50.8 against 89.2) still favours the benchmark because it averages
+The pooled MAPE in §8 (50.8 against 89.2) still favours the benchmark because it averages
 over sixteen cells and the `rate = 0.01` row reaches 591. **On dense panels the seasonal
 term is worth more than the death process and the ranking flips**; on sparse ones it is not
-close. Any single grid-wide number hides that, which is what §5's per-cell tables and §7's
+close. Any single grid-wide number hides that, which is what §5's per-cell tables and §8's
 per-rate win rates (8% / 25% / 65% / 88%) exist to prevent.
 
 ### `ar_unbounded` drifts upward, visibly
@@ -381,7 +382,85 @@ rollout, and it is worth keeping the figure for that reason alone.
 
 ---
 
-## 7. Every tree, pooled
+## 7. Does anything here detect death?
+
+Everything so far scores a forecast against the realised panel. These panels also carry the
+*latent* truth the models never see — `ground_truth.csv` holds each customer's true churn
+week `tau` — so the aggregate can be split into the two halves it silently adds together
+(`studies.synthetic_grid`, the module whose import declares an analysis synthetic-only):
+
+```
+R_A  alive_volume_ratio    predicted volume on weeks t <  tau,  over true volume.  1.0 = perfect
+L_D  dead_volume_leakage   predicted volume on weeks t >= tau,  over true volume.  0   = perfect
+```
+
+The oracle is exactly zero after death, so `L_D` is pure error. The two compose:
+`R_A + L_D = 1 + bias/100`, which is the identity that makes this a decomposition of the
+headline metric rather than a separate diagnostic.
+
+### The benchmark's near-zero bias is two errors cancelling
+
+At `rate = 0.30`, the row where §6 showed the ranking flipping:
+
+| rate 0.30 | metric | churn 0.2 | 0.4 | 0.6 | 0.8 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Pareto/NBD | R_A | 0.743 | 0.680 | 0.635 | 0.584 |
+| | L_D | **0.111** | **0.185** | 0.248 | 0.290 |
+| LSTM `ar_bounded` | R_A | **0.929** | **0.800** | **0.680** | **0.595** |
+| | L_D | 0.165 | 0.218 | 0.258 | 0.270 |
+| Transformer `ar_bounded` | R_A | 1.018 | 0.865 | 0.982 | 0.793 |
+| | L_D | 0.231 | 0.371 | 0.622 | 0.656 |
+
+**Pareto/NBD under-serves living customers by 26–42% and leaks onto dead ones, and the two
+offset.** Its −14.4% aggregate bias at `churn 0.2` is `0.743 + 0.111 = 0.854`: not a model
+that is nearly right, but one that is wrong in both directions by more than it is wrong in
+total. Any reading of this grid that treats its low bias as accuracy per customer-week is
+reading a cancellation. The LSTM is clearly the better model on the legitimate half of the
+volume in every cell of this row.
+
+### The LSTM reaches parity on death detection, on dense panels only
+
+Paired per-panel comparison of `L_D`, ten replicates per cell:
+
+| rate 0.30 | Pareto/NBD | LSTM | LSTM better on | Wilcoxon p |
+| --- | ---: | ---: | ---: | ---: |
+| churn 0.2 | 0.111 | 0.165 | 0/10 | 0.002 |
+| churn 0.4 | 0.185 | 0.218 | 0/10 | 0.002 |
+| churn 0.6 | 0.248 | 0.258 | 5/10 | 0.63 |
+| churn 0.8 | 0.290 | 0.270 | 6/10 | 0.38 |
+
+At the two highest churn levels of the densest row the LSTM is **statistically
+indistinguishable** from the process that generated the deaths. It is not better: over all
+160 panels it leaks less on 17. The cell means alone would have suggested a win at
+`churn 0.8` (0.270 against 0.290); the paired test says that margin is noise.
+
+Away from that row it collapses. Leakage at `rate = 0.01` runs 0.42 → 1.09 → 2.01 → **5.48**
+across the churn axis: at the sparse, high-churn corner the LSTM assigns dead customer-weeks
+five and a half times the volume all living customers legitimately earn.
+
+### What it has is a silence detector, not a death mechanism
+
+The arm doing this is `ar_bounded`, and its features are literally
+`active_in_last_{2,4,8,16,32}_periods`. Nothing in the model represents death; what it has
+is a bounded, rollout-safe encoding of *how long this customer has been quiet*, and a
+decision rule learned on top of it.
+
+That is exactly why the effect is confined to dense panels. At `rate = 0.30` a living
+customer buys around sixteen times a year, so eight quiet weeks is strong evidence of death.
+At `rate = 0.01` a living customer buys about once every two years, so silence carries
+almost no information and the same flags fire on customers who are merely slow. The
+Transformer, whose leakage is worse than the LSTM's in every cell of the dense row
+(0.231–0.656), does not learn the rule as well from the same features.
+
+So the diagnosis in §9 needs stating more precisely than "the neural models cannot represent
+a customer who has stopped". **On dense panels a bounded silence encoding already buys
+Pareto/NBD-level death detection.** What the absorbing state has to fix is the regime where
+silence is uninformative — the sparse panels, where leakage is 20× worse and where §5 showed
+the LSTM losing every cell.
+
+---
+
+## 8. Every tree, pooled
 
 All 160 panels per row, sorted by median MAPE. Mean and median are both given because the
 `ar_unbounded` LSTM arms are driven by a tail — `ar_unbounded-kmeans_8` reports a mean
@@ -416,7 +495,7 @@ replicate-to-replicate variance as well as the level.
 
 ---
 
-## 8. What this says to build next
+## 9. What this says to build next
 
 1. **Keep `ar_bounded`; make it the default AR encoding.** It is the only arm-axis change
    that improved anything, it improved both architectures significantly, and it costs six
@@ -440,15 +519,19 @@ replicate-to-replicate variance as well as the level.
    four, while the Transformer is neither. Whatever absorbing state gets built should be
    evaluated per cell, not pooled.
 
-5. **Build the absorbing state.** This was the hypothesis that could have made it
-   unnecessary, and it failed: nothing on the arm axis gave the model a way to represent a
-   customer who has stopped, and nothing on the arm axis moved the churn slope.
+5. **Build the absorbing state, and target it at the sparse panels.** This was the
+   hypothesis that could have made it unnecessary, and it failed: nothing on the arm axis
+   moved the churn slope. But §7 narrows where the gap actually is — on dense panels
+   `ar_bounded`'s silence flags already reach Pareto/NBD-level death detection, and the
+   benchmark's own advantage there is a cancellation of two larger errors. The regime that
+   needs a mechanism rather than a feature is the sparse one, where silence carries no
+   signal and the LSTM's dead-volume leakage is 20x worse.
    `insights-study.md` §5.2 argued for it from the archived run; this run rules out the
    feature-engineering alternative empirically rather than by argument.
 
 ---
 
-## 9. What this does not establish
+## 10. What this does not establish
 
 - **The embedder axis was not crossed.** `EMBEDDER_AXIS` holds `valendin` only; `projected`
   was measured to run and cut on cost. ADR-0005's seam changes how features become a
