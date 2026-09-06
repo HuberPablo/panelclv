@@ -109,6 +109,40 @@ def desired_shards(spec) -> list[Shard]:
     return shards
 
 
+def shard_is_complete(spec, shard: "Shard") -> bool:
+    """True when every suite this shard owns already has a ``results.csv`` locally.
+
+    ``run_pnbd_grid.py`` builds an arm-major ``(arm, dataset)`` worklist and takes
+    ``i-1::N`` of it, so the same stride reproduces exactly what shard ``i`` is
+    responsible for. Reading completion off disk rather than off the state file is
+    what makes the supervisor genuinely restartable: the file records what this
+    process believed, and nothing keeps that in step once another script -- or a
+    human running ``vastai destroy`` -- retires a box behind its back.
+    """
+    from panelclv.studies import pareto_nbd_grid as ps
+
+    rows = list(ps.list_pnbd_datasets(spec.dataset_dir).itertuples(index=False))
+    arms = list(spec.arms) or [None]
+    work = [(a, r) for a in arms for r in rows]          # arm-major: arms vary slowest
+    mine = work[shard.index - 1::shard.total]
+    for arm, row in mine:
+        base = spec.train_base(shard.model_name, arm.name if arm else None)
+        if not (base / f"{row.combo}__{row.dataset}" / "results.csv").exists():
+            return False
+    return True
+
+
+def arm_names(spec) -> list[str | None]:
+    """Every arm tree this grid writes, as ``train_base`` names them.
+
+    A shard spans *all* of a grid's arms rather than owning one (Rules.md §5), so a
+    worker writes one tree per arm and every path this module builds has to loop over
+    them. A grid with no arm axis yields ``[None]`` — the un-suffixed path, which
+    ``train_base`` documents and the archived suites live under.
+    """
+    return [a.name for a in spec.arms] or [None]
+
+
 # ---------------------------------------------------------------------------
 # Observed state
 # ---------------------------------------------------------------------------
@@ -219,8 +253,18 @@ def probe(inst: Instance, grid: str) -> None:
 # Actions
 # ---------------------------------------------------------------------------
 
-def destroy(inst_id: int, why: str, dry: bool) -> None:
-    print(f"    destroy {inst_id}: {why}")
+def destroy(inst_id: int, why: str, dry: bool, *, secured: bool) -> None:
+    """Destroy an instance, recording whether its work was pulled first.
+
+    ``secured`` is required rather than defaulted because the module's contract is
+    "nothing is destroyed before its results are pulled and counted", and the only
+    way to keep that honest is to make every call site say which case it is. An
+    unreachable box cannot be pulled from, so ``secured=False`` is legitimate there —
+    but it goes in the log, so a run that lost work says so at the time instead of
+    being reconstructed from empty directories afterwards.
+    """
+    print(f"    destroy {inst_id}: {why}"
+          f"{'' if secured else '  [UNSECURED — results not pulled]'}")
     if not dry:
         run([VASTAI, "destroy", "instance", str(inst_id), "-y"])
 
@@ -230,16 +274,20 @@ def start_driver(inst: Instance, spec, grid: str, shard: Shard, dry: bool) -> No
     print(f"    start {shard.key} on {inst.id} ({inst.host}:{inst.port})")
     if dry:
         return
-    # Seed the worker with suites already collected for this model. run_pnbd_grid.py
-    # skips any suite whose results.csv exists, but it reads the *worker's* disk — so
-    # without this a replacement worker redoes work another worker already finished.
-    seed = spec.train_base(shard.model_name)
-    if seed.is_dir() and any(seed.glob("*__*")):
-        run(["rsync", "-az", "--partial", "-e",
-             "ssh " + " ".join(o for o in SSH_OPTS if o != "-n") + f" -p {inst.port}",
-             str(seed) + "/",
-             f"root@{inst.host}:/root/panelclv/Studies/{spec.name}__{shard.model_name}/"],
-            timeout=1800)
+    # Seed the worker with suites already collected for this model, one tree per arm.
+    # run_pnbd_grid.py skips any suite whose results.csv exists, but it reads the
+    # *worker's* disk, so without this a replacement worker redoes finished work. The
+    # per-arm loop is the load-bearing part: an un-suffixed seed sends nothing, the
+    # replacement restarts its whole stride from the top of the arm-major worklist, and
+    # every later interruption then truncates the same lexicographic tail.
+    for arm in arm_names(spec):
+        seed = spec.train_base(shard.model_name, arm)
+        if seed.is_dir() and any(seed.glob("*__*")):
+            run(["rsync", "-az", "--partial", "-e",
+                 "ssh " + " ".join(o for o in SSH_OPTS if o != "-n") + f" -p {inst.port}",
+                 str(seed) + "/",
+                 f"root@{inst.host}:/root/panelclv/Studies/{seed.name}/"],
+                timeout=1800)
     log = REPO_ROOT / "VastAI" / "state" / f"driver_{inst.id}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
@@ -256,16 +304,26 @@ def pull_results(inst: Instance, spec, shard: Shard, dry: bool) -> int:
     Shards write disjoint ``<combo>__<dataset>/`` folders inside one model's tree, so
     pulling every worker into the same local directory reassembles the grid with no
     merge step (Rules.md §4).
+
+    **One rsync per arm.** A shard spans every arm, so the worker holds one tree per
+    arm and a single un-suffixed pull moves nothing at all: it rsyncs a remote path
+    that does not exist into a local path where results do not belong, then reports a
+    count nobody checked. That is not hypothetical — it is what emptied shard 7/8 of
+    107 suites on the first arm-bearing run, and the empty
+    ``Studies/<grid>__<Model>/`` directories it left behind are its fingerprint.
     """
-    local = spec.train_base(shard.model_name)
-    local.mkdir(parents=True, exist_ok=True)
-    remote = f"/root/panelclv/Studies/{spec.name}__{shard.model_name}/"
-    print(f"    pull {shard.key} -> {local.name}")
-    if not dry:
-        run(["rsync", "-az", "--partial", "-e",
-             "ssh " + " ".join(o for o in SSH_OPTS if o != "-n") + f" -p {inst.port}",
-             f"root@{inst.host}:{remote}", str(local) + "/"], timeout=1800)
-    return len(list(local.glob("*__*")))
+    total = 0
+    for arm in arm_names(spec):
+        local = spec.train_base(shard.model_name, arm)
+        local.mkdir(parents=True, exist_ok=True)
+        remote = f"/root/panelclv/Studies/{local.name}/"
+        if not dry:
+            run(["rsync", "-az", "--partial", "-e",
+                 "ssh " + " ".join(o for o in SSH_OPTS if o != "-n") + f" -p {inst.port}",
+                 f"root@{inst.host}:{remote}", str(local) + "/"], timeout=1800)
+        total += len(list(local.glob("*__*")))
+    print(f"    pull {shard.key} -> {len(arm_names(spec))} arm tree(s), {total} suites local")
+    return total
 
 
 def pick_offer(max_price: float, exclude: set[str]) -> tuple[str, float] | None:
@@ -326,8 +384,14 @@ def main() -> None:
     state_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Resume: a shard whose results are already local is finished, whatever the
-    # fleet looks like. This is what makes the supervisor restartable.
-    print(f"supervising {args.grid}: {len(shards)} shards"
+    # fleet looks like. This is what makes the supervisor restartable -- without it a
+    # restart re-rents a box for every shard that already finished, and pays again for
+    # work sitting on this disk.
+    for shard in shards:
+        shard.done = shard_is_complete(spec, shard)
+    already = sum(s.done for s in shards)
+    print(f"supervising {args.grid}: {len(shards)} shards, "
+          f"{already} already complete on disk"
           f"{' (DRY RUN)' if args.dry_run else ''}")
 
     tried_offers: set[str] = set()
@@ -373,19 +437,28 @@ def main() -> None:
 
             # watchdog first: it overrides every other consideration
             if age_h > args.max_hours:
-                destroy(inst.id, f"watchdog: {age_h:.1f}h old", args.dry_run)
+                # The watchdog overrides everything except the pull. A box at its age
+                # limit has usually finished most of its stride, so destroying it
+                # unpulled throws away hours of paid work for the sake of a deadline.
+                secured = False
+                if shard and inst.reachable:
+                    pull_results(inst, spec, shard, args.dry_run)
+                    secured = True
+                destroy(inst.id, f"watchdog: {age_h:.1f}h old", args.dry_run,
+                        secured=secured)
                 if shard:
                     shard.instance = None
                 continue
 
             if inst.state != "running":
-                destroy(inst.id, f"state={inst.state} (F12: never started)", args.dry_run)
+                destroy(inst.id, f"state={inst.state} (F12: never started)", args.dry_run,
+                        secured=True)   # never ran; there is nothing to pull
                 if shard:
                     shard.instance = None
                 continue
 
             if inst.auth_failed:
-                destroy(inst.id, "ssh key rejected (F3)", args.dry_run)
+                destroy(inst.id, "ssh key rejected (F3)", args.dry_run, secured=False)
                 if shard:
                     shard.instance = None
                 continue
@@ -395,7 +468,8 @@ def main() -> None:
                 continue
 
             if inst.cuda != "ok":
-                destroy(inst.id, f"cuda={inst.cuda} (F2: driver too old)", args.dry_run)
+                destroy(inst.id, f"cuda={inst.cuda} (F2: driver too old)", args.dry_run,
+                        secured=True)   # never trained; nothing to pull
                 if shard:
                     shard.instance = None
                 continue
@@ -417,7 +491,8 @@ def main() -> None:
             if status == "done" and shard:
                 n = pull_results(inst, spec, shard, args.dry_run)
                 shard.done = True
-                destroy(inst.id, f"shard complete, {n} suites local", args.dry_run)
+                destroy(inst.id, f"shard complete, {n} suites local", args.dry_run,
+                        secured=True)
                 shard.instance = None
                 continue
 
@@ -434,7 +509,12 @@ def main() -> None:
                         print(f"  {inst.id:<9} {tag:<22} STALLED {idle}m — restarting")
                         start_driver(inst, spec, args.grid, shard, args.dry_run)
                     else:
-                        destroy(inst.id, f"stalled {idle}m twice", args.dry_run)
+                        # Reachable by definition at this point, so whatever the
+                        # stalled shard did finish is recoverable.
+                        if shard:
+                            pull_results(inst, spec, shard, args.dry_run)
+                        destroy(inst.id, f"stalled {idle}m twice", args.dry_run,
+                                secured=shard is not None)
                         if shard:
                             shard.instance = None
                 else:
@@ -469,7 +549,8 @@ def main() -> None:
         if not pending:
             for inst in free_instances:
                 if inst.shard == "none":
-                    destroy(inst.id, "surplus: no shard left to assign", args.dry_run)
+                    destroy(inst.id, "surplus: no shard left to assign", args.dry_run,
+                            secured=True)   # no shard, so no results
 
         running = len([i for i in insts.values() if i.state == "running"])
         for shard in pending:

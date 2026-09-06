@@ -379,3 +379,60 @@ check that catches this has to *launch a kernel*, not query for a device.
 vast's query language has no compute-capability predicate. `survey_machines.py` also
 runs a real matmul before committing a shard. Roughly a third of the verified sub-$0.06
 market is excluded by this, all of it correctly.
+
+---
+
+## F18 — Workers clone from GitHub, so uncommitted local work produces a wrong run
+
+**Symptom.** None. That is the whole problem. The fleet provisions cleanly, every
+health check passes, shards train to completion and write `results.csv` — and the
+results answer a different question than the one the orchestrator was configured for.
+
+**Cause.** `vast_onstart.sh` builds the worker's repo with
+
+    git clone --quiet --branch "$BRANCH" https://github.com/HuberPablo/panelclv.git
+
+so a worker runs whatever is on **`origin/main`**, never the orchestrator's working
+tree. A grid declaration, a runner change or a new search space that is committed
+locally but not pushed — or not committed at all — simply is not there. The worker
+falls back to the previous declaration and trains it without complaint.
+
+This nearly cost a full fleet: the arm axis (`grids.Arm`, 6 arms x 160 panels, 100
+trials) existed only as uncommitted local edits when ten boxes were launched. Every
+one of them would have trained the *previous* single-configuration grid at the
+*previous* trial budget. `Rules.md` §9's "provided every worker runs the same commit"
+is usually read as a statement about workers agreeing with each other; it is also a
+statement about them agreeing with the orchestrator, and only the second half fails
+silently.
+
+**Why nothing catches it.** `healthcheck.sh` checks `state / ssh / onstart / cuda /
+pkg / data / shard` — every one of which passes on a worker running the wrong commit.
+`start_shard.sh` waits for provisioning, pushes the panels and starts the trainer; it
+never asks what the checkout contains. There is no check anywhere that compares the
+worker's HEAD with the orchestrator's.
+
+**Check.** Before starting any shard:
+
+    git rev-parse HEAD                                    # orchestrator
+    ssh -n root@HOST -p PORT 'git -C /root/panelclv rev-parse HEAD'
+
+and refuse to start on a mismatch. `VastAI/pin_workers.sh <sha>` does the reconciling
+form of this — it polls every instance and hard-resets any box off the target commit,
+skipping (and reporting) any box whose shard has already started, because resetting
+under a running trainer mixes two commits into one result.
+
+**Fix.** Three, in order of how much they buy:
+
+- **Push before launching.** `git status` must be clean and `git ls-remote origin main`
+  must equal local HEAD before a single box is rented. This is the whole fix; the rest
+  is defence.
+- **Do not push to `main` while a fleet is running.** `vast_onstart.sh` replays on every
+  instance *restart* and does `git pull --ff-only origin main`, so a mid-run push means a
+  restarted box silently runs a different commit than its peers — the exact condition
+  §9 requires against.
+- **Verify in `start_shard.sh`**, which is the one place that knows both ends.
+
+**Related.** F13 bit while fixing this: the natural probe for "has this box started its
+shard?" is `ssh root@HOST 'pgrep -f run_pnbd_grid'`, and the remote shell's own command
+line contains that string, so it always matches itself. Every box reports "already
+training" and the reconciler resets nothing. Bracket it: `pgrep -f "[r]un_pnbd_grid"`.

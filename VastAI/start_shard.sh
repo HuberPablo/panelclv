@@ -14,11 +14,18 @@
 
 set -euo pipefail
 
-HOST="${1:?usage: start_shard.sh <HOST> <PORT> <GRID> <MODEL> <SHARD>}"
+HOST="${1:?usage: start_shard.sh <HOST> <PORT> <GRID> <MODEL> <SHARD> [ARM]}"
 PORT="${2:?missing PORT}"
 GRID="${3:?missing GRID}"
 MODEL="${4:?missing MODEL}"
 SHARD="${5:?missing SHARD}"
+# Optional 6th argument: restrict the run to one declared arm. A shard normally spans
+# every arm (Rules.md §5), so this is for a targeted resume — the case where a handful
+# of suites in one arm are missing and the worker should walk that arm alone, skipping
+# what is already on disk, rather than re-striding the whole (arm x dataset) product.
+ARM="${6:-}"
+ARM_FLAG=""
+[ -n "$ARM" ] && ARM_FLAG="--arm $ARM"
 
 KEY="${VAST_KEY:-$HOME/.ssh/id_ed25519}"
 REPO_DIR=/root/panelclv
@@ -84,11 +91,12 @@ rm -f /root/.shard_done /root/.shard_exit
 # the box rather than keeping it in a local file, so it survives its own restart
 # and cannot drift from reality — the box is the authority on what it is doing.
 echo '$GRID $MODEL $SHARD' > /root/.shard_spec
+echo '$ARM' > /root/.shard_arm
 # Record the exit STATUS, not merely the fact that the command returned. Writing an
 # unconditional done-marker made a shard that crashed in seconds indistinguishable
 # from one that trained for hours — the health check read "done" and moved on.
 setsid nohup bash -c "
-    \$PY scripts/run_pnbd_grid.py --grid $GRID --model $MODEL --shard $SHARD
+    \$PY scripts/run_pnbd_grid.py --grid $GRID --model $MODEL --shard $SHARD $ARM_FLAG
     echo \$? > /root/.shard_exit
 " > /root/shard.log 2>&1 &
 sleep 2
