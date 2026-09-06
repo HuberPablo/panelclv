@@ -47,6 +47,10 @@ LOCAL_DATA="$(dirname "$(dirname "$SCRIPT_DIR")")/$DATA_SRC"
 
 # Rented boxes reuse IPs and get a fresh host key each time, so a changed fingerprint
 # is expected rather than suspicious — keep them out of the real known_hosts.
+# Every plain ssh below carries -n. Without it ssh drains this script's stdin, so a
+# caller looping over a heredoc list of hosts loses every host after the first — F6,
+# which once started 1 of 8 boxes and looked like a provisioning failure. Fixing it
+# here rather than making each caller remember `</dev/null`.
 SSH_OPTS=(-i "$KEY" -p "$PORT"
           -o StrictHostKeyChecking=accept-new
           -o UserKnownHostsFile="$HOME/.ssh/known_hosts_vast"
@@ -59,7 +63,7 @@ say() { echo "[$HOST:$PORT $MODEL $SHARD] $*"; }
 # means we would be racing a pip install still in flight.
 say "waiting for /root/.onstart_done (image pull + pip install take several minutes)"
 for attempt in $(seq 1 80); do
-    if ssh "${SSH_OPTS[@]}" "root@$HOST" 'test -f /root/.onstart_done' 2>/dev/null; then
+    if ssh -n "${SSH_OPTS[@]}" "root@$HOST" 'test -f /root/.onstart_done' 2>/dev/null; then
         say "provisioned"
         break
     fi
@@ -85,7 +89,7 @@ fi
 # transfer, and a re-run skips what is already there (VastAI/Rules.md §3).
 [ -d "$LOCAL_DATA" ] || { say "FATAL: no local data at $LOCAL_DATA"; exit 1; }
 say "pushing $(du -sh "$LOCAL_DATA" | cut -f1) of panels"
-ssh "${SSH_OPTS[@]}" "root@$HOST" "mkdir -p $REPO_DIR/$(dirname "$DATA_DST")"
+ssh -n "${SSH_OPTS[@]}" "root@$HOST" "mkdir -p $REPO_DIR/$(dirname "$DATA_DST")"
 rsync -az --partial -e "ssh ${SSH_OPTS[*]}" \
       "$LOCAL_DATA/" "root@$HOST:$REPO_DIR/$DATA_DST/"
 
