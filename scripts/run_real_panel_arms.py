@@ -797,6 +797,67 @@ def report(panel: str, suffix: str | None = None) -> None:
               f"{'OK' if ok else 'OFF — investigate before trusting the other arms'}")
 
 
+def plot_tracking(panel: str, suffix: str | None = None) -> Path:
+    """Weekly-aggregate tracking curve: each model's ENSEMBLE against the actual.
+
+    The ensemble -- the mean of the 20 fits -- rather than one fit, because that is what
+    a practitioner deploys and the only thing comparable to Pareto/NBD's single
+    deterministic fit (see docs/insights-study.md §9).
+
+    Each model is drawn at its best arm on this panel, so the picture compares models
+    rather than one model against another's handicap. This is the plot that shows what
+    `bias_percent` cannot: a forecast can hit the right total while tracking the wrong
+    shape, by under-predicting early and over-predicting late.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    from panelclv.evaluation.plots import plot_weekly_aggregated
+
+    arms = arms_for(panel)
+    # The cohort is arm-invariant, so one actuals array serves every arm.
+    plain = arms[f"no_ar-no_cluster-{EMBEDDER}"]
+    actual = holdout_actuals(build_data(panel, plain))
+
+    # Pick each model's best arm by ensemble MAPE, not by |bias|. Selecting on bias
+    # picks whichever arm hits the total by cancellation -- under-predicting early and
+    # over-predicting late -- which is exactly the failure this figure exists to show,
+    # so choosing arms that way would hide it behind its own symptom.
+    series: dict[str, np.ndarray] = {}
+    for model_type in NEURAL:
+        best, best_score = None, float("inf")
+        for arm_name in arms:
+            md = STUDIES_BASE / suite_name(
+                model_type, panel, arm_name, "a", suffix
+            ) / MODEL_NAMES[model_type]
+            paths = sorted((md / "Predictions").glob("Prediction_*.csv")) if (
+                md / "Predictions").is_dir() else []
+            if not paths:
+                continue
+            runs = [load_model_predictions(md, study=int(q.stem.split("_")[-1]))[0]
+                    for q in paths]
+            ens = np.mean(runs, axis=0)
+            score = compute_forecast_metrics(actual, ens)["mape_aggregate"]
+            if score < best_score:
+                best, best_score = (arm_name, ens), score
+        if best:
+            series[f"{MODEL_NAMES[model_type]} · {best[0].replace('-' + EMBEDDER, '')}"] = best[1]
+
+    pareto = STUDIES_BASE / pareto_suite_name(panel, suffix) / "ParetoNBD"
+    if (pareto / "Predictions").is_dir():
+        series["Pareto/NBD"] = load_model_predictions(pareto, study=1)[0]
+
+    out = REPO_ROOT / "figures"
+    out.mkdir(exist_ok=True)
+    path = out / f"{EXPERIMENT}__{panel}__weekly_aggregate.png"
+    plot_weekly_aggregated(
+        actual.sum(axis=0), series,
+        title=f"{panel} holdout — weekly aggregate transactions "
+              f"(ensemble of {N_STUDIES} fits per model)",
+        show_ci=False, save_path=path,
+    )
+    return path
+
+
 def check_complete(suffix: str | None = None) -> int:
     """Compare what the declaration owes against what is on disk. Exit code gates a run.
 
@@ -872,12 +933,18 @@ def main() -> None:
                         help="preflight without the tiny training pass")
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--check-complete", action="store_true")
+    parser.add_argument("--plot", action="store_true",
+                        help="write the weekly-aggregate tracking figure")
     args = parser.parse_args()
 
     if args.preflight or args.preflight_config_only:
         sys.exit(preflight(train=not args.preflight_config_only))
     if args.check_complete:
         sys.exit(check_complete(args.suite_suffix))
+    if args.plot:
+        for panel in ([args.panel] if args.panel else sorted(PANELS)):
+            print(f"wrote {plot_tracking(panel, args.suite_suffix)}")
+        return
     if args.report:
         for panel in ([args.panel] if args.panel else sorted(PANELS)):
             report(panel, args.suite_suffix)

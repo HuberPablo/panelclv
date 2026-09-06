@@ -20,6 +20,8 @@ rather than an archived one, it says so.
 5. [What to try, in order](#5-what-to-try-in-order)
 6. [What this does not establish](#6-what-this-does-not-establish)
 7. [Two loose ends found while reading](#7-two-loose-ends-found-while-reading)
+8. [The real panels: what the arm axis did on CDNOW and electronics](#8-the-real-panels-what-the-arm-axis-did-on-cdnow-and-electronics)
+9. [Score the ensemble, not the mean of the runs](#9-score-the-ensemble-not-the-mean-of-the-runs)
 
 ---
 
@@ -364,3 +366,176 @@ deliberate, not an oversight. The triple is "the right information in a form a r
 neural model cannot use", and on these panels it is the *true* model's own sufficient
 statistic — so the arm reproduces §4.3's blowup where the truth is known rather than
 assumed.
+
+---
+
+## 8. The real panels: what the arm axis did on CDNOW and electronics
+
+Run 2026-09-06 with `scripts/run_real_panel_arms.py` on a vast.ai fleet of eight
+workers: the same six arms as the seasonal grid, plus two electronics-only arms with
+the engineered time features removed, 20 studies per (model, panel, arm), 50 trials
+(25 for the frozen benchmark), 50 Monte Carlo paths. 32 arm-suites, 640 studies,
+~$2.50 of GPU. Everything below is the **ensemble** — the mean of the 20 forecasts,
+scored once — for the reason §9 gives.
+
+### It reproduces
+
+Three of four shared arms land on the archived `ar_encoding` figures:
+
+| | got | archived | |
+|---|---|---|---|
+| electronics `no_ar` | +20.0% | +22.0% | ok |
+| electronics `ar_unbounded` | +196.7% | +235.0% | ok |
+| cdnow `no_ar` | +6.1% | +2.0% | ok |
+| cdnow `ar_unbounded` | +155.5% | +334.0% | flagged |
+
+The fourth is a soft failure not worth leaning on: the archived CDNOW `ar_unbounded`
+shards were +461% and +207%, sd 640 and 310. An arm whose own two halves differ by 254
+points cannot be reproduced to a tolerance narrower than that. The arm is unstable; the
+run is not.
+
+### The frozen benchmark, finally
+
+ValendinLSTM has never produced a number in this repo before — F11 refused it in both
+grids. On CDNOW, at the arms it can read:
+
+| CDNOW, ensemble | bias % | sd across 20 | MAPE | Spearman |
+|---|---|---|---|---|
+| **ValendinLSTM** `no_ar-no_cluster` | **−2.4** | 17.3 | **18.13** | 0.385 |
+| LSTM `ar_bounded-no_cluster` | −10.0 | 13.7 | 18.29 | 0.418 |
+| **Pareto/NBD** | −11.6 | — | 18.70 | 0.448 |
+| ValendinLSTM `no_ar-kmeans_8` | +0.1 | 22.4 | 20.48 | 0.448 |
+| Transformer `no_ar-kmeans_8` | +1.3 | 12.7 | 22.54 | 0.426 |
+
+The published benchmark is the best model on this panel by MAPE and by bias, narrowly
+ahead of our LSTM and the Pareto/NBD. That is the comparison the thesis exists to make
+and it had never been run.
+
+On **electronics** the picture inverts: Pareto/NBD sits at **−62.6%** bias and 65.4
+MAPE, while every neural arm lands between −2% and +35%. The best is LSTM
+`ar_bounded-kmeans_8` at **−1.6% ± 10.1**, the tightest distribution in the run. So the
+benchmark is not uniformly strong — it is strong where the panel suits it.
+
+### The unbounded-AR blowup is LSTM-specific
+
+§4.3 reads out-of-range AR features as a property of the *encoding*. On real panels that
+is only half true:
+
+| CDNOW `ar_unbounded` | LSTM | Transformer |
+|---|---|---|
+| `no_cluster` | +155.5% (sd 343, max +1,480) | **+35.5% (sd 21)** |
+| `kmeans_8` | +244.7% (sd 510, max +1,885) | **−29.8% (sd 17)** |
+
+Same panel, same channels, same out-of-range hazard — and the attention model largely
+absorbs what wrecks the recurrence. Electronics shows the same asymmetry (LSTM +196.7%
+against the Transformer's +56.4%). This is a genuine finding and it is **not** what the
+AR encoding ablation concluded, because that ablation only ever ran the LSTM
+(`run_ar_encoding_ablation.py` declares one `ModelSpec`). The encoding is dangerous; the
+recurrence is what makes it catastrophic.
+
+### Clusters help here, unlike on synthetic panels
+
+`kmeans_8` is in the best arm on electronics (`ar_bounded-kmeans_8`, −1.6%) and the best
+Transformer arm on CDNOW (`no_ar-kmeans_8`, +1.3%). On the seasonal grid the cluster axis
+was inert or harmful (§5 of the grid read). Behavioural clusters appear to buy something
+on real heterogeneity that a Pareto/NBD-generated panel does not have.
+
+### The tracking plot, which the tables hide
+
+`figures/real_panel_arms__cdnow__weekly_aggregate.png`, written by
+`scripts/run_real_panel_arms.py --plot` — each model's ensemble against the actual weekly
+aggregate over the 38 holdout weeks, each model shown at its best arm **by MAPE**. Not by
+`bias_percent`: selecting on bias picks whichever arm hits the total by cancellation,
+which is the failure this figure exists to show, so it would hide the effect behind its
+own symptom. (The first draft of the plotting code made exactly that mistake.)
+
+The actual series decays from ~50 to ~30 transactions/week and is very noisy (29 to 85).
+Pareto/NBD and the LSTM track that decay closely. **The Transformer does not: it flattens
+after week 25 and ends near 53 against an actual of 30.** Its +1.3% aggregate bias — the
+best of any model — is obtained by *cancellation*, under-predicting the first weeks and
+over-predicting the last. Bias is a signed total and cannot see this; MAPE is an L1 on
+the per-period curve and can, which is why its MAPE (22.5) is the worst in that table
+while its bias is the best.
+
+### Why every curve is smooth, and why that is correct
+
+The plotted forecasts are near-straight lines while the actual jumps between 29 and 85.
+That is not underfitting; it is three things, and the third is the important one.
+
+**The model has no calendar input.** CDNOW's `PanelConfig` engineers no time features, so
+`seq_cols` is `['Transactions']` in the `no_ar` arms and the target plus five activity
+flags in the bounded ones. Nothing says what week it is, so during a rollout the only
+quantity changing step to step is the customer's own sampled history, which decays
+monotonically. A smooth curve is the only shape the input design permits — and every
+model in the plot is smooth, not just the LSTM.
+
+**There is nothing week-to-week to learn.** Detrended, the actual weekly totals have a
+lag-1 autocorrelation of **+0.198** — effectively white. No history-conditioned model can
+anticipate next week's spike, because last week's carries almost no information about it.
+
+**The straight line is within 0.2 points of optimal.** Fit the best smooth curve to the
+*actuals themselves* — an oracle no forecast could beat — and score it the same way:
+
+| CDNOW | MAPE |
+|---|---|
+| oracle trend line fitted to the actuals | **18.10** |
+| ValendinLSTM ensemble | 18.13 |
+| LSTM ensemble | 18.29 |
+| Pareto/NBD | 18.70 |
+
+**MAPE ≈ 18 is a floor on this panel and all four models sit against it.** The ranking in
+the table above is inside that ceiling and should not be read as a model ordering. This is
+the single most important qualification on the CDNOW result.
+
+What is left over is real but not learnable from these inputs: the weekly totals have
+sd 13.1 where Poisson sampling on their mean would give 7.0, so the series is roughly
+2x overdispersed. That excess is not autocorrelated, so it is not recoverable from
+transaction history — it would need exogenous calendar or promotional covariates the
+panel does not carry. That is the concrete answer to "could a better architecture do
+better on CDNOW": not without different inputs.
+
+Two things follow. First, this is the concrete reason `CONTEXT.md` defines **tracking**
+separately from aggregate bias, and the reason `compute_forecast_metrics` returns three
+numbers rather than one. **Never rank models on `bias_percent` alone.** Second, a model
+that fails to decay is the §3 diagnosis showing up on a real panel: CDNOW's cohort dies
+across the holdout, and the model with no absorbing state is the one that keeps selling
+to it.
+
+---
+
+## 9. Score the ensemble, not the mean of the runs
+
+A comparison in §8 looked wrong at first: Pareto/NBD's MAPE of 18.70 beat every neural
+arm, whose means started at 22.3. The gap was an artefact of the reporting convention.
+
+`mape_aggregate` is `100 · Σ|actual_t − pred_t| / Σ actual_t` — a positive magnitude, so
+it is **convex** in the prediction. By Jensen, the error of the averaged forecast is at
+most the average of the errors, and the slack is exactly the run-to-run scatter.
+Pareto/NBD is a single deterministic MCMC fit with no scatter; every neural row was the
+mean of 20 independent fits. The two are not comparable on a convex metric.
+
+Averaging the 20 forecasts first, then scoring once — which is both what one would
+deploy and what Pareto/NBD gets for free:
+
+| CDNOW MAPE | mean of 20 | ensemble |
+|---|---|---|
+| ValendinLSTM `no_ar-no_cluster` | 22.54 | **18.13** |
+| LSTM `ar_bounded-no_cluster` | 22.34 | **18.29** |
+| LSTM `no_ar-no_cluster` | 24.39 | 21.64 |
+| Transformer `no_ar-no_cluster` | 49.62 | 37.31 |
+| Pareto/NBD (n=1) | 18.70 | 18.70 |
+
+The benchmark's apparent lead disappears. **`bias_percent` is unchanged in every row** —
+it is linear in the prediction, so averaging forecasts and averaging biases agree
+exactly. Only the magnitude metrics move, which is a clean check that the ensembling is
+doing what is claimed here and nothing else.
+
+This is the ensembling §6 named as "the obvious untried thing", now measured: averaging
+20 fits cuts CDNOW MAPE by 3 to 12 points, most where the scatter is worst. It costs
+nothing — the fits already exist.
+
+**Report both.** The distribution across replications is what says a single fit is
+unreliable (bias sd of 10 to 40 points), and that is a real property of these models
+that a thesis must not hide. The ensemble is what a practitioner would deploy and the
+only figure comparable to a deterministic benchmark. Picking whichever flatters is how
+this section's mistake happened in the first place.
