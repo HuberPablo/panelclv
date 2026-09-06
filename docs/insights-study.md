@@ -141,8 +141,32 @@ That is the shape of the table in §2: bias monotone in churn rate, and worst wh
 transaction rate is lowest — the regime where "alive but quiet" and "dead" are hardest
 to tell apart from the target channel alone.
 
-This is a hypothesis fitted to one grid, not a proven mechanism, and §5.1 is the cheap
-test that would confirm or kill it before any model is built.
+This was a hypothesis fitted to one grid, and §5.1 proposed the cheap test.
+**That test has since been run, and it refines the claim rather than confirming it as
+written** — see `docs/insights-arm-sweep.md` §7, which splits the aggregate against the
+panels' latent churn week `tau` into the volume predicted for living customers and the
+volume leaked onto dead ones.
+
+Two things come back. First, the benchmark's near-zero bias is itself two errors
+cancelling: at `rate 0.30, churn 0.2` it serves living customers only 0.743 of their true
+volume and leaks 0.111 onto dead ones. Its low bias is not per-customer accuracy, and the
+LSTM is the better model on the legitimate half of the volume in every cell of that row.
+
+Second, and this is the correction: on **dense** panels a bounded silence encoding already
+buys Pareto/NBD-level death detection — at the two highest churn levels of the `rate 0.30`
+row the LSTM's leakage is statistically indistinguishable from the process that generated
+the deaths. The features doing it are literally `active_in_last_{2,4,8,16,32}_periods`.
+Nothing in the model represents death; what it has is a *silence detector*, and that is
+enough where silence is informative.
+
+It collapses where silence is not. At `rate = 0.01` leakage runs 0.42 → 1.09 → 2.01 →
+**5.48** across the churn axis: a living customer buys about once every two years, so the
+same flags fire on customers who are merely slow.
+
+So the sentence "the neural models have no way to represent a customer who has stopped
+buying" is too broad. The precise version is: **they have a silence detector, and it fails
+where silence is uninformative.** That is what an absorbing state has to fix, and it
+narrows §5.2 to the sparse regime rather than the whole grid.
 
 Note what it is **not**. The head cap (`clip_target_upper=6`) biases forecasts
 *downward*, so it cannot explain over-prediction; it is a separate, smaller issue
@@ -223,7 +247,16 @@ give the model a way to say the customer is gone.
 
 ## 5. What to try, in order
 
-### 5.1 Confirm the diagnosis before building anything
+### 5.1 Confirm the diagnosis before building anything — DONE
+
+**Answered by `docs/insights-arm-sweep.md` §7, and it moved the target** (see §3). The
+split was done better than proposed here: against the synthetic panels' latent churn week
+rather than against observed holdout activity, which separates "dead" from "alive but
+quiet" instead of conflating them. The result narrows §5.2 to the sparse regime — a
+bounded silence encoding already matches the benchmark's death detection on dense panels.
+
+The original proposal, kept because it is still the right test on a **real** panel, where
+no latent `tau` exists:
 
 Split the holdout aggregate bias by customer group and ask whether the over-prediction is
 concentrated in customers with **zero holdout activity**. The segment machinery already
@@ -239,6 +272,14 @@ evenly, §3 is wrong and §5.2 should not be built.
 Do this first. Everything below is conditional on it.
 
 ### 5.2 Give the model an absorbing state
+
+**Scope narrowed by §5.1's answer: this is for the sparse regime.** Where a customer
+buys often enough that eight quiet weeks is evidence, `ar_bounded` already reaches
+Pareto/NBD-level death detection and an absorbing state has little left to buy. Where a
+living customer buys once every two years, silence is uninformative and leakage runs to
+5.5× the volume living customers legitimately earn. Both real panels sit at ~0.05
+transactions per customer-week, i.e. the second-sparsest row of the synthetic grid, so
+this matters for them.
 
 The cheapest form that fits the package's contract: an additional outcome meaning
 "inactive" which, once sampled during a rollout, **latches** — the customer emits zero
@@ -433,12 +474,35 @@ AR encoding ablation concluded, because that ablation only ever ran the LSTM
 (`run_ar_encoding_ablation.py` declares one `ModelSpec`). The encoding is dangerous; the
 recurrence is what makes it catastrophic.
 
-### Clusters help here, unlike on synthetic panels
+### Clusters: no evidence here, and good evidence against elsewhere
 
-`kmeans_8` is in the best arm on electronics (`ar_bounded-kmeans_8`, −1.6%) and the best
-Transformer arm on CDNOW (`no_ar-kmeans_8`, +1.3%). On the seasonal grid the cluster axis
-was inert or harmful (§5 of the grid read). Behavioural clusters appear to buy something
-on real heterogeneity that a Pareto/NBD-generated panel does not have.
+An earlier draft of this section claimed clusters help on real panels, on the grounds
+that `kmeans_8` is in the best electronics arm (`ar_bounded-kmeans_8`, −1.6%) and the
+best CDNOW Transformer arm (`no_ar-kmeans_8`, +1.3%). **That was a generalisation from
+half the data.** Held to the same feature cell, the two panels disagree:
+
+| `ar_bounded`, LSTM, mean \|bias\| | no_cluster | kmeans_8 |
+|---|---|---|
+| electronics | 20.6 | **7.8** |
+| CDNOW | **15.2** | 18.7 |
+
+Clusters help on one panel and hurt on the other, at n=20 per arm with no paired test —
+which is no evidence of a direction at all.
+
+`docs/insights-arm-sweep.md` §4 settles it on far stronger evidence: a paired Wilcoxon
+over the same 160 synthetic panels finds `kmeans_8` **hurts** in five of six contrasts,
+significantly, and it gives the mechanism — a label assigned from calibration behaviour
+cannot update when the simulated customer goes quiet, so it keeps asserting the customer
+is who they used to be. That is the `ar_unbounded` failure in a different costume.
+
+The one place it reverses there is under `ar_unbounded` itself (median |bias| 261 → 133,
+p = 7×10⁻⁵), read as the clusters *displacing* the broken counters rather than
+contributing: a bounded categorical summary of the same history, so less of the
+prediction rests on channels that drift out of range. Both rescued arms remain worse
+than `ar_bounded`, which reaches the same place by construction.
+
+**Read together: drop the cluster axis.** It improves exactly one arm, and that is the
+arm to drop anyway.
 
 ### The tracking plot, which the tables hide
 
