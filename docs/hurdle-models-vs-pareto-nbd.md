@@ -17,7 +17,9 @@ Everything below was read from the primary source — the paper's own PDF, the p
 own source, or the publisher's own abstract — and every citation carries a URL. The
 handful of claims that could only be reached through a secondary retelling or an
 abstract are marked **ABSTRACT-ONLY** or **SECONDARY** inline and listed again in §8.
-Nothing here was measured; this is a reading exercise, not a run.
+Nothing here was measured; this is a reading exercise, not a run. The one exception is
+§2's correction to how Jerath, Fader & Hardie's CDNOW figure should be read, which is
+carried by a run and cites it: `docs/pareto-nbd-cdnow-replication.md`.
 
 ## Contents
 
@@ -87,7 +89,20 @@ times, and what survives estimation is a population-level description that repro
 cohort totals extremely well. Jerath, Fader & Hardie report a cumulative aggregate MAPE
 of **1.35%** for the Pareto/NBD over a 39-week CDNOW holdout (Table 3,
 [customer_death.pdf](https://business.columbia.edu/sites/default/files-efs/pubfiles/6057/customer_death.pdf)).
-There is very little room above that.
+
+**That 1.35% is not a holdout forecast error, and an earlier draft of this section read
+it as one.** It is the mean relative error of an aggregate *tracking curve* — cumulative
+repeat sales from week 1, so the denominator over weeks 40–78 already carries the 2,457
+calibration transactions — drawn from the population-level `E[X(t)]` rather than from
+per-customer conditional expectations. `docs/pareto-nbd-cdnow-replication.md` reproduces
+it (1.68% against their 1.35%) and then scores the identical fit the way this package
+scores a forecast: the Pareto/NBD under-predicts CDNOW holdout repeat sales by
+**11–14%**. Both numbers describe the same fit. The first says the model reproduces the
+cohort's sales trajectory; the second says how many transactions it expects these
+customers to make, which is the question this thesis asks.
+
+So the ceiling is real but it is lower than 1.35% suggests, and the gap between it and
+this package's electronics figures (−53%, −64%) is mostly panel, not metric.
 
 **Its individual-level error is dominated by the zeros, and the zeros are easy.** In a
 panel that is 96–98% zeros, a forecaster that predicts near-zero everywhere already
@@ -630,6 +645,7 @@ CDNOW. Write the ADR first, because it breaks C1 and C2.
 | Simple managerial heuristics match or beat Pareto/NBD and BG/NBD on all managerially relevant tasks (**SECONDARY** for the per-dataset figures) | Wübben & von Wangenheim, *Journal of Marketing* 72(3):82–93 (2008) — https://doi.org/10.1509/jmkg.72.3.082 |
 | Hurdle over a free `K`-way softmax = cross-entropy term for term; zero-inflation is a fix for a constraint this head does not have; NB alone recovers 608/683 zeros | `docs/loss-functions.md` §5.6, citing Zeileis, Kleiber & Jackman, JSS 27(8) — https://www.jstatsoft.org/index.php/jss/article/view/v027i08/v27i08.pdf, and Warton (2005) — https://doi.org/10.1002/env.702 |
 | What a parametric count head would actually buy: 5.45% of electronics holdout mass above the cap, nothing on CDNOW | `docs/loss-functions.md` §2.3(c) and §5.7 |
+| Jerath et al.'s 1.35% is a tracking-curve MAPE, not a holdout forecast error; the same fit under this package's metric under-predicts CDNOW by 11–14% | `docs/pareto-nbd-cdnow-replication.md` §6–§8 |
 | Available reference implementations: NBD, MBG/NBD, BG/CNBD-k, MBG/CNBD-k, Pareto/NBD (HB), Pareto/NBD (Abe), Pareto/GGG | BTYDplus (Platzer) — https://github.com/mplatzer/BTYDplus |
 | Available reference implementations: Pareto/NBD, Extended Pareto/NBD (time-varying covariates), BG/NBD, GGom/NBD, Gamma/Gamma | CLVTools 0.12.1 — https://cran.r-project.org/web/packages/CLVTools/index.html |
 | MBG/NBD conditional-expectation erratum | *IJRM* 25(2) (2008) — https://doi.org/10.1016/j.ijresmar.2008.02.001 |
