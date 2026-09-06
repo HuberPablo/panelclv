@@ -89,14 +89,18 @@ EXPERIMENT = "real_panel_arms"
 # N_SIMULATIONS-path rollout per study.
 #
 # N_SIMULATIONS is 50, not the 200 the grid used or the 300 the archived real-panel
-# ablations used. Measured over the 2,080 archived seasonal suites (each writes
-# config.json at creation and results.csv at the end, so the mtime gap is its
-# wall-clock), a Transformer suite spends ~73% of its time in the rollout rather than
-# the search -- `simulate_attention_path` is stateless and re-reads a growing context at
-# every step, for every path. Cutting the paths is therefore the single largest lever in
-# the run, and it costs nothing measurable: one path's aggregate has sd ~2.6% of the
-# holdout total, so 50 paths gives ~0.37% Monte Carlo noise against the ~23pp
-# across-study sd that actually limits a result.
+# ablations used. `simulate_attention_path` is stateless and re-reads a growing context
+# at every step, for every path, so the rollout is a large share of a Transformer suite
+# and the path count is the lever on it.
+#
+# MEASURED on one box, 2026-09-06 (one CDNOW study at two path counts, hardware held
+# fixed): 4.38 s per path + 189 s fixed. At 50 paths the rollout is 219 s of a 408 s
+# suite -- 54%; at 200 it would be 82% of ~1,070 s. So this choice roughly halves the
+# run's dominant term.
+#
+# And it costs nothing measurable. One path's aggregate has sd ~2.6% of the holdout
+# total, so 50 paths leaves ~0.37% Monte Carlo noise against the ~23pp across-study sd
+# that actually limits a result -- two orders of magnitude apart.
 N_STUDIES = 20
 N_SIMULATIONS = 50
 

@@ -327,15 +327,28 @@ choice above.**
   Pareto/NBD fit. This replaces the 18x that `grids/seasonal_4x4x10.py` carried, which
   was a CPU-only figure and self-labelled provisional — the 8:2 worker split it justified
   was roughly right for the wrong reason.
-- **And the transformer's cost is the ROLLOUT, not the search.** Fitting the 10-trial and
-  100-trial runs of the same configuration splits a suite into a fixed cost and a
-  per-trial cost: LSTM ~22 s + 0.58 s/trial, transformer **~297 s + 1.11 s/trial**. Some
-  73% of a transformer suite is the refit plus the Monte Carlo rollout, because
-  `simulate_attention_path` is stateless and re-reads a growing context at every step for
-  every path. **`n_simulations` is therefore the largest lever on a transformer budget,
-  and `n_trials` is nearly free.** (The split is fitted across two fleet epochs, so
-  hardware confounds it; probe two `--n-simulations` values on the target box to
-  measure it exactly.)
+- **And a large part of the transformer's cost is the ROLLOUT, not the search.**
+  `simulate_attention_path` is stateless and re-reads a growing context at every step,
+  for every path, so `n_simulations` is a real lever on a transformer budget where
+  `n_trials` is comparatively cheap.
+
+  **Measured directly, 2026-09-06**, by running one CDNOW study at two simulation counts
+  on a single box (EPYC 7402 + RTX 3060, so hardware is held fixed): 408 s at 50 paths,
+  233 s at 10 paths, i.e. **4.38 s per Monte Carlo path plus 189 s fixed**. At 50 paths
+  the rollout is 219 s of 408 — **54% of the suite**; at 200 paths the same suite would
+  cost ~1,070 s and the rollout would be 82% of it.
+
+  This *corrects* an earlier estimate of 73% in this section, which was fitted across two
+  fleet epochs and confounded by hardware. Prefer the two-point probe: it costs one study
+  and settles it on the box you are about to rent.
+- **The transformer premium depends on the path count, so quote it with one.** At 50
+  simulations and 50 trials: **3.7x** the LSTM on CDNOW (408 s vs 110 s) and **2.9x** on
+  electronics (175 s vs 61 s). The 5.5x above is the same ratio at 200 simulations —
+  raising the path count inflates the premium, because that is the term the transformer
+  pays disproportionately.
+- **The frozen benchmark is cheap: 76 s/study** on CDNOW at 25 trials and 50 simulations —
+  below the LSTM. First measured 2026-09-06; the two grids that declared `valendin_lstm`
+  before that never ran it (F11), so no timing existed.
 - **The seed costs more than the machine.** On one box, `--shard a` ran 262 s/study and
   `--shard b` 144 s — **1.82x** from `base_seed` alone. Never compare timings across
   shards, and note that this makes an arm's two shards unequal work (section 5 splits
