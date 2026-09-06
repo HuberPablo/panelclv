@@ -21,9 +21,9 @@ on the difference:
 and it stops when every shard's results are on this machine.
 
 Usage:
-    python VastAI/supervise.py --grid seasonal_4x4x10
-    python VastAI/supervise.py --grid seasonal_4x4x10 --dry-run     # observe only
-    python VastAI/supervise.py --grid seasonal_4x4x10 --max-hours 8
+    python VastAI/supervise/supervise.py --grid seasonal_4x4x10
+    python VastAI/supervise/supervise.py --grid seasonal_4x4x10 --dry-run     # observe only
+    python VastAI/supervise/supervise.py --grid seasonal_4x4x10 --max-hours 8
 
 Safety rules it will not break:
   * A worker that is making progress is never destroyed.
@@ -44,7 +44,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]   # VastAI/supervise/ -> repo root
 sys.path.insert(0, str(REPO_ROOT))
 
 from grids import load_grid  # noqa: E402
@@ -292,7 +292,7 @@ def start_driver(inst: Instance, spec, grid: str, shard: Shard, dry: bool) -> No
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
         subprocess.Popen(
-            [str(REPO_ROOT / "VastAI" / "start_shard.sh"),
+            [str(REPO_ROOT / "VastAI" / "launch" / "start_shard.sh"),
              inst.host, str(inst.port), grid, shard.model_type, shard.spec],
             stdout=fh, stderr=fh, start_new_session=True,
         )
@@ -332,7 +332,7 @@ def pick_offer(max_price: float, exclude: set[str]) -> tuple[str, float] | None:
     Generation matters more than price here: the `ancient` Xeon E5 rows are where a
     launch-bound workload crawls regardless of how cheap they are.
     """
-    code, out = run([sys.executable, str(REPO_ROOT / "VastAI" / "vast_search.py"),
+    code, out = run([sys.executable, str(REPO_ROOT / "VastAI" / "choose" / "vast_search.py"),
                      "--max-price", str(max_price), "--top", "25"], timeout=180)
     best = None
     for line in out.splitlines():
@@ -358,7 +358,7 @@ def rent(offer: str, dry: bool) -> None:
     log = REPO_ROOT / "VastAI" / "state" / f"launch_{offer}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
-        subprocess.Popen([str(REPO_ROOT / "VastAI" / "vast_launch.sh"), offer],
+        subprocess.Popen([str(REPO_ROOT / "VastAI" / "launch" / "vast_launch.sh"), offer],
                          stdout=fh, stderr=fh, start_new_session=True)
 
 

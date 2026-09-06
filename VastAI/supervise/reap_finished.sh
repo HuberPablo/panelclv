@@ -15,9 +15,10 @@
 #
 # Read-only until the gate passes. Boxes that are still training are left alone.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 export PATH="$HOME/venvs/panelclv/bin:$PATH"
 INTERVAL="${1:-300}"
+GRID="${2:-seasonal_4x4x10}"   # which grid to reconcile against once the fleet empties
 KEY="$HOME/.ssh/id_ed25519"
 SSH=(ssh -n -i "$KEY" -o StrictHostKeyChecking=accept-new
      -o UserKnownHostsFile="$HOME/.ssh/known_hosts_vast" -o BatchMode=yes -o ConnectTimeout=15)
@@ -107,6 +108,22 @@ for i in d:
 
   live=$(vastai show instances --raw 2>/dev/null | python -c \
     "import json,sys; d=json.load(sys.stdin); print(len(d), round(sum(i.get('dph_total') or 0 for i in d),4))" 2>/dev/null)
-  log "fleet: ${live:-?} (instances, \$/hr) | transformer $(find Studies/seasonal_4x4x10__Transformer__* -name results.csv 2>/dev/null | wc -l)/960"
+  n_live=${live%% *}
+
+  # The gate above only ever compares a worker against ITSELF: every results.csv that
+  # box holds must be local. Nothing in it knows how many suites the GRID owes, which is
+  # how a run ends with an empty fleet, every shard exit=0, and nine suites missing
+  # (F19). Once the fleet is empty there is no worker left to ask, so ask the grid.
+  if [ "${n_live:-1}" = "0" ]; then
+    if python scripts/reconcile_grid.py --grid "$GRID" > VastAI/state/reconcile.txt 2>&1; then
+      log "fleet empty and $GRID reconciles — the run is complete"
+    else
+      log "fleet empty but $GRID is INCOMPLETE — see VastAI/state/reconcile.txt"
+      grep -E "^  SHORT|^INCOMPLETE" VastAI/state/reconcile.txt | while IFS= read -r l; do
+        log "  $l"; done
+    fi
+  fi
+
+  log "fleet: ${live:-?} (instances, \$/hr)"
   sleep "$INTERVAL"
 done

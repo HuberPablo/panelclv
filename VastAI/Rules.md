@@ -249,7 +249,7 @@ kernel-launch latency. VRAM demand is trivial.
 What follows was **measured** on 2026-09-02, not reasoned from specs. Ten machines were
 rented and timed on one real arm of the CDNOW AR-encoding ablation
 (`--arm ar_bounded_16 --shard a`, full trial and simulation counts), and the results
-live in `VastAI/machine_benchmarks.csv`. `VastAI/survey_machines.py` is the instrument;
+live in `VastAI/choose/machine_benchmarks.csv`. `VastAI/choose/survey_machines.py` is the instrument;
 re-run it when the market has moved or the workload changes.
 
 ### The quantity to minimise is $/study, not $/hr

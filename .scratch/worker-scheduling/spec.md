@@ -16,7 +16,7 @@ be, and both predictions are wrong.
 
 ### 1. Machine selection ranks on the wrong signal
 
-`VastAI/vast_search.py` ranks offers by CPU generation and clock, on the documented
+`VastAI/choose/vast_search.py` ranks offers by CPU generation and clock, on the documented
 reasoning that the workload is CPU-bound: small panels, few batches per epoch, and a
 Monte Carlo rollout that loops simulations sequentially in Python, so throughput should
 follow single-thread speed. It advises "pick from the top rows, not the cheapest row".

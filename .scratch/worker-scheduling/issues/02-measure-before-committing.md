@@ -43,9 +43,9 @@ with a number from the cached table once it has a few runs in it.
 
 **2026-09-02 — measured, and one recommendation here is wrong.**
 
-Built `VastAI/survey_machines.py` and ran it: ten machines rented, timed on a real arm of
+Built `VastAI/choose/survey_machines.py` and ran it: ten machines rented, timed on a real arm of
 the CDNOW ablation (`ar_bounded_16 --shard a`, full trials and simulations). Results in
-`VastAI/machine_benchmarks.csv`; `Rules.md` §7 rewritten around them.
+`VastAI/choose/machine_benchmarks.csv`; `Rules.md` §7 rewritten around them.
 
 What held:
 

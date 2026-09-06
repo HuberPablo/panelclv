@@ -16,7 +16,7 @@
 # supervise.py may also write is idempotent (identical bytes, --ignore-existing on the
 # suite directories that are already complete).
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 export PATH="$HOME/venvs/panelclv/bin:$PATH"
 INTERVAL="${1:-1200}"
 KEY="$HOME/.ssh/id_ed25519"

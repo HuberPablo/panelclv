@@ -100,7 +100,15 @@ README for which and why. Nothing there is expected to run, and
 
 ## Running on rented hardware
 
-`VastAI/` holds the launch scripts for training on a rented [vast.ai](https://vast.ai)
-machine: `vast_search.py` picks an offer (the workload is CPU-bound, so it filters on CPU
-generation rather than GPU), `vast_launch.sh` rents it, and `vast_onstart.sh` /
-`script_on_start` clone the repo and install the package on the machine once it boots.
+`VastAI/` holds everything for training on rented [vast.ai](https://vast.ai) machines,
+split by the order you use it in — **`VastAI/README.md` is the runbook**, and
+`VastAI/Rules.md` is the contract behind it:
+
+| Folder | What it is for |
+| --- | --- |
+| `VastAI/choose/` | Pick a machine before spending anything. `vast_search.py` filters offers (CPU *generation* predicts throughput here; GPU tier barely does), `survey_machines.py` times real ones into `machine_benchmarks.csv`. |
+| `VastAI/launch/` | Get from an offer to a training worker: `vast_launch.sh` rents and boots it, `vast_onstart.sh` provisions it, `start_shard.sh` pushes the panels and starts the run. |
+| `VastAI/supervise/` | Keep the fleet honest while it runs: `supervise.py` reconciles desired against actual, and the loops pull results, retire finished boxes, watch spend and pin commits. |
+
+`VastAI/known_failures.md` catalogues the ways a rented worker fails, F1-F20, each with
+the check that detects it. Read it before renting; most entries cost real money to learn.

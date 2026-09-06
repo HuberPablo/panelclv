@@ -16,7 +16,7 @@
 #
 # Read-only. It destroys nothing and starts nothing — supervise.py owns those decisions.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 export PATH="$HOME/venvs/panelclv/bin:$PATH"
 INTERVAL="${1:-900}"
 GRID="${GRID:-seasonal_4x4x10}"

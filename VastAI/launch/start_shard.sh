@@ -30,7 +30,7 @@ ARM_FLAG=""
 KEY="${VAST_KEY:-$HOME/.ssh/id_ed25519}"
 REPO_DIR=/root/panelclv
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCAL_DATA="$(dirname "$SCRIPT_DIR")/Datasets/Synthetic/$GRID"
+LOCAL_DATA="$(dirname "$(dirname "$SCRIPT_DIR")")/Datasets/Synthetic/$GRID"
 
 # Rented boxes reuse IPs and get a fresh host key each time, so a changed fingerprint
 # is expected rather than suspicious — keep them out of the real known_hosts.
@@ -61,7 +61,7 @@ done
 # VastAI/known_failures.md.
 if [ -n "${INSTANCE_ID:-}" ]; then
     say "health check"
-    if ! "$SCRIPT_DIR/healthcheck.sh" "$INSTANCE_ID"; then
+    if ! "$SCRIPT_DIR/../supervise/healthcheck.sh" "$INSTANCE_ID"; then
         say "FATAL: failed the health check — not sending work to this box"
         exit 1
     fi

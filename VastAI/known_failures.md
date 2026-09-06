@@ -3,7 +3,17 @@
 Every entry here cost real debugging time and real billed hours. The point of the
 catalogue is that none of them should ever be diagnosed from scratch again: each
 gives the **symptom** as it actually appears, the **cause**, the **check** that
-detects it (all of them are implemented in `healthcheck.sh`), and the **fix**.
+detects it, and the **fix**.
+
+**Where the checks live.** Only five are in `healthcheck.sh` (F1, F2, F3, F9, F10) —
+it probes one box at a time for `state / ssh / onstart / cuda / pkg / data / shard`.
+F4 and F12 are caught at launch by `launch/vast_launch.sh`, before the image pull is
+paid for. F17 and F18 pass every one of those checks and are caught by
+`choose/vast_search.py` and `supervise/pin_workers.sh` instead. F19 and F20 are about
+the *grid*, not a box, so `scripts/reconcile_grid.py` is their check. The rest are
+scripting-hygiene rules with no automated check at all. An earlier version of this
+paragraph claimed all of them lived in `healthcheck.sh`, which was never true and
+made the four it cannot see look covered.
 
 A worker that fails a check is either repaired or destroyed — never left running.
 An idle rented box costs exactly as much as a working one.
@@ -416,7 +426,7 @@ worker's HEAD with the orchestrator's.
     git rev-parse HEAD                                    # orchestrator
     ssh -n root@HOST -p PORT 'git -C /root/panelclv rev-parse HEAD'
 
-and refuse to start on a mismatch. `VastAI/pin_workers.sh <sha>` does the reconciling
+and refuse to start on a mismatch. `VastAI/supervise/pin_workers.sh <sha>` does the reconciling
 form of this — it polls every instance and hard-resets any box off the target commit,
 skipping (and reporting) any box whose shard has already started, because resetting
 under a running trainer mixes two commits into one result.
@@ -436,3 +446,87 @@ under a running trainer mixes two commits into one result.
 shard?" is `ssh root@HOST 'pgrep -f run_pnbd_grid'`, and the remote shell's own command
 line contains that string, so it always matches itself. Every box reports "already
 training" and the reconciler resets nothing. Bracket it: `pgrep -f "[r]un_pnbd_grid"`.
+
+---
+
+## F19 — A shard reports success with suites untrained
+
+**Symptom.** Every shard exits 0, the state file says `done`, the fleet empties, and
+the grid is short. On `seasonal_4x4x10` one arm finished at **151/160**: four suites
+had no directory at all, five had a directory holding `config.json` and an empty model
+folder but no `results.csv`.
+
+**Cause.** Nothing compares what a shard *owed* against what it *produced*.
+`supervise/reap_finished.sh` verifies that every `results.csv` the worker holds is also
+local — a real gate, but its denominator is the worker's own disk, so a box destroyed
+mid-suite passes it trivially. `supervise/watch_fleet.sh` prints a fleet-wide count
+whose denominator omits the models that run on the orchestrator, so it read
+`2071/1920` — apparently over-complete — while nine suites were missing.
+
+The five half-written suites are the signature: `scripts/run_pnbd_grid.py` calls
+`run_study_suite` with no `try`/`except`, so a suite that *raised* would have exited
+non-zero. A suite that leaves `config.json` and nothing else was interrupted from
+outside — the box went away underneath it.
+
+**Why the losses cluster.** They are not spread evenly. `pareto_nbd_simulation.py`
+builds the manifest with a lexicographic `sorted(glob(...))`, so `Dataset_5_60` and
+`Dataset_5_80` sort **last**. Any pass cut off before the end loses the same tail every
+time, which is why all nine sat in the same transaction-rate column. Combined with F20's
+un-seeded replacements — which restart a stride from the top — a shard that is replaced
+twice will truncate that identical tail twice.
+
+**Check.**
+
+    python scripts/reconcile_grid.py --grid seasonal_4x4x10
+
+It expands the grid's declared (model, arm, dataset) product, compares it against the
+`results.csv` files on disk, and exits non-zero on any shortfall. Run it before calling
+a run finished and before reading its results — "the fleet is empty" is not the same
+statement as "the grid is complete".
+
+**Fix.** Recover with a targeted resume rather than a re-run: `run_pnbd_grid.py` skips
+any suite whose `results.csv` exists and passes `overwrite=True` for the rest, so
+
+    scripts/run_pnbd_grid.py --grid <grid> --model <type> --arm <arm> --shard 1/1
+
+trains only what is missing, half-written directories included. Seed the worker first
+(see F20) or it will retrain the whole arm.
+
+**Related.** `collect_grid_results` skips a cell with no `results.csv` and says nothing,
+so an arm missing nine panels reads as a complete arm with fewer rows. It now warns.
+Until it did, a grid analysis compared one model's *finished* panels against another's
+full set and drew the wrong winner in several cells.
+
+---
+
+## F20 — The fleet state file drifts, in both directions
+
+**Symptom.** `VastAI/state/<grid>.json` disagrees with reality both ways at once. After
+one run it marked `transformer:4/8` and `transformer:6/8` as `"done": false` against
+instance IDs that no longer existed — while five *other* shards it marked `done` were
+each missing suites.
+
+**Cause.** `supervise.py` is the only writer of that file, and it is no longer the only
+process that retires a box. `reap_finished.sh`, `pin_workers.sh` and a human running
+`vastai destroy` all act outside its bookkeeping, so once `supervise.py` stops polling —
+or is stopped — the file freezes at whatever it last believed. Both those shards had in
+fact finished cleanly, hours after the supervisor's last cycle:
+
+    [19:16:31] 49936444 shard finished (exit=0) — pulling before anything else
+    [21:49:58] 49957817 shard finished (exit=0) — pulling before anything else
+
+**Check.** Do not read the state file to answer "is this shard done". Read the disk:
+`supervise.py`'s `shard_is_complete()` reproduces the arm-major stride and checks for
+each owed `results.csv`, and `scripts/reconcile_grid.py` does it for the whole grid.
+
+**Fix.** Treat the file as a cache, never as the authority. `supervise.py` now
+recomputes every shard's `done` from disk at startup, which is what its docstring always
+promised and what makes a restart cheap — before this, restarting it re-rented a box for
+every shard that had already finished.
+
+**Related.** The same divergence made replacement workers expensive. `start_driver`
+seeds a new box with the suites already collected so `run_pnbd_grid.py` can skip them,
+but it read them from the un-suffixed path (the bug behind the 107-suite loss in
+`supervise/reap_finished.sh`'s header), so replacements arrived empty and restarted their
+stride from the top. Seeding needs only the `results.csv` files — 61 KB against a 2.6 GB
+tree, and bandwidth is billed per GB (F14).

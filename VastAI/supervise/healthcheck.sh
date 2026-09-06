@@ -27,7 +27,7 @@
 set -uo pipefail          # NOT -e: a failing check must be reported, not abort the sweep
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 KEY="${VAST_KEY:-$HOME/.ssh/id_ed25519}"
 GRID="${GRID:-}"
 STALL_MINUTES="${STALL_MINUTES:-30}"   # no new log output for this long = stalled

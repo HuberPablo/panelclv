@@ -136,6 +136,6 @@ bought nothing. Same for the stale skip reason in `tests/test_archive_formats.py
 
 `src/panelclv/training/training_utils.py` still carries the `_utils` suffix the checkbox
 mentions — that rename is issue 09 decision 3's table, which issue 15 executes. Nothing in
-`evaluation/` carries it any more, which is the half this issue owns. `VastAI/vast_search.py`
+`evaluation/` carries it any more, which is the half this issue owns. `VastAI/choose/vast_search.py`
 names `run_monte_carlo_forecast` in a comment and was left alone: it has unrelated
 uncommitted edits in the working tree.

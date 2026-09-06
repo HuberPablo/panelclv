@@ -70,9 +70,9 @@ bandwidth on a $0.10/hr rental.
 
 Usage
 -----
-    python VastAI/survey_machines.py --max-price 0.05 --budget 6.00
-    python VastAI/survey_machines.py --max-price 0.05 --include 47635953  # + control
-    python VastAI/survey_machines.py --dry-run          # show the pool, rent nothing
+    python VastAI/choose/survey_machines.py --max-price 0.05 --budget 6.00
+    python VastAI/choose/survey_machines.py --max-price 0.05 --include 47635953  # + control
+    python VastAI/choose/survey_machines.py --dry-run          # show the pool, rent nothing
 """
 
 from __future__ import annotations
@@ -209,7 +209,7 @@ def launch(offer_id: int, tag: str, key: Path, disk: int) -> tuple[int | None, s
     """
     env = dict(os.environ, VAST_KEY=str(key), VAST_DISK=str(disk))
     proc = subprocess.run(
-        [str(HERE / "vast_launch.sh"), str(offer_id)],
+        [str(HERE.parent / "launch" / "vast_launch.sh"), str(offer_id)],
         capture_output=True, text=True, timeout=1800, env=env, cwd=str(REPO),
     )
     out = proc.stdout + proc.stderr

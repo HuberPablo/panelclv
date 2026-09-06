@@ -20,7 +20,7 @@
 #   VAST_IMAGE    docker image                (default: vast-native pytorch)
 #   VAST_DISK     disk GB                     (default: 20)
 #   VAST_KEY      private key path            (default: ~/.ssh/id_ed25519)
-#   VAST_ONSTART  provisioning script         (default: VastAI/vast_onstart.sh)
+#   VAST_ONSTART  provisioning script         (default: VastAI/launch/vast_onstart.sh)
 
 set -euo pipefail
 
@@ -169,7 +169,7 @@ print(f\"destroy  : $VASTAI destroy instance {r['id']}\")
         echo
         echo "INSTANCE ${ID} WAS REAPED — vast could not place it on that host."
         echo "  Almost always means the offer was taken between search and create."
-        echo "  Re-run: python $SCRIPT_DIR/vast_search.py  and try the next row."
+        echo "  Re-run: python $SCRIPT_DIR/../choose/vast_search.py  and try the next row."
         exit 1
     fi
     sleep 15

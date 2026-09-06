@@ -38,6 +38,8 @@ Typical use::
 
 from __future__ import annotations
 
+import warnings
+
 from pathlib import Path
 from typing import Sequence
 
@@ -140,9 +142,11 @@ def collect_grid_results(
 
     grid = list_pnbd_datasets(dataset_dir)
     rows: list[dict] = []
+    skipped: list[str] = []
     for g in grid.itertuples(index=False):
         res_path = _suite_dir(train_base, g.combo, g.dataset) / "results.csv"
         if not res_path.exists():
+            skipped.append(f"{g.combo}__{g.dataset}")
             continue                                 # dataset not trained yet — skip
         res = pd.read_csv(res_path)                  # one row per (model, study)
         for r in res.itertuples(index=False):
@@ -158,6 +162,22 @@ def collect_grid_results(
             for m in metrics:
                 row[m] = getattr(r, _METRIC_SOURCE[m])
             rows.append(row)
+
+    # Skipping silently is how an incomplete arm becomes a result. A tree missing nine
+    # of 160 panels returns a frame that looks exactly like a complete one, only shorter,
+    # and the panels a distributed run fails to finish are not a random sample of the
+    # grid -- they are whatever sorted last in the worklist (F19). Averaging over them
+    # then compares one model's easy cells against another's full set. The caller may
+    # legitimately be reading a run in progress, so this warns rather than raising.
+    if skipped:
+        warnings.warn(
+            f"{len(skipped)} of {len(grid)} datasets have no results.csv under "
+            f"{train_base.name} and were skipped: {', '.join(skipped[:5])}"
+            + (f", ... (+{len(skipped) - 5} more)" if len(skipped) > 5 else "")
+            + ". Rows returned cover only the trained subset, which is not a random "
+              "one -- run scripts/reconcile_grid.py before treating this as a result.",
+            UserWarning, stacklevel=2,
+        )
 
     if not rows:
         raise FileNotFoundError(

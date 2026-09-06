@@ -12,7 +12,7 @@
 # reset, because resetting under a running trainer would mix two commits in one result.
 set -u
 WANT="${1:?usage: pin_workers.sh <commit-sha>}"
-cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 export PATH="$HOME/venvs/panelclv/bin:$PATH"
 SSH=(ssh -n -i "$HOME/.ssh/id_ed25519" -o StrictHostKeyChecking=accept-new
      -o UserKnownHostsFile="$HOME/.ssh/known_hosts_vast" -o BatchMode=yes -o ConnectTimeout=15)

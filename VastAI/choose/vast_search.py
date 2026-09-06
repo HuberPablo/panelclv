@@ -9,7 +9,7 @@ Why this exists instead of a one-line `vastai search offers`:
     latency. VRAM demand is trivial.
 
     MEASURED, 2026-09-02, seven machines timed on identical work (see
-    VastAI/machine_benchmarks.csv):
+    VastAI/choose/machine_benchmarks.csv):
 
       * CPU *generation* decides throughput. AMD Zen 2/3 (EPYC Rome, Ryzen 5000)
         averaged 169 s/study against 249 s for Xeon E5 v3/v4 — a 1.48x ratio,
@@ -29,7 +29,7 @@ Why this exists instead of a one-line `vastai search offers`:
     Generation only shows up as a model-name string, so that part is client-side.
 
     This script cannot tell you which individual offer is cheapest per unit work —
-    only a stopwatch can. `VastAI/survey_machines.py` is that stopwatch.
+    only a stopwatch can. `VastAI/choose/survey_machines.py` is that stopwatch.
 
 Usage:
     python vast_search.py                      # default search, top 15
@@ -39,7 +39,7 @@ Usage:
     python vast_search.py --show-fields        # dump one raw offer to see the schema
 
 Nothing here rents anything — it is read-only. Copy an offer ID from the output
-into `./VastAI/vast_launch.sh <ID>` when you have picked one.
+into `./VastAI/launch/vast_launch.sh <ID>` when you have picked one.
 """
 
 from __future__ import annotations
@@ -316,7 +316,7 @@ def main() -> None:
         "GPU only; the instance is billed\n"
         "$/hr + disk_gb * storage_cost / 730, about +$0.006/hr at the 20 GB the\n"
         "launcher should rent.\n\n"
-        "Then, from the repo root:  ./VastAI/vast_launch.sh <ID>\n\n"
+        "Then, from the repo root:  ./VastAI/launch/vast_launch.sh <ID>\n\n"
         "Use the launcher rather than a bare `vastai create instance`: create only\n"
         "ALLOCATES — the container does not boot, the image is not pulled and\n"
         "--onstart never runs until you separately `start` it, and a key attached\n"
@@ -330,11 +330,11 @@ if __name__ == "__main__":
 
 # Run from the repo root:
 #
-# python VastAI/vast_search.py --verbose
+# python VastAI/choose/vast_search.py --verbose
 # Echoes the query actually sent to vast before the results.
 #
-# python VastAI/vast_search.py --show-fields
+# python VastAI/choose/vast_search.py --show-fields
 # Dumps one raw offer as JSON. Run this first if anything errors — it tells you what fields your CLI version actually returns.
 #
-# python VastAI/vast_search.py --max-price 0.15 --min-cores 16 --top 30
+# python VastAI/choose/vast_search.py --max-price 0.15 --min-cores 16 --top 30
 # Tightens price, widens the core requirement, shows more rows.

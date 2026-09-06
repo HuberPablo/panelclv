@@ -64,7 +64,6 @@ ALLOWED_ABSENT = {
                                # name, i.e. data that was written, not a symbol
     # --- external to this repo ---
     "rfm2lstm",                # Valendin et al.'s published GitHub package
-    "script_on_start",         # VastAI/: a shell script, not a Python symbol
     # --- prose shorthand, not an identifier ---
     "active_in_last_K",        # informal for the `active_in_last_<K>_periods` family
     "NoCov",                   # a fragment of an archived suite directory name
