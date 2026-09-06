@@ -322,6 +322,49 @@ curve is the right shape at roughly the right rate of change, sitting bodily abo
 actuals from holdout week 0. That is a different defect from the LSTM's, and it matches §5:
 its per-cell bias is uniform (+23% to +104%) where the LSTM's spans 46×.
 
+### Why a curve that looks right can still score badly — and vice versa
+
+`compute_forecast_metrics` builds both aggregate metrics from the same weekly curve the
+figures draw, `act.sum(axis=0)`, over the same denominator:
+
+```
+bias % = 100 * |sum_t (p_t - a_t)| / sum_t a_t        (signed, then reported signed)
+MAPE   = 100 *  sum_t |p_t - a_t|  / sum_t a_t
+```
+
+So **MAPE >= |bias| always**, and they are equal only when the forecast errs in the same
+direction every week. The gap between them is error that cancels in the total and does not
+cancel week by week — shape error. Splitting the two at each transaction rate:
+
+| at rate | config | MAPE | \|bias\| | shape residual |
+| --- | --- | ---: | ---: | ---: |
+| 0.30 | Pareto/NBD | 32.0 | 13.5 | **18.5** |
+| 0.30 | LSTM `ar_bounded` | 19.8 | 11.3 | 8.5 |
+| 0.10 | Pareto/NBD | 37.3 | 9.4 | **27.9** |
+| 0.10 | LSTM `ar_bounded` | 36.1 | 23.7 | 12.4 |
+| 0.01 | Pareto/NBD | 90.2 | 35.4 | **54.8** |
+| 0.01 | LSTM `ar_bounded` | 243.2 | 231.6 | 11.6 |
+
+The benchmark's error is majority *shape* everywhere — it gets the level close and loses
+its score to being a flat line under a four-peak season. The neural models' error is
+almost entirely *level*: their shape residual sits near 10 regardless of regime.
+
+This is why the two models cross over on the sparsity axis, and why a cell where the LSTM's
+curve visibly hugs the actuals is not a contradiction of the pooled table. At
+`rate = 0.30, churn = 0.20` the LSTM scores **11.8 MAPE against the benchmark's 30.3** — its
+worst replicate beats the benchmark's best — and it wins the whole `rate = 0.30` row:
+
+| MAPE, rate 0.30 | churn 0.2 | 0.4 | 0.6 | 0.8 |
+| --- | ---: | ---: | ---: | ---: |
+| Pareto/NBD | 30.3 | 30.8 | 32.0 | **35.0** |
+| LSTM `ar_bounded` | **11.8** | **12.6** | **19.3** | 35.4 |
+
+The pooled MAPE in §7 (50.8 against 89.2) still favours the benchmark because it averages
+over sixteen cells and the `rate = 0.01` row reaches 591. **On dense panels the seasonal
+term is worth more than the death process and the ranking flips**; on sparse ones it is not
+close. Any single grid-wide number hides that, which is what §5's per-cell tables and §7's
+per-rate win rates (8% / 25% / 65% / 88%) exist to prevent.
+
 ### `ar_unbounded` drifts upward, visibly
 
 The clearest picture in the set is
