@@ -52,7 +52,14 @@ the model: add an absorbing state, not a better sequence encoder.
 `{0.01, 0.05, 0.10, 0.30}` × 4 churn rates `{0.20, 0.40, 0.60, 0.80}` × 10 seeds — of
 1000 customers over 156 weeks, with four seasonal peaks. Two calibration years, one
 holdout year, `clip_target_upper=6`, **no AR features** (`F = 3`: the target plus the
-cyclical pair). Each model gets 20 Optuna trials per panel and a 200-path forecast.
+cyclical pair), and a 200-path forecast.
+
+**The two neural arms did not get equal search effort.** The archived `config.json`
+files record `n_trials=10` for the LSTM against `20` for the Transformer, so every
+LSTM-vs-Transformer comparison below is between a 10-trial search and a 20-trial one
+(see §6). `grids/seasonal_4x4x10.py` has since equalised both at 100 (commit
+`2d815b3`), so a re-run does not carry the confound — but the numbers in this section
+were produced before that, and stand as they are.
 
 The panels are generated *by* a Pareto/NBD process, so that benchmark is the correct
 model by construction and is the ceiling, not a competitor. What the grid asks is how
@@ -304,9 +311,15 @@ Everything else on that list is the same bet at 10–50× the price.
 - **The Transformer's non-monotone sparsity profile is unexplained** (§2). It may mean
   the two architectures fail for different reasons, in which case one fix will not serve
   both.
-- **The grid's neural arms ran 20 Optuna trials per panel**, against the 100 the
-  single-panel suites use. Both neural models are under-searched relative to a real
-  study; the Pareto/NBD needs no tuning, so its column is its true one.
+- **The archived neural arms were under-searched, and unequally.** 10 Optuna trials
+  for the LSTM and 20 for the Transformer, against the 100 the single-panel suites use.
+  So the LSTM's worse bias in §2 is confounded with half the search budget, and the two
+  neural columns are not directly comparable to each other. The churn-axis finding does
+  not rest on that comparison — it is within-model, and it holds separately for both —
+  but any LSTM-vs-Transformer statement here does. The Pareto/NBD needs no tuning
+  (its `n_trials=50` is recorded but inert, the entry being declarative), so its column
+  is its true one. The grid now searches all three neural models at 100 trials, so this
+  limitation is on the archived numbers, not on the grid.
 - **Nothing here was re-run.** Every number is recomputed from archived `results.csv`
   files. If an archive is stale relative to the code that wrote it, this document
   inherits that.
@@ -314,6 +327,9 @@ Everything else on that list is the same bet at 10–50× the price.
 ---
 
 ## 7. Two loose ends found while reading
+
+The second was closed by commit `2d815b3` while this document was being written; it is
+kept, with what closed it, because the reasoning is what justifies the arm axis.
 
 **The frozen benchmark is missing from the headline grid.**
 `Studies/seasonal_4x4x10__ValendinLSTM/` contains `config.json` for its suites but
@@ -323,16 +339,26 @@ rented worker. So the arm was declared and never produced output. The §2 table 
 three models in it because the fourth is not there, and a grid whose point is comparing
 a contribution against published work is currently missing the published work.
 
-**The unbounded triple in the AR grid is deliberate — keep it, but pair it.**
-`grids/seasonal_4x4x10_ar.py` (untracked at the time of writing) declares the same
-unbounded `(t_x, x, T)` that §4.3 shows blowing up. That is not an oversight: commit
-`8979946` states the reason explicitly — the triple is "the right information in a form a
-rolled-out neural model cannot use", and that *is* the finding the config carries.
+**The unbounded triple needed a bounded arm beside it — CLOSED by `2d815b3`.**
+A grid carrying only the unbounded `(t_x, x, T)` confounds the information with its
+encoding, so it cannot answer the question that config exists to ask: does a neural model
+close the gap when handed the same summary of a customer's history the Pareto/NBD
+conditions on, or is the remaining gap about functional form rather than information?
+Two arms separate information from representation; one arm measures their product.
 
-The refinement, not a correction: as written the grid confounds the information with its
-encoding, so it cannot answer the question its own docstring poses ("does a neural model
-close the gap when it is given the same summary of a customer's history that Pareto/NBD
-conditions on? Or is the remaining gap about the functional form rather than the
-information?"). Answering that needs a **bounded** arm on the same panels — the same
-statistics in an encoding that stays in range — run beside the unbounded one. Two arms
-separate information from representation; one arm measures their product.
+`grids/seasonal_4x4x10.py` now crosses `AR_AXIS = {no_ar, ar_unbounded, ar_bounded}`
+with `CLUSTER_AXIS = {no_cluster, kmeans_8}` — six arms, with `no_ar × no_cluster ×
+valendin` reproducing the archived configuration so the §2 numbers remain the baseline
+the rest are read against. That is the paired design, and it supersedes the separate
+`grids/seasonal_4x4x10_ar.py` this section originally described.
+
+That file is committed rather than deleted only because `docs/feature_engineering.md`
+cites it as where the triple reaches a model as three continuous channels — a reference
+that has been dangling, the file having never been tracked. When the file goes, that
+citation moves to the `ar_unbounded` arm.
+
+The point the arm axis inherits, from commit `8979946`: keeping the unbounded triple is
+deliberate, not an oversight. The triple is "the right information in a form a rolled-out
+neural model cannot use", and on these panels it is the *true* model's own sufficient
+statistic — so the arm reproduces §4.3's blowup where the truth is known rather than
+assumed.
