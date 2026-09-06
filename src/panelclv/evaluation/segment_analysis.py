@@ -212,7 +212,7 @@ def group_metrics_table(
             m = compute_forecast_metrics(a_g, arr[row_idx])
             rows.append({
                 "group": gname, "model": mname, "n_customers": len(row_idx),
-                "rmse": m["rmse"],                              # individual (per cell)
+                "rmse": m["rmse"],                              # per customer-week cell
                 "mape": m["mape_aggregate"],                    # aggregate (weekly curve)
                 "bias": aggregate_bias(a_g, arr[row_idx]),      # aggregate (raw count)
                 "bias_percent": m["bias_percent"],              # aggregate (% of actual)

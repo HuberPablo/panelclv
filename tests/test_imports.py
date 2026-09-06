@@ -70,12 +70,12 @@ def test_public_api_resolves_from_new_homes():
 
 
 # `compute_forecast_metrics` is the package's single scoring authority — plots, group
-# tables and study results all delegate to it — so its three definitions are pinned
-# here against hand-computed values rather than only exercised indirectly.
+# tables and study results all delegate to it — so its definitions are pinned here
+# against hand-computed values rather than only exercised indirectly.
 
 
 def test_forecast_metrics_match_hand_computation():
-    """rmse, bias_percent and mape_aggregate on a worked (N, T_HOLD) example."""
+    """Both RMSEs, bias_percent and mape_aggregate on a worked (N, T_HOLD) example."""
     from panelclv.models import compute_forecast_metrics
 
     # 2 customers x 3 holdout periods. Errors are +1 in one cell and -2 in another,
@@ -87,6 +87,11 @@ def test_forecast_metrics_match_hand_computation():
 
     m = compute_forecast_metrics(actual, pred)
     assert m["rmse"] == pytest.approx((5.0 / 6.0) ** 0.5)
+    # The customer-total RMSE aggregates each row BEFORE squaring. Here every customer
+    # has exactly one wrong cell, so the same two errors survive whole -- totals are
+    # (7, 1) predicted against (6, 3) actual, errors (+1, -2) -- but they are now
+    # averaged over 2 customers instead of 6 cells: sqrt(5/2), not sqrt(5/6).
+    assert m["rmse_customer_total"] == pytest.approx((5.0 / 2.0) ** 0.5)
     # bias is on the grand total: (8 - 9) / 9.
     assert m["bias_percent"] == pytest.approx(100.0 * -1.0 / 9.0)
     # MAPE is aggregate: per-period totals, summed abs error over total actual.
@@ -95,13 +100,14 @@ def test_forecast_metrics_match_hand_computation():
 
 
 def test_forecast_metrics_perfect_prediction_is_zero():
-    """A perfect forecast scores zero on all three numbers."""
+    """A perfect forecast scores zero on every number."""
     from panelclv.models import compute_forecast_metrics
 
     actual = np.array([[0.0, 1.0, 2.0], [3.0, 0.0, 1.0]])
     m = compute_forecast_metrics(actual, actual.copy())
-    assert set(m) == {"rmse", "bias_percent", "mape_aggregate"}
+    assert set(m) == {"rmse", "rmse_customer_total", "bias_percent", "mape_aggregate"}
     assert m["rmse"] == pytest.approx(0.0)
+    assert m["rmse_customer_total"] == pytest.approx(0.0)
     assert m["bias_percent"] == pytest.approx(0.0)
     assert m["mape_aggregate"] == pytest.approx(0.0)
 

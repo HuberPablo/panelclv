@@ -5,7 +5,7 @@ Reads a suite through `suite_reader` and re-scores every stored forecast with
 recomputed from the prediction CSVs rather than read back from `results.csv`. Three
 public tables:
 
-1. ``study_metrics`` — whole-cohort RMSE / bias / MAPE per model, averaged over the
+1. ``study_metrics`` — whole-cohort RMSEs / bias / MAPE per model, averaged over the
    suite's independent studies, optionally with their spread.
 2. ``compare_study_metrics`` — several suites stacked into one comparison table.
 3. ``group_metrics_suite_table`` — the same scoring broken out by customer group.
@@ -155,9 +155,12 @@ def group_metrics_suite_table(
 # ---------------------------------------------------------------------------
 
 
-# The three whole-cohort metrics `compute_forecast_metrics` returns — the exact
-# numbers the runner writes to results.csv, per study.
-_STUDY_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
+# The whole-cohort metrics `compute_forecast_metrics` returns — the exact numbers the
+# runner writes to results.csv, per study. Suites archived before
+# `rmse_customer_total` was added carry no such column; nothing here reads it back
+# from results.csv, because every table in this module rescores the stored
+# predictions, so an old suite gains the new metric simply by being read again.
+_STUDY_METRIC_COLS = ["rmse", "rmse_customer_total", "bias_percent", "mape_aggregate"]
 
 
 def study_metrics(
@@ -174,7 +177,8 @@ def study_metrics(
     Give it the suite folder and the dataset (panel) CSV it was built from; it rebuilds
     the exact dataset (via the persisted ``panel_config``), then scores **every** study's
     stored forecast with the same function the runner used (``compute_forecast_metrics``:
-    whole-cohort RMSE, aggregate %-bias, aggregate MAPE). Each neural model ran
+    whole-cohort per-cell RMSE, per-customer-total RMSE, aggregate %-bias, aggregate
+    MAPE). Each neural model ran
     ``n_studies_per_model`` independent studies (own seed), so the summary is the mean
     over those studies; a deterministic benchmark (Pareto/NBD) has a single study, which
     averages to itself.
@@ -215,7 +219,8 @@ def study_metrics(
         Decimal places for the ``display`` strings (default ``3``). Ignored otherwise.
 
     Returns a ``pandas.DataFrame`` indexed by model. With neither spread flag (and no
-    ``display``): flat columns ``[rmse, bias_percent, mape_aggregate, n_studies]``
+    ``display``): flat columns
+    ``[rmse, rmse_customer_total, bias_percent, mape_aggregate, n_studies]``
     (the means). With a spread flag and ``display=False``: a MultiIndex column
     ``(metric, stat)`` whose stats are ``mean`` plus whichever of ``std`` / ``ci_low`` /
     ``ci_high`` were requested, then ``n``. With ``display=True``: one string column per

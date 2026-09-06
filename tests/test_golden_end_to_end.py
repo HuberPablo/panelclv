@@ -93,16 +93,19 @@ N_SIMULATIONS = 8
 GOLDEN_METRICS = {
     "lstm": {
         "rmse": 2.0019012702059444,
+        "rmse_customer_total": 44.51266917846316,
         "bias_percent": 247.03757225433526,
         "mape_aggregate": 247.03757225433526,
     },
     "transformer": {
         "rmse": 1.8498824874546234,
+        "rmse_customer_total": 39.94403353715535,
         "bias_percent": 211.56069364161849,
         "mape_aggregate": 211.56069364161849,
     },
     "valendin_lstm": {
         "rmse": 1.869680860932991,
+        "rmse_customer_total": 40.53122119187069,
         "bias_percent": 216.257225433526,
         "mape_aggregate": 216.257225433526,
     },
@@ -416,7 +419,7 @@ def test_golden_feature_axis_is_pinned(golden):
 
 
 def test_rollout_metrics_are_pinned(rollout):
-    """The three scores `compute_forecast_metrics` is the single authority for."""
+    """The four scores `compute_forecast_metrics` is the single authority for."""
     arm, result = rollout
     if os.environ.get("PANELCLV_PRINT_GOLDEN"):
         print(f'\n    "{arm}": {{')

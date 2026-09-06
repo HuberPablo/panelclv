@@ -8,8 +8,10 @@ not evaluation either — that is ``panelclv.predictions``, which both this
 subpackage and the model layer read from.
 
 ``models.monte_carlo_forecasting.compute_forecast_metrics`` is the single authority for
-``rmse`` / ``bias_percent`` / ``mape_aggregate`` — the only place in the package
-that computes them. Everything here delegates to it rather than defining its own.
+``rmse`` / ``rmse_customer_total`` / ``bias_percent`` / ``mape_aggregate`` — the only
+place in the package that computes them. The two RMSEs differ in what they aggregate
+over before squaring: a customer-week cell, and a customer's whole holdout total (the
+"individual-level RMSE" the published benchmark reports). Everything here delegates to it rather than defining its own.
 The one number it does not return is ``aggregate_bias`` (raw-count bias), which the
 per-group table needs because percentage bias is uninformative for a group whose
 actual total is near zero.

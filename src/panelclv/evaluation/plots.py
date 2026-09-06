@@ -2,13 +2,14 @@
 
 Both take a forecast the model + Monte Carlo simulator already produced and say
 something about it to a reader: one draws it against the actuals, the other prints
-the three numbers the thesis reports.
+the numbers the thesis reports.
 
 # Metric convention
 # -----------------
-# The thesis pipeline reports three numbers everywhere — `rmse`, `bias_percent`,
-# `mape_aggregate` — all in **percent scale** and all computed on per-customer
-# per-week arrays of shape (N, T_HOLD). `metrics_table` below delegates to
+# The thesis pipeline reports four numbers everywhere — `rmse`,
+# `rmse_customer_total`, `bias_percent`, `mape_aggregate` — the two %-scale ones in
+# percent and all four computed from per-customer per-week arrays of shape
+# (N, T_HOLD). `metrics_table` below delegates to
 # `models.monte_carlo_forecasting.compute_forecast_metrics` so the notebook
 # printouts and the plot helper agree to the last decimal. That function is the
 # package's single scoring authority — there is no second definition of these
@@ -158,14 +159,19 @@ def metrics_table(
     pareto_benchmark: bool = False,
     data: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
-    """Per-model evaluation table — same three numbers as the notebooks print.
+    """Per-model evaluation table — the same numbers the notebooks print.
 
     Returns one row per model with columns
-    `rmse`, `bias_percent`, `mape_aggregate` — exactly the keys
-    `monte_carlo_forecasting.compute_forecast_metrics` returns. This is the
+    `rmse`, `rmse_customer_total`, `bias_percent`, `mape_aggregate` — exactly the
+    keys `monte_carlo_forecasting.compute_forecast_metrics` returns. This is the
     package's single metric convention; everything (this table, the LSTM
     notebook printout, the demo notebook printout) flows through the same
     helper so the numbers reconcile to the last decimal.
+
+    On the two RMSEs: `rmse` is per customer-week cell, `rmse_customer_total` is per
+    customer's holdout total. Only the second is the "individual-level RMSE" of
+    Valendin et al. (2022) — see `compute_forecast_metrics` for why they are not a
+    rescaling of one another.
 
     Parameters
     ----------
@@ -173,7 +179,7 @@ def metrics_table(
         Per-customer per-week actuals — the natural output of
         `forecast["actual"]` from the Monte Carlo simulator. NOT the aggregated
         (T_HOLD,) vector; the metric definitions need the per-customer
-        granularity to compute individual RMSE.
+        granularity to compute either RMSE.
     predictions_by_model : dict[str, np.ndarray]
         Each prediction may be:
           - (S, N, T_HOLD, 1)  full Monte Carlo array → reduced via mean over S,
@@ -192,10 +198,11 @@ def metrics_table(
     Notes
     -----
     Why NOT pre-aggregate actuals/predictions to (T_HOLD,) and score those?
-    The aggregate vector would still give a correct `mape_aggregate`,
-    but `rmse` on the aggregate is a different quantity (lower bound on the
-    individual RMSE thanks to error cancellation across customers). The thesis
-    reports individual RMSE, so we score on per-customer arrays.
+    The aggregate vector would still give a correct `mape_aggregate`, but an RMSE
+    on the cohort-summed curve is a third quantity again — a lower bound on both
+    per-customer RMSEs, because errors cancel across customers before being
+    squared. Both RMSEs the thesis reports need the per-customer granularity, so
+    the aggregation happens here (or not at all) rather than at the input.
     """
     actuals = np.asarray(actuals, dtype=np.float64)
     if actuals.ndim != 2:
@@ -226,4 +233,4 @@ def metrics_table(
         rows.append(m)
 
     df = pd.DataFrame(rows).set_index("model")
-    return df[["rmse", "bias_percent", "mape_aggregate"]]
+    return df[["rmse", "rmse_customer_total", "bias_percent", "mape_aggregate"]]

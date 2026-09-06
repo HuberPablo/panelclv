@@ -60,12 +60,15 @@ RESULTS_LEADING_COLS = [
     "seed",
     "objective",
     "rmse",
+    "rmse_customer_total",
     "bias_percent",
     "mape_aggregate",
 ]
-# The three metric names the package writes today — `compute_forecast_metrics`' own
-# keys, which `suite_metrics._STUDY_METRIC_COLS` and `pareto_nbd_grid._METRIC_SOURCE` both name.
-RESULTS_METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
+# The metric names the package writes today — `compute_forecast_metrics`' own keys, which
+# `suite_metrics._STUDY_METRIC_COLS` names. `pareto_nbd_grid._METRIC_SOURCE` names only
+# the three that predate `rmse_customer_total`: it reads archived grids straight out of
+# their `results.csv`, and those files have no such column to read.
+RESULTS_METRIC_COLS = ["rmse", "rmse_customer_total", "bias_percent", "mape_aggregate"]
 
 # A prediction file: `Prediction_{i}.csv`, wide, `<id_col>` then `week_0..week_{T-1}`.
 PREDICTION_FILE_RE = re.compile(r"^Prediction_(\d+)\.csv$")
@@ -300,16 +303,19 @@ C04,0.25,0.25,0.25,0.25
 FIXTURE_METRICS = {
     ("LSTM", 1): {
         "rmse": 0.385275875185561,
+        "rmse_customer_total": 0.39528470752104744,
         "bias_percent": 3.8461538461538463,
         "mape_aggregate": 19.23076923076923,
     },
     ("LSTM", 2): {
         "rmse": 0.4759858191164943,
+        "rmse_customer_total": 1.1858541225631423,
         "bias_percent": 34.61538461538461,
         "mape_aggregate": 34.61538461538461,
     },
     ("ParetoNBD_MLE", 1): {
         "rmse": 0.7180703308172536,
+        "rmse_customer_total": 1.0,
         "bias_percent": 0.0,
         "mape_aggregate": 23.076923076923077,
     },

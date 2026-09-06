@@ -235,7 +235,7 @@ def test_no_band_for_a_single_study_model(suite):
 
 # --- study_metrics (whole-cohort metrics, with SD / CI / display) -------------
 
-METRIC_COLS = ["rmse", "bias_percent", "mape_aggregate"]
+METRIC_COLS = ["rmse", "rmse_customer_total", "bias_percent", "mape_aggregate"]
 
 
 @pytest.fixture

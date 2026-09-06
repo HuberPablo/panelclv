@@ -543,17 +543,48 @@ def compute_forecast_metrics(
     actual: np.ndarray,
     prediction_mean: np.ndarray,
 ) -> dict[str, float]:
-    """Return RMSE, %-bias and aggregate MAPE — both inputs (N, T_HOLD).
+    """Return two RMSEs, %-bias and aggregate MAPE — both inputs (N, T_HOLD).
 
     Argument order follows the Python / sklearn convention `(y_true, y_pred)`.
 
     This is the package's single scoring authority: plots, group tables and study
     results all delegate here, so they agree to the last decimal.
+
+    Two RMSEs, because "RMSE" names two different quantities in this literature and
+    the thesis is read against both:
+
+    - `rmse` squares the error in each **customer-week cell**. This is what the
+      package has scored on since the beginning and what every archived suite's
+      `results.csv` carries.
+    - `rmse_customer_total` squares the error in each **customer's holdout total**.
+      This is the "individual-level RMSE" of Valendin et al. (2022, IJRM 39(4)),
+      Table 4 — so it is the only one of the two comparable with the published
+      benchmark figures.
+
+    They are not interconvertible by a factor of sqrt(T_HOLD). A customer the model
+    wrongly writes off is wrong in every holdout week in the same direction, so the
+    per-week errors are positively correlated and the total's error grows faster
+    than independence would give: on the electronics panel the observed ratio is 9.3
+    against sqrt(52) = 7.2. Reading one as a rescaling of the other understates the
+    error by whatever that correlation is worth, which is why both are returned
+    rather than converted.
+
+    Both inputs must be 2-D (N, T_HOLD), as documented — `rmse_customer_total` sums
+    over axis 1 and will raise on a 1-D array. That was always the contract; before
+    this metric existed a 1-D array produced a quietly meaningless MAPE instead of
+    an error.
     """
     pred = np.asarray(prediction_mean, dtype=np.float64)
     act  = np.asarray(actual,          dtype=np.float64)
 
+    # Per customer-week cell: the package's long-standing definition.
     rmse = float(np.sqrt(np.mean((pred - act) ** 2)))
+
+    # Per customer, over the whole holdout window: the published benchmark's
+    # definition. Same squared error, aggregated one level up before squaring.
+    rmse_customer_total = float(
+        np.sqrt(np.mean((pred.sum(axis=1) - act.sum(axis=1)) ** 2))
+    )
 
     total_actual = float(act.sum())
     bias_percent = (
@@ -571,6 +602,7 @@ def compute_forecast_metrics(
 
     return {
         "rmse": rmse,
+        "rmse_customer_total": rmse_customer_total,
         "bias_percent": bias_percent,
         "mape_aggregate": mape_agg,
     }
