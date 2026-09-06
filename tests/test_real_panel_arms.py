@@ -58,16 +58,56 @@ needs_panels = pytest.mark.skipif(
 
 
 def test_arm_counts_per_panel():
-    """Six shared arms; electronics gets two more, and only electronics.
+    """Four shared feature cells, plus each panel's own calendar-encoding arms.
 
-    The extra pair exists solely so ValendinLSTM has a legible arm on that panel (F11).
-    CDNOW engineers no time features, so its `no_ar` arms are already fully embedded and
-    a `-no_tf` twin there would be an exact duplicate.
+    Electronics engineers sin/cos by default, so its extra pair REMOVES the calendar
+    (`-no_tf`) -- the only shape ValendinLSTM can read there (F11). CDNOW engineers
+    nothing by default, so its extras ADD one: `-tf` on all four cells, and `-week_emb`
+    on the two `no_ar` cells, the latter being the only encoding the benchmark can read.
+    The suffixes are panel-specific because the defaults are opposite; a `-no_tf` arm on
+    CDNOW would duplicate its plain arm exactly.
     """
-    assert len(rpa.arms_for("cdnow")) == 6
-    assert len(rpa.arms_for("electronics")) == 8
-    assert not [a for a in rpa.arms_for("cdnow") if a.endswith("-no_tf")]
-    assert len([a for a in rpa.arms_for("electronics") if a.endswith("-no_tf")]) == 2
+    cdnow, electronics = rpa.arms_for("cdnow"), rpa.arms_for("electronics")
+    assert len(cdnow) == 10
+    assert len(electronics) == 6
+    assert not [a for a in cdnow if a.endswith("-no_tf")]
+    assert len([a for a in electronics if a.endswith("-no_tf")]) == 2
+    assert len([a for a in cdnow if a.endswith("-tf")]) == 4
+    assert len([a for a in cdnow if a.endswith("-week_emb")]) == 2
+    assert not [a for a in electronics if a.endswith("-tf") or a.endswith("-week_emb")]
+
+
+def test_calendar_encodings_are_what_they_claim():
+    """Each CDNOW calendar arm builds the config its name promises -- and only that.
+
+    Asserted on the built `PanelConfig` rather than on the arm, because the arm carries
+    a label and the config carries the consequence. The `-tf` arms must NOT set
+    `add_year_idx`: CDNOW calibrates inside 1997 and forecasts into 1998, so a year
+    index is constant while fitting and out of range in the holdout.
+    """
+    arms = rpa.arms_for("cdnow")
+    plain = rpa.cdnow_config(arms["no_ar-no_cluster-valendin"])
+    assert not plain.time_features
+
+    tf = rpa.cdnow_config(arms["no_ar-no_cluster-valendin-tf"])
+    assert tf.time_features == {"add_week_sin_cos": True}
+    assert "add_year_idx" not in tf.time_features
+
+    emb = rpa.cdnow_config(arms["no_ar-no_cluster-valendin-week_emb"])
+    assert not emb.time_features
+    assert "week" in dict(emb.embedded_cols)
+    assert "week" in tuple(emb.time)
+
+
+def test_unknown_calendar_encoding_raises():
+    """An arm asking for an encoding its panel cannot express is a declaration bug.
+
+    Silently falling back to the panel default would train the wrong thing under the
+    right name, which is the failure the whole eligibility apparatus exists to stop.
+    """
+    bogus = rpa.Arm(name="bogus", calendar="week_emb")
+    with pytest.raises(ValueError, match="no calendar encoding"):
+        rpa.electronics_config(bogus)
 
 
 def test_bounded_depth_is_below_the_calibration_window():
@@ -158,12 +198,12 @@ def test_the_benchmark_is_scheduled_on_both_panels(built):
 
 @needs_panels
 def test_scheduled_counts(built):
-    """14 LSTM, 14 Transformer, 4 ValendinLSTM — the run's declared size."""
+    """16 LSTM, 16 Transformer, 6 ValendinLSTM — the run's declared size."""
     scheduled, _, _ = built
     counts = {}
     for item in scheduled:
         counts[item.model_type] = counts.get(item.model_type, 0) + 1
-    assert counts == {"lstm": 14, "transformer": 14, "valendin_lstm": 4}
+    assert counts == {"lstm": 16, "transformer": 16, "valendin_lstm": 6}
 
 
 @needs_panels

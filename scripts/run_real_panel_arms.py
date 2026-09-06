@@ -85,24 +85,28 @@ CLEAN = REPO_ROOT / "Datasets" / "Dataset_clean"
 EXPERIMENT = "real_panel_arms"
 
 # --- study size ------------------------------------------------------------------
-# 14 arm-suites x N_STUDIES studies x N_TRIALS trainings, plus one refit and one
+# One arm-suite is N_STUDIES studies x N_TRIALS trainings, plus one refit and one
 # N_SIMULATIONS-path rollout per study.
 #
-# N_SIMULATIONS is 50, not the 200 the grid used or the 300 the archived real-panel
-# ablations used. `simulate_attention_path` is stateless and re-reads a growing context
-# at every step, for every path, so the rollout is a large share of a Transformer suite
-# and the path count is the lever on it.
+# N_SIMULATIONS was 50 for the first generation of this run and is now 200, matching
+# `grids/seasonal_4x4x10.py`. The 50-path suites are preserved under
+# `Studies/_archive_50sim/` and are NOT comparable with these: a path count is part of
+# what produced a number, so the two generations must not be pooled or read against
+# each other. Everything under `Studies/real_panel_arms__*` is 200-path.
 #
-# MEASURED on one box, 2026-09-06 (one CDNOW study at two path counts, hardware held
-# fixed): 4.38 s per path + 189 s fixed. At 50 paths the rollout is 219 s of a 408 s
-# suite -- 54%; at 200 it would be 82% of ~1,070 s. So this choice roughly halves the
-# run's dominant term.
+# What that costs, MEASURED on one box on 2026-09-06 (one CDNOW study at two path
+# counts, hardware held fixed): 4.38 s per path + 189 s fixed. `simulate_attention_path`
+# is stateless and re-reads a growing context at every step, for every path, so the
+# rollout dominates a Transformer suite -- 54% of it at 50 paths, ~82% at 200. Going to
+# 200 therefore costs roughly 2.6x on the Transformer and less on the LSTM.
 #
-# And it costs nothing measurable. One path's aggregate has sd ~2.6% of the holdout
-# total, so 50 paths leaves ~0.37% Monte Carlo noise against the ~23pp across-study sd
-# that actually limits a result -- two orders of magnitude apart.
+# What it buys is small and worth stating honestly: one path's aggregate has sd ~2.6% of
+# the holdout total, so 50 paths already left ~0.37% Monte Carlo noise against the ~23pp
+# across-study sd that actually limits a result. 200 paths halves an error term that was
+# two orders of magnitude below the binding one. The reason to run it is consistency
+# with the synthetic grid, not precision.
 N_STUDIES = 20
-N_SIMULATIONS = 50
+N_SIMULATIONS = 200
 
 # Trials per study, per model. The LSTM and the Transformer MUST stay equal -- an
 # unequal budget makes a difference attributable to search effort rather than to the arm
@@ -133,17 +137,18 @@ class Arm:
     `ar_features` and `cluster_features` are `PanelConfig` fields, so each arm needs its
     own `prepare_dataset` and therefore its own suite.
 
-    `drop_time_features` exists only for electronics, and only because of F11: the
-    panel's engineered `week_sin`/`week_cos` are non-embedded columns, so ValendinLSTM
-    refuses every arm that carries them. Turning them off is a property of the PANEL
-    rather than of the feature axes, which is why it is a flag here rather than a fourth
-    axis -- crossing it would silently double the run.
+    `calendar` overrides how the panel encodes calendar time (see the CAL_* constants).
+    It is a flag rather than a fourth axis because its meaningful values differ by panel
+    -- electronics engineers sin/cos by default and only ever turns it off, CDNOW
+    engineers nothing and turns one of two encodings on -- so crossing it everywhere
+    would schedule cells that do not exist. `None` means "whatever this panel does by
+    default", which is what every arm inherited from the archived configs uses.
     """
 
     name: str
     ar_features: tuple[str, ...] = ()
     cluster_features: tuple[str, ...] = ()
-    drop_time_features: bool = False
+    calendar: str | None = None
 
 
 # The Pareto/NBD sufficient statistics (t_x, x, T). Two of the three are capped by the
@@ -178,6 +183,23 @@ BOUNDED_DEPTH = {"electronics": 32, "cdnow": 16}
 
 CLUSTER_AXIS = {"no_cluster": (), "kmeans_8": ("kmeans_8",)}
 
+# How an arm encodes calendar time. Three encodings, and which of them a panel can use
+# is a fact about that panel's windows, not a preference:
+#
+#   CAL_NONE      no calendar column at all. Every seq_col stays embedded, so this is
+#                 the one setting ValendinLSTM can always read (F11).
+#   CAL_SIN_COS   week_sin/week_cos. Continuous and periodic, so it is the only encoding
+#                 that carries a usable value for a calendar week the calibration window
+#                 never contained -- which is CDNOW's situation exactly.
+#   CAL_WEEK_EMB  week as an embedded categorical. The published model's own encoding
+#                 (Valendin et al. read week as a category), and therefore the only way
+#                 to give the frozen benchmark calendar information. Unlike sin/cos it
+#                 has one weight row per week, so a week absent from calibration is
+#                 forecast from that row's random initialization.
+CAL_NONE = "none"
+CAL_SIN_COS = "sin_cos"
+CAL_WEEK_EMB = "week_emb"
+
 # The embedder axis has one value, so it is not crossed -- but it stays in the arm name
 # because the archived seasonal trees are named `<ar>-<cluster>-<embedder>` and a reader
 # comparing the two runs should not have to translate.
@@ -187,15 +209,31 @@ EMBEDDER = "valendin"
 def arms_for(panel: str) -> dict[str, Arm]:
     """`{arm name: Arm}` for one panel. The single declaration of the axis.
 
-    Six arms everywhere: 3 AR encodings x 2 cluster settings. Electronics gets two more,
-    which are its `no_ar` arms with the engineered time features removed -- the only
-    shape ValendinLSTM can run in on that panel (F11). They are named as their
-    time-features-on twin plus a `-no_tf` suffix so each sorts beside it and a reader can
-    see it is the same feature cell with one panel setting removed.
+    Four arms everywhere: 2 AR encodings (no_ar, ar_bounded) x 2 cluster settings. Each panel then gets extra
+    arms that vary only its calendar encoding, named as their twin plus a suffix so each
+    sorts beside the cell it differs from by one setting:
+
+    - electronics `-no_tf`: its `no_ar` arms with the engineered time features removed.
+      The only shape ValendinLSTM can run in on that panel (F11).
+    - CDNOW `-tf`: all six cells with `week_sin`/`week_cos` engineered. CDNOW's archived
+      configs carry no calendar column at all, which was inherited rather than decided;
+      these arms are what decides it, by measuring both.
+    - CDNOW `-week_emb`: its `no_ar` cells with week as an embedded categorical. This is
+      the published model's own encoding and the only one the benchmark can read, so it
+      is what puts ValendinLSTM into the calendar comparison at all. Read its result
+      knowing that 13 of CDNOW's 52 weeks (39-51) never occur in calibration, so those
+      embedding rows go to the holdout untrained -- the contrast with `-tf` on the same
+      cells is a measurement of what that costs.
     """
+    # `ar_unbounded` (AR_UNBOUNDED above) is deliberately NOT crossed here any more. It
+    # is the diagnosed-broken encoding -- +198%/+461% bias on these two panels in the
+    # 50-path archive, and the same monotone failure across the synthetic grid -- so it
+    # has already answered its question and re-measuring it at 200 paths would only
+    # re-establish a known result at four times the rollout cost. The constant stays
+    # defined because the archived suites are named after it and `--report`'s
+    # reproduction check still knows its numbers.
     ar_axis = {
         "no_ar": (),
-        "ar_unbounded": AR_UNBOUNDED,
         "ar_bounded": bounded_flags(BOUNDED_DEPTH[panel]),
     }
     arms = {
@@ -208,8 +246,59 @@ def arms_for(panel: str) -> dict[str, Arm]:
     if panel == "electronics":
         for cl, c in CLUSTER_AXIS.items():
             name = f"no_ar-{cl}-{EMBEDDER}-no_tf"
-            arms[name] = Arm(name=name, cluster_features=c, drop_time_features=True)
+            arms[name] = Arm(name=name, cluster_features=c, calendar=CAL_NONE)
+    if panel == "cdnow":
+        for ar, f in ar_axis.items():
+            for cl, c in CLUSTER_AXIS.items():
+                name = f"{ar}-{cl}-{EMBEDDER}-tf"
+                arms[name] = Arm(
+                    name=name, ar_features=f, cluster_features=c, calendar=CAL_SIN_COS
+                )
+        for cl, c in CLUSTER_AXIS.items():
+            name = f"no_ar-{cl}-{EMBEDDER}-week_emb"
+            arms[name] = Arm(name=name, cluster_features=c, calendar=CAL_WEEK_EMB)
     return arms
+
+
+def calendar_kwargs(panel: str, arm: Arm) -> dict:
+    """The `PanelConfig` fields that encode calendar time, for one arm on one panel.
+
+    One function rather than a branch inside each panel config, because this is the one
+    place that decides what a calendar setting MEANS -- and the mapping is not symmetric
+    between the panels, so having it in two places is having it disagree in one.
+
+    Unknown combinations raise rather than falling back to a default: an arm asking for
+    an encoding this panel cannot express is a declaration bug, and silently training the
+    default instead is exactly the class of failure `refuses()` exists to prevent.
+    """
+    if panel == "electronics":
+        if arm.calendar is None:
+            return {"time_features": {"add_year_idx": True, "add_week_sin_cos": True}}
+        if arm.calendar == CAL_NONE:
+            return {"time_features": None}
+    if panel == "cdnow":
+        if arm.calendar is None:
+            return {}                      # the archived configs: no calendar column
+        if arm.calendar == CAL_SIN_COS:
+            # `add_year_idx` is deliberately NOT set here, though electronics sets it.
+            # CDNOW calibrates entirely within 1997 and forecasts across into 1998, so a
+            # year index is constant while fitting and out of its fitted range for the
+            # back half of the holdout -- the unbounded-counter failure this whole study
+            # measures, reintroduced through the calendar. sin/cos is bounded and
+            # periodic and has no such range to leave.
+            return {"time_features": {"add_week_sin_cos": True}}
+        if arm.calendar == CAL_WEEK_EMB:
+            # `week` is already a column of the panel (it is half of `time_cols`); giving
+            # it the `time` role puts it in seq_cols, and embedding it keeps every
+            # channel embedded, which is what the benchmark's guard requires.
+            return {
+                "time": ("week",),
+                "embedded_cols": {"Transactions": "auto", "week": "auto"},
+            }
+    raise ValueError(
+        f"panel {panel!r} has no calendar encoding {arm.calendar!r} (arm {arm.name!r}). "
+        f"Add it to `calendar_kwargs` if it is meaningful on this panel's windows."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,12 +327,8 @@ def electronics_config(arm: Arm) -> PanelConfig:
         holdout_end="2001-12-31",
         clip_target_upper=6,             # 7-class head
         require_calibration_activity=True,
-        # The one thing the `-no_tf` arms change. `time_features` is opt-in, so None
-        # engineers no calendar columns at all and leaves seq_cols fully embedded.
-        time_features=(
-            None if arm.drop_time_features
-            else {"add_year_idx": True, "add_week_sin_cos": True}
-        ),
+        # The one thing the `-no_tf` arms change; `calendar_kwargs` owns the mapping.
+        **calendar_kwargs("electronics", arm),
         ar_features=arm.ar_features,
         cluster_features=arm.cluster_features,
         known_future=(),
@@ -258,11 +343,19 @@ def cdnow_config(arm: Arm) -> PanelConfig:
 
     A harsher test of the same hazard than electronics: the holdout is nearly as long as
     the calibration window (38 vs 39 periods, against 52 vs 104), so capped counters
-    drift proportionally further. It engineers no time features at all, which is why it
-    needs no `-no_tf` arms -- every one of its `no_ar` arms is already fully embedded and
-    therefore already legible to ValendinLSTM.
+    drift proportionally further.
+
+    Its default carries no calendar column at all -- inherited from the archived configs
+    rather than argued for, which is why the `-tf` and `-week_emb` arms exist to test it.
+    Two facts constrain what those arms can mean. Calibration is weeks 0-38 of 1997, so
+    it spans 0.75 of an annual cycle and the holdout runs through weeks 39-51 that
+    calibration never contained: an encoding with a per-week weight has nothing fitted
+    for a third of the forecast, and even sin/cos has no training signal about that
+    quarter of the phase circle. Whatever these arms show, seasonal AMPLITUDE at those
+    weeks is not learnable from this window -- only whether carrying the column helps or
+    hurts the rest.
     """
-    return PanelConfig(
+    kwargs = dict(
         id_col="Id",
         target_col="Transactions",
         frequency="weekly",
@@ -277,6 +370,10 @@ def cdnow_config(arm: Arm) -> PanelConfig:
         cluster_features=arm.cluster_features,
         embedded_cols={"Transactions": "auto"},
     )
+    # Applied last so a calendar encoding that needs its own `embedded_cols` (week_emb)
+    # replaces the default rather than being silently dropped beside it.
+    kwargs.update(calendar_kwargs("cdnow", arm))
+    return PanelConfig(**kwargs)
 
 
 PANELS = {
