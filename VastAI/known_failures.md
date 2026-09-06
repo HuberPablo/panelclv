@@ -492,8 +492,11 @@ any suite whose `results.csv` exists and passes `overwrite=True` for the rest, s
 trains only what is missing, half-written directories included. Seed the worker first
 (see F20) or it will retrain the whole arm.
 
-**Related.** `collect_grid_results` skips a cell with no `results.csv` and says nothing,
-so an arm missing nine panels reads as a complete arm with fewer rows. It now warns.
+**Related.** `collect_grid_results` skips any *dataset* with no `results.csv` and said
+nothing, so an arm missing nine panels reads as a complete arm with fewer rows. Since
+a grid *cell* averages the ten replicate panels sharing a `(rate, churn)` coordinate,
+one model's cell mean then rests on the panels that finished while another's rests on
+all ten. It now warns.
 Until it did, a grid analysis compared one model's *finished* panels against another's
 full set and drew the wrong winner in several cells.
 

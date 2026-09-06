@@ -170,3 +170,14 @@ property of the data is varied. The Pareto/NBD grid varies the generating parame
 synthetic panels. A grid holds suites, which hold studies, which hold trials — it is a
 level above the suite, not another word for one.
 _Avoid_: sweep, matrix, experiment set
+
+**Cell**:
+One position on a grid's axes — for the Pareto/NBD grid, one `(mean transaction rate,
+churn rate)` pair. A cell is not one panel: it holds the `n_datasets` **replicate
+panels** generated at that coordinate, and a result is reported per cell by averaging
+over them with a confidence interval (`studies.pareto_nbd_grid.cell_summary`). Four
+rates x four churn rates is sixteen cells; at ten replicates each that is the grid's
+160 datasets. So "a missing cell" means an axis position nothing was trained at,
+whereas a run that ends short is normally missing *datasets* scattered inside cells —
+which is worse, because the cell still reports a mean and does not say it is thinner.
+_Avoid_: bucket, square, grid point, combination

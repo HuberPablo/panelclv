@@ -166,8 +166,9 @@ def collect_grid_results(
     # Skipping silently is how an incomplete arm becomes a result. A tree missing nine
     # of 160 panels returns a frame that looks exactly like a complete one, only shorter,
     # and the panels a distributed run fails to finish are not a random sample of the
-    # grid -- they are whatever sorted last in the worklist (F19). Averaging over them
-    # then compares one model's easy cells against another's full set. The caller may
+    # grid -- they are whatever sorted last in the worklist (F19). A cell then averages
+    # one model over the replicate panels that finished and another over all ten, which
+    # is not the same comparison and does not say so. The caller may
     # legitimately be reading a run in progress, so this warns rather than raising.
     if skipped:
         warnings.warn(
