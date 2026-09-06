@@ -26,9 +26,10 @@ heatmaps as figures, is published at
 3. [The churn axis, per arm](#3-the-churn-axis-per-arm)
 4. [What the arm axis moved](#4-what-the-arm-axis-moved)
 5. [Per cell: where each architecture fails](#5-per-cell-where-each-architecture-fails)
-6. [Every tree, pooled](#6-every-tree-pooled)
-7. [What this says to build next](#7-what-this-says-to-build-next)
-8. [What this does not establish](#8-what-this-does-not-establish)
+6. [The shape of the miss](#6-the-shape-of-the-miss)
+7. [Every tree, pooled](#7-every-tree-pooled)
+8. [What this says to build next](#8-what-this-says-to-build-next)
+9. [What this does not establish](#9-what-this-does-not-establish)
 
 ---
 
@@ -177,7 +178,7 @@ the more of the prediction it carries, the less rests on channels that drift out
 during the rollout. Both arms it rescues remain worse than the corresponding `ar_bounded`
 arm, which reaches the same end by construction rather than by competition.
 
-So `kmeans_8` improves exactly one thing, and that thing is the arm §7 recommends dropping.
+So `kmeans_8` improves exactly one thing, and that thing is the arm §8 recommends dropping.
 
 ---
 
@@ -248,7 +249,96 @@ numbers than the headline, and still the same monotone story.
 
 ---
 
-## 6. Every tree, pooled
+## 6. The shape of the miss
+
+Everything above is a scalar per panel. It says how far each model's holdout volume is
+from the truth and never what the miss looks like. `scripts/plot_grid_forecasts.py` draws
+the curves — actual weekly holdout volume against each model's simulated volume, rebuilt
+from the stored `Predictions/Prediction_*.csv` rather than re-simulated:
+
+```
+PYTHONPATH=src python scripts/plot_grid_forecasts.py --grid seasonal_4x4x10 --overview
+PYTHONPATH=src python scripts/plot_grid_forecasts.py --grid seasonal_4x4x10 --per-cell
+```
+
+`--overview` is one 4×4 figure, an axes per cell, averaged over the cell's ten replicates
+(`figures/seasonal_4x4x10__forecast_overview.png`). `--per-cell` writes sixteen figures, one
+per cell, each drawing its ten replicate panels separately — every dataset in the grid,
+once. Reading them alongside two measurements separates the miss into three parts that the
+bias number adds together.
+
+### Shape: the neural models have the strength the benchmark lacks
+
+Correlation between predicted and actual weekly holdout totals
+(`studies.synthetic_grid.shape_correlation`, mean over the four transaction rates).
+Correlation is invariant to a multiplicative over-prediction, so it isolates shape from
+level:
+
+| config | churn 0.2 | 0.4 | 0.6 | 0.8 |
+| --- | ---: | ---: | ---: | ---: |
+| Pareto/NBD | −0.07 | +0.02 | +0.07 | +0.09 |
+| LSTM `ar_bounded` | **0.69** | **0.64** | **0.54** | 0.29 |
+| LSTM `no_ar` | 0.67 | 0.62 | 0.51 | **0.32** |
+| Transformer `ar_bounded` | 0.51 | 0.45 | 0.35 | 0.28 |
+| Transformer `no_ar` | 0.50 | 0.50 | 0.39 | 0.25 |
+| LSTM `ar_unbounded` | 0.17 | 0.24 | 0.29 | 0.22 |
+| Transformer `ar_unbounded` | 0.45 | 0.33 | 0.19 | 0.16 |
+
+**The benchmark's shape correlation is zero.** In the figures it is a straight, gently
+decaying line: the Pareto/NBD has no seasonal term, so it structurally cannot track the
+four within-year peaks these panels are generated with. Every neural arm except
+`ar_unbounded` tracks them, the LSTM best. This is the compensating strength
+`figures/fig2_seasonal_shape.png` reports for the archived grid, and it survives the arm
+axis unchanged — which matters, because it is the one dimension on which the contribution
+beats the model that generated the data.
+
+### Decay: not what the aggregate curve shows, and the LSTM overshoots it
+
+Second-half ÷ first-half holdout volume, mean over the four transaction rates. The
+generator's four seasonal peaks straddle the two halves, so the **actual** ratio sits near
+1.0 at every churn level — within-year attrition is not visible in this statistic, and
+"the neural models fail to decay" is not readable off the aggregate curve:
+
+| config | churn 0.2 | 0.4 | 0.6 | 0.8 |
+| --- | ---: | ---: | ---: | ---: |
+| **actual** | **1.06** | **1.00** | **0.97** | **1.00** |
+| Pareto/NBD | 0.95 | 0.89 | 0.83 | 0.77 |
+| LSTM `ar_bounded` | 1.00 | 0.90 | 0.81 | 0.68 |
+| LSTM `no_ar` | 0.99 | 0.88 | 0.82 | 0.66 |
+| Transformer `ar_bounded` | 0.99 | 0.96 | 0.96 | 0.92 |
+| Transformer `no_ar` | 0.98 | 0.99 | 1.01 | 0.99 |
+| LSTM `ar_unbounded` | **1.93** | **1.45** | 1.19 | 0.95 |
+| Transformer `ar_unbounded` | 1.05 | 1.06 | **1.26** | **1.78** |
+
+Two things fall out. The Pareto/NBD and the LSTM both decay *faster* than the realised
+series, the LSTM most of all at high churn (0.68 against 1.00) — its cells at
+`rate = 0.30` go negative precisely because it runs the cohort down too hard by year's end.
+And the Transformer barely decays at all, which is the closest thing here to the "no
+absorbing state" signature, though on this statistic it is nearer the truth than the LSTM
+is.
+
+**So the Transformer's miss is a level offset, not a decay failure.** In the figures its
+curve is the right shape at roughly the right rate of change, sitting bodily above the
+actuals from holdout week 0. That is a different defect from the LSTM's, and it matches §5:
+its per-cell bias is uniform (+23% to +104%) where the LSTM's spans 46×.
+
+### `ar_unbounded` drifts upward, visibly
+
+The clearest picture in the set is
+`figures/seasonal_4x4x10__forecast_overview_ar_unbounded.png`. The LSTM's simulated volume
+**rises monotonically through the holdout year** in almost every cell — at `rate = 0.30,
+churn = 0.20` from about 250 to 870 a week while the truth oscillates around 200 — giving
+the 1.93 ratio in the table above. The Transformer does the same at high churn (1.78).
+
+That is the §4 mechanism drawn rather than argued: `cumulative_transactions` and
+`period_since_first_transaction` keep climbing as the rollout feeds its own samples back,
+the inputs leave the range the weights were fitted on, and the model's output climbs with
+them. A curve that ramps away over 52 steps is what an unbounded feature looks like in a
+rollout, and it is worth keeping the figure for that reason alone.
+
+---
+
+## 7. Every tree, pooled
 
 All 160 panels per row, sorted by median MAPE. Mean and median are both given because the
 `ar_unbounded` LSTM arms are driven by a tail — `ar_unbounded-kmeans_8` reports a mean
@@ -283,7 +373,7 @@ replicate-to-replicate variance as well as the level.
 
 ---
 
-## 7. What this says to build next
+## 8. What this says to build next
 
 1. **Keep `ar_bounded`; make it the default AR encoding.** It is the only arm-axis change
    that improved anything, it improved both architectures significantly, and it costs six
@@ -291,7 +381,8 @@ replicate-to-replicate variance as well as the level.
 
 2. **Never let an unbounded counter into a rollout.** This grid measured the cost on
    panels where the truth is known: the generator's own sufficient statistic, encoded as
-   counters, tripled the LSTM's error. Any feature read during a rollout has to be bounded
+   counters, tripled the LSTM's error, and §6 shows the mechanism as a curve that ramps
+   away over the 52 rollout steps. Any feature read during a rollout has to be bounded
    by construction. `docs/feature_engineering.md` should carry this as a rule rather than
    a caution.
 
@@ -314,7 +405,7 @@ replicate-to-replicate variance as well as the level.
 
 ---
 
-## 8. What this does not establish
+## 9. What this does not establish
 
 - **The embedder axis was not crossed.** `EMBEDDER_AXIS` holds `valendin` only; `projected`
   was measured to run and cut on cost. ADR-0005's seam changes how features become a
