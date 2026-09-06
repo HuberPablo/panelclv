@@ -59,7 +59,9 @@ files record `n_trials=10` for the LSTM against `20` for the Transformer, so eve
 LSTM-vs-Transformer comparison below is between a 10-trial search and a 20-trial one
 (see §6). `grids/seasonal_4x4x10.py` has since equalised both at 100 (commit
 `2d815b3`), so a re-run does not carry the confound — but the numbers in this section
-were produced before that, and stand as they are.
+were produced before that, and stand as they are. **That re-run has since happened**, at
+100 trials for both models and across six arms: see `docs/insights-arm-sweep.md`, which
+reproduces this section's baseline arm and reports what the arm axis did and did not move.
 
 The panels are generated *by* a Pareto/NBD process, so that benchmark is the correct
 model by construction and is the ceiling, not a competitor. What the grid asks is how
