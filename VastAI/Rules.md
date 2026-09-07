@@ -366,7 +366,20 @@ the main way money is lost here.
   the end of the whole study. Models finish at different times; the fast ones stop
   costing immediately.
 - `vastai show instances` is checked at the end of every run. Nothing is left
-  running.
+  running. `vastai destroy instance` needs **`-y`** or it prompts, prints `Aborted.`
+  and destroys nothing while the box keeps billing (F24) — verify by re-reading
+  `show instances`, never by trusting the destroy command's output.
+- **Every box is ssh-probed the moment it is launched, and anything that will not
+  take the key is destroyed immediately.** `actual_status: running` is the container,
+  not a usable machine: some fraction of a batch comes up with no key injected and
+  answers `Permission denied (publickey)` forever. `start_shard.sh` now probes before
+  its provisioning wait and exits 2 on a dead box, because that wait cannot tell a
+  keyless box from a slow image pull and used to give both the full 20 minutes — six
+  such boxes once billed ~7 idle hours each, about half that run's spend (F21).
+- The fleet list comes from `vastai show instances --raw`, never from parsing the
+  launcher's stdout: vast returns either a direct `ip=/port=` or an `sshN.vast.ai`
+  proxy endpoint, so a parser written for one records nothing for the other and the
+  orchestrator loses track of what it rented (F22).
 - Provisioning is billed too — roughly 5–10 minutes per worker for image pull, apt,
   pip install and the data push. **Worker count is chosen from measured
   per-dataset wall-clock, not from the shape of the grid**, because past some point

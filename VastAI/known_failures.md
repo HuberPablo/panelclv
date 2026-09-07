@@ -565,3 +565,130 @@ but it read them from the un-suffixed path (the bug behind the 107-suite loss in
 `supervise/reap_finished.sh`'s header), so replacements arrived empty and restarted their
 stride from the top. Seeding needs only the `results.csv` files — 61 KB against a 2.6 GB
 tree, and bandwidth is billed per GB (F14).
+
+## F21 — Half a fleet rented with no ssh key injected, and the launcher took 20 minutes each to notice
+
+**Symptom.** 14 boxes launched; 8 provisioned and trained, 6 answered every ssh attempt
+with `root@sshN.vast.ai: Permission denied (publickey)`. `start_shard.sh` did not report
+that. It reported
+
+    [ssh8.vast.ai:18030 transformer 10/12] FATAL: never finished provisioning
+
+after polling `test -f /root/.onstart_done` 80 times at 15 s. Because the starter walks
+its host list serially, six such boxes cost **two hours of wall-clock before the first
+one was even declared dead**, and they then sat rented until a human looked. ~7 idle
+hours across 6 machines, roughly half the run's total spend, for nothing.
+
+**Cause.** Two separate things, and the second is what made the first expensive.
+
+`vast_launch.sh` creates, attaches the key, starts and polls to `running` — but
+`running` is the *container's* state, and it is reached whether or not the key landed.
+When many instances are created back to back some do not get the key, and nothing in
+the launch path asks.
+
+`start_shard.sh`'s first act is the provisioning wait, whose failure mode ("no
+`.onstart_done` after 20 minutes") is indistinguishable from a slow image pull. A box
+that will never accept a connection and a box still pulling a 4 GB image look identical
+to it, so it gives both the full 20 minutes.
+
+**Check.** One ssh round-trip, immediately after launch, before any work is assigned:
+
+    ssh -n -i ~/.ssh/id_ed25519 -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 \
+        "root@$HOST" true
+
+A box that cannot answer that in the first few minutes will not answer in twenty. Probe
+the whole fleet in a loop with a couple of retries, keep what answers, and destroy the
+rest **immediately** — a keyless box is worth nothing and bills like any other. On the
+recovery run this separated 6 good boxes from 2 dead ones within seconds of launch.
+
+**Fix.** Probe-then-assign, never assign-then-discover. The provisioning wait is for
+boxes that have already proved they are reachable; it must not be the thing that finds
+out they are not. Also worth remembering that vast's own `actual_status: running` is not
+evidence the box is usable — F17 makes the same point about `torch.cuda.is_available()`.
+
+## F22 — vast returns two endpoint formats, and parsing the launcher's stdout loses the fleet
+
+**Symptom.** A launcher loop that recorded `<instance> <ip> <port>` per box wrote an
+empty `fleet.txt` while 14 instances were live and billing. Every line of its log read
+`no endpoint; skipping` directly under a successful launch.
+
+**Cause.** `vast_launch.sh` prints whatever endpoint vast gives it, and vast gives two
+different shapes depending on the machine:
+
+    ready ip=84.249.79.112 port=30221          # direct
+    ssh -i ~/.ssh/id_ed25519 -p 17940 root@ssh4.vast.ai   # proxy
+
+A parser written against one silently matches nothing on the other. Nothing failed — the
+boxes were fine — but the orchestrator had no record of what it had rented, which is the
+state in which machines get forgotten.
+
+**Check.** Never parse the launcher's stdout for the fleet list. Ask the API, which
+always reports both fields in the same place:
+
+    vastai show instances --raw | python3 -c 'import json,sys; [print(i["id"], i["ssh_host"], i["ssh_port"]) for i in json.load(sys.stdin)]'
+
+**Fix.** Build the fleet file from `show instances`, filtered to `actual_status ==
+"running"`. It is also the only list that survives the launcher dying halfway.
+
+## F23 — A changed study constant makes suite names lie, and the orchestrator keeps both generations
+
+**Symptom.** After re-declaring `run_real_panel_arms.py` from 50 to 200 Monte Carlo
+paths, the orchestrator's `Studies/` held 29 suites at 50 paths and 12 at 200 —
+**under the same names**. `real_panel_arms__Transformer__cdnow__no_ar-no_cluster-valendin__a`
+existed twice over, meaning two different things.
+
+**Cause.** A suite root is named from (experiment, model, panel, arm, shard). None of
+those is the path count, the trial count or the study count, so changing one produces
+results that collide with the previous generation's by name while being incomparable to
+them. The workstation copy was moved to `Studies/_archive_50sim/` when the constant
+changed; the orchestrator's copy was not, and `pull_results.sh` then merged new suites
+into a tree that still held old ones.
+
+**Check.** Read the generation off `config.json`, never off the path:
+
+    python3 -c 'import json,glob,collections; print(collections.Counter(json.load(open(c))["n_simulations"] for c in glob.glob("Studies/<exp>__*/config.json")))'
+
+More than one value in that counter means the tree is mixed and no aggregate over it is
+meaningful.
+
+**Fix.** When a study constant changes, archive the previous generation **on every
+machine that holds a copy**, in the same commit that changes the constant — the
+orchestrator and the workstation both. And never rsync a mixed tree back wholesale;
+filter to the current generation first. (`_archive_50sim` deliberately does not match
+the `real_panel_arms__*` glob, so the runner, `--report` and `--check-complete` all stop
+seeing the old generation the moment it is moved.)
+
+## F24 — `vastai destroy instance` aborts without `-y`
+
+**Symptom.** A destroy loop printed `Aborted.` for every instance and killed none, while
+reporting nothing that looked like an error. The boxes kept billing.
+
+**Cause.** The CLI prompts `Are you sure you want to destroy instance N? [y/N]` and a
+non-interactive stdin answers no.
+
+**Check / Fix.** `vastai destroy instance -y <id>`. Pass `-y` in every script; verify by
+re-reading `show instances` rather than by trusting the command's output.
+
+## F25 — Diagnosing a supervisor from the instance count instead of its log
+
+**Symptom.** Seven of eight working boxes had disappeared while six broken ones
+remained. Read as "a stale reaper from the previous run is destroying my fleet", and the
+reaper and puller were killed on that basis.
+
+**Cause.** The inference was wrong, and the evidence against it was one file away.
+`VastAI/state/reap_finished.log` said plainly:
+
+    [04:35:36] 50097941 shard finished (exit=0) — pulling before anything else
+    [04:35:37]   verified all 2 suites present locally — destroying 50097941
+
+The boxes were gone *because they had finished*, results pulled and verified first. The
+reaper was the only thing keeping the run from billing idle machines all night, and
+killing it was the actual damage.
+
+**Check.** Before stopping any long-running supervisor, read its log. These processes
+narrate what they do precisely so that "why did the fleet shrink" is answerable without
+guessing. A shrinking fleet is the reaper's *success* condition, not a symptom.
+
+**Fix.** Restart what was killed, and confirm exactly one of each is running — `pkill -f`
+is unreliable here (F13), so kill by PID from `pgrep -af` and re-check. Duplicated
+reapers race on the same instances.

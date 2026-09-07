@@ -58,6 +58,27 @@ SSH_OPTS=(-i "$KEY" -p "$PORT"
 
 say() { echo "[$HOST:$PORT $MODEL $SHARD] $*"; }
 
+# --- 0. reachability ---------------------------------------------------------
+# A box whose ssh key was never injected answers `Permission denied (publickey)`, and it
+# will answer that forever. The provisioning wait below cannot tell that apart from a
+# slow image pull, so without this check such a box absorbs the full 20 minutes and then
+# bills until a human looks: six of fourteen did exactly that, ~7 idle hours each (F21).
+# One round trip, a few retries for a container still booting, then give up fast.
+say "reachability probe"
+reachable=0
+for attempt in $(seq 1 6); do
+    if ssh -n "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=15 "root@$HOST" true 2>/dev/null; then
+        reachable=1
+        break
+    fi
+    sleep 10
+done
+if [ "$reachable" = 0 ]; then
+    say "FATAL: no ssh after ~90s — the key was almost certainly not injected (F21)."
+    say "       This box will never work. Destroy it: vastai destroy instance -y <id>"
+    exit 2                     # 2 = dead box, distinct from a genuine setup failure
+fi
+
 # --- 1. wait for provisioning ------------------------------------------------
 # vast_onstart.sh only touches .onstart_done if every step succeeded, so its absence
 # means we would be racing a pip install still in flight.
