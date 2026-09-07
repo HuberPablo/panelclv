@@ -8,8 +8,9 @@ Built by reading the archived `config.json` of every suite (they record the pane
 config, the model specs and the budget verbatim) and cross-checking the two scripts that
 own the "what is owed" question: `scripts/run_real_panel_arms.py --check-complete` and
 `scripts/reconcile_grid.py --grid <name>`. Those two commands are the authority; this
-document is a snapshot of them taken **7 September 2026**, plus the families they do not
-cover.
+document is a snapshot of them taken **7 September 2026, 21:10 CEST**, plus the families
+they do not cover. The `real_panel_arms` fleet was still draining while this was written,
+so re-run those two commands before trusting §4.
 
 ---
 
@@ -103,7 +104,7 @@ QEMU VM (`/home/agent`, CPU), **local** = workstation, **colab** = `/content/dri
 | E | `ar_encoding` ablation | vast | 1–3 Sep | CDNOW, electronics | LSTM | CDNOW: `no_ar`, `ar_unbounded`, `ar_bounded_16`, `ar_bounded_32`; electronics: `no_ar`, `ar_unbounded`, `ar_bounded_32`, `ar_bounded_52` | 50 | 20 × 2 shards | 300 | 16 | complete |
 | F | `cluster` ablation | vast | 3 Sep | CDNOW, electronics | LSTM | `no_cluster`, `kmeans_4`, `kmeans_8`, `kmeans_16`, `ar_unbounded`, `ar_plus_cluster_8` | 50 | 20 × 2 shards | 300 | 24 | complete |
 | G | `real_panel_arms` @ 50 paths | vast | Aug | CDNOW, electronics | LSTM, Transformer, ValendinLSTM | 3 AR × 2 cluster (+ 2 `-no_tf` on electronics) | 50 / 25¹ | 20 (shard a) | **50** | 32 + 2 Pareto | complete, **superseded by H** |
-| H | `real_panel_arms` @ 200 paths | vast | 6–7 Sep | CDNOW, electronics | LSTM, Transformer, ValendinLSTM | see §4 | 50 / 25¹ | 20 (shard a) | 200 | 38 + 2 Pareto | **in flight — 12 ok, 10 short, 16 absent** |
+| H | `real_panel_arms` @ 200 paths | vast | 6–7 Sep | CDNOW, electronics | LSTM, Transformer, ValendinLSTM | see §4 | 50 / 25¹ | 20 (shard a) | 200 | 38 + 2 Pareto | **37 ok, 1 short (19/20)** |
 | I | `loss_ablation_cdnow` | local | 31 Aug | CDNOW | LSTM ×3 losses (`ce`, `emd`, `ce_emd`) | `ar_unbounded`-lite² | 20 | 10 | 300 | 1 (3 arms) | complete |
 | J | `pnbd_study_4x4x10` | colab | 16 Jul | synthetic, 160 panels | LSTM, Transformer, ParetoNBD_MLE | `no_ar-no_cluster` | 20 | 1/cell | 100 | 160 | complete, superseded by A/B |
 | K | `pnbd_study_4x4x10__ar` | colab | 2 Aug | synthetic, 160 panels | LSTM, ParetoNBD_MLE | ad-hoc AR set³ | 20 | 1/cell | 100 | 160 | complete, superseded by B |
@@ -154,17 +155,20 @@ does not exist. It is **superseded**: its feature set is exactly family B's
 
 ---
 
-## 4. `real_panel_arms` @ 200 paths — what is owed
+## 4. `real_panel_arms` @ 200 paths — essentially complete
 
-`scripts/run_real_panel_arms.py --check-complete`, 7 Sep: **38 schedulable neural suites
-+ 2 Pareto; 12 ok, 10 SHORT, 16 ABSENT, 10 n/a.**
+`scripts/run_real_panel_arms.py --check-complete`, 7 Sep 21:10 CEST (three consecutive
+runs agreeing): **38 schedulable neural suites + 2 Pareto; 37 ok, 1 SHORT, 0 ABSENT,
+10 n/a.**
 
-The declared axis is `{no_ar, ar_bounded} × {no_cluster, kmeans_8}` per panel — 
+The declared axis is `{no_ar, ar_bounded} × {no_cluster, kmeans_8}` per panel —
 `ar_unbounded` was **deliberately dropped** at this budget: it is the diagnosed-broken
 encoding (+198%/+461% bias in the 50-path archive) and re-measuring it at 200 paths would
 re-establish a known result at four times the rollout cost. Plus per-panel calendar
 variants: CDNOW `-tf` (all four cells) and `-week_emb` (its two `no_ar` cells);
 electronics `-no_tf` (its two `no_ar` cells). 10 arms on CDNOW, 6 on electronics.
+
+Complete at 20/20 studies:
 
 | Arm | Panel | LSTM | Transformer | ValendinLSTM |
 |---|---|---|---|---|
@@ -172,31 +176,41 @@ electronics `-no_tf` (its two `no_ar` cells). 10 arms on CDNOW, 6 on electronics
 | `ar_bounded-kmeans_8-valendin` | CDNOW | ok | ok | n/a |
 | `ar_bounded-kmeans_8-valendin-tf` | CDNOW | ok | ok | n/a |
 | `ar_bounded-no_cluster-valendin` | electronics | ok | ok | n/a |
-| `ar_bounded-no_cluster-valendin` | CDNOW | **13/20** | **18/20** | n/a |
-| `ar_bounded-no_cluster-valendin-tf` | CDNOW | **1/20** | ok | n/a |
-| `no_ar-kmeans_8-valendin` | electronics | **absent** | ok | n/a |
-| `no_ar-kmeans_8-valendin` | CDNOW | **absent** | ok | **absent** |
-| `no_ar-kmeans_8-valendin-no_tf` | electronics | **absent** | **9/20** | **absent** |
-| `no_ar-kmeans_8-valendin-tf` | CDNOW | **absent** | **7/20** | n/a |
-| `no_ar-kmeans_8-valendin-week_emb` | CDNOW | **absent** | **12/20** | **absent** |
-| `no_ar-no_cluster-valendin` | electronics | **absent** | **8/20** | n/a |
-| `no_ar-no_cluster-valendin` | CDNOW | **absent** | **2/20** | **absent** |
-| `no_ar-no_cluster-valendin-no_tf` | electronics | **absent** | **18/20** | **absent** |
-| `no_ar-no_cluster-valendin-tf` | CDNOW | **absent** | ok | n/a |
-| `no_ar-no_cluster-valendin-week_emb` | CDNOW | **absent** | **19/20** | **absent** |
+| `ar_bounded-no_cluster-valendin` | CDNOW | ok | ok | n/a |
+| `ar_bounded-no_cluster-valendin-tf` | CDNOW | ok | ok | n/a |
+| `no_ar-kmeans_8-valendin` | electronics | ok | ok | n/a |
+| `no_ar-kmeans_8-valendin` | CDNOW | ok | ok | ok |
+| `no_ar-kmeans_8-valendin-no_tf` | electronics | ok | ok | ok |
+| `no_ar-kmeans_8-valendin-tf` | CDNOW | ok | ok | n/a |
+| `no_ar-kmeans_8-valendin-week_emb` | CDNOW | ok | ok | ok |
+| `no_ar-no_cluster-valendin` | electronics | ok | ok | n/a |
+| `no_ar-no_cluster-valendin` | CDNOW | ok | **19/20** | ok |
+| `no_ar-no_cluster-valendin-no_tf` | electronics | ok | ok | ok |
+| `no_ar-no_cluster-valendin-tf` | CDNOW | ok | ok | n/a |
+| `no_ar-no_cluster-valendin-week_emb` | CDNOW | ok | ok | ok |
 | *(no arm)* | both | — | — | ParetoNBD 1/1 ok, both panels |
 
-**The LSTM is the hole.** It has 4 of its 16 declared suites and every one of its
-`no_ar` cells is absent. The Transformer has 8 of 16 complete and 8 part-run.
-`ValendinLSTM` has 0 of its 6 eligible suites.
+The one gap is a single missing replication of `Transformer / cdnow /
+no_ar-no_cluster-valendin` — 19 of 20 studies. Whether that is worth a box is a judgement
+call: the suite already reports a 19-study distribution.
 
 Shard `b` (20 more replications per arm) has not been run for any arm in any family
 except E and F, and is only worth spending where a confidence interval overlaps a
 neighbour's.
 
----
+### Fleet postscript
 
-## 5. Why `ValendinLSTM` keeps coming out at zero
+The run drained cleanly: six workers finished `exit=0`, were verified suite-by-suite
+against local disk, and were destroyed by `reap_finished.sh` between 09:32 and 13:52.
+One box (`50097932`, RTX 3060, $0.0589/hr) outlived them **without doing work**: its
+trainer died at 00:30 UTC leaving no `.shard_exit` and no traceback, and the reaper's
+state probe returns `none` for that case — which is a silent `continue`, deliberately
+left for a human. Nothing it held was unique (its one `results.csv` and all 20 electronics
+predictions were already local), so it is safe to destroy. **A worker that dies without
+writing `.shard_exit` bills indefinitely and logs nothing** — worth a heartbeat check on
+`shard.log` mtime in a future reaper.
+
+## 5. Where `ValendinLSTM` can and cannot run
 
 `benchmarks/valendin_lstm.py:99` refuses any `seq_col` that is not embedded — the
 published model reads week and transaction count, both categorical, and has no covariate
@@ -212,8 +226,9 @@ Consequences, both **verified by running the code**:
   `week`-embedded panel variant, which does not exist.
 - **On the real panels it is eligible on 6 of 16 arms** — the `no_ar` cells with no
   engineered calendar: CDNOW base (×2 cluster) and `-week_emb` (×2 cluster), electronics
-  `-no_tf` (×2 cluster). All 6 are absent at 200 paths; 4 of them exist in the 50-path
-  archive.
+  `-no_tf` (×2 cluster). **All 6 are complete at 20/20**, so the frozen benchmark is in
+  the real-panel comparison at full budget, including both `-week_emb` cells — the only
+  arms that give it calendar information at all.
 
 ---
 
@@ -221,27 +236,24 @@ Consequences, both **verified by running the code**:
 
 Ordered by what a result depends on.
 
-1. **`real_panel_arms` @ 200 paths, LSTM** — 4 of 16 suites complete: 10 absent, 2 short.
-   The whole `no_ar` half of the LSTM's axis is missing, so no AR-vs-no-AR contrast exists
-   at this budget.
-2. **`real_panel_arms` @ 200 paths, Transformer** — 8 of 16 complete, 8 short (2/20 to 19/20).
-3. **`ValendinLSTM` @ 200 paths** — 6 eligible suites, all absent. Without them the
-   frozen benchmark appears in the real-panel comparison only at 50 paths.
-4. **`ValendinLSTM` on the synthetic grid** — blocked by design (§5). Needs a decision:
-   declare a no-calendar arm, or state that the benchmark is a real-panel-only comparator.
-5. **The `projected` embedder — never run anywhere.** `scripts/run_cdnow_embedding_ablation.py`
+1. **The `projected` embedder — never run anywhere.** `scripts/run_cdnow_embedding_ablation.py`
    declares it fully (arms `LSTM_valendin`, `LSTM_projected_32`, `LSTM_projected_64`,
    `LSTM_projected_128`; 15 trials, 3 studies, 300 sims) and has never been executed —
    there is no `Studies/cdnow_embedding_ablation`. On the synthetic grid the embedder axis
    is declared but not crossed (`EMBEDDER_AXIS = ("valendin",)`), cut on cost: adding
    `"projected"` to that tuple is the only edit needed, and it doubles the bill.
-   **Any claim about embedding strategy currently rests on zero measurements.**
-6. **Trial-budget confound in family A.** The archived baseline gave the LSTM 10 trials
+   **Any claim about embedding strategy currently rests on zero measurements.** This is now
+   the largest unmeasured axis in the project.
+2. **`ValendinLSTM` on the synthetic grid** — blocked by design (§5). Needs a decision:
+   declare a no-calendar (or `week`-embedded) arm, or state in the thesis that the frozen
+   benchmark is a real-panel-only comparator. Right now the synthetic grid compares our two
+   models against Pareto/NBD with no published-model reference at all.
+3. **One replication short** — `Transformer / cdnow / no_ar-no_cluster-valendin` at 19/20.
+   Cheap to finish, and defensible to leave.
+4. **Trial-budget confound in family A.** The archived baseline gave the LSTM 10 trials
    and the Transformer 20. Family B re-ran the same arm for both at 100, so use B for any
    LSTM-vs-Transformer statement and treat A as superseded rather than as a baseline.
-7. **Shard `b`** anywhere a comparison turns out to be within noise.
-
----
+5. **Shard `b`** anywhere a comparison turns out to be within noise.
 
 ## 7. Known inconsistency
 
