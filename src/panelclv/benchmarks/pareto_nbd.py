@@ -31,7 +31,8 @@ The four population parameters (r, alpha, s, beta) themselves get vague Gamma(1e
 where x_i = repeat transactions, t.x_i = recency (time of last purchase), and
 T_i = age (calibration length since first purchase) — the standard Pareto/NBD
 sufficient statistics, here counted at the **occasion** level (one purchase event
-per active period, matching BTYDplus's `elog2cbs`).
+per active period, matching BTYDplus's `elog2cbs`). See `_panel_to_cbs` for why
+counting the target column instead is not a valid alternative.
 
 Forecast
 --------
@@ -109,12 +110,37 @@ def _build_cbs(
     `first` is each customer's first active period; `cal_end` is the last period
     in the calibration panel. Time is measured per customer **from its own first
     purchase**, exactly as the BTYDplus convention.
+
+    **Do not "fix" this to count the target column.** Tried 2026-09-07, reverted
+    the same day. The motivation was real: lambda is an OCCASION rate here, so the
+    model predicts expected active periods, while every caller scores it against
+    `target_col` summed over the holdout. Where a period can hold several events
+    those are different quantities — 1.05x on cdnow (harmless), 2.38x on
+    electronics, where it turned a -9.3% error against occasions into a -62.6%
+    reported bias.
+
+    But `x = (total transactions) - 1` is not the repair, because it makes the
+    triple incoherent. A customer who buys three items in one week and never
+    returns then has x = 2 repeats with t_x = 0: two repeat purchases whose last
+    occurred at time zero. Pareto/NBD's likelihood places x events in [0, t_x], so
+    that customer has no valid density and the Gibbs sampler diverges. On
+    electronics it produced NaN for exactly the 169 of 829 customers with a single
+    active period — 100% of the failures, and no others.
+
+    The mismatch is therefore in the EVALUATION TARGET, not in this function. On
+    electronics `target_col` counts LINE ITEMS: `Datasets/Electronic.csv` holds one
+    row per item, 2.24 per customer-day, so the weekly panel's "Transactions" is
+    not a purchase occasion at all — and the CBA literature, Valendin et al.
+    included, models purchase occasions. Fixing it means rebuilding that panel on
+    distinct active days, which changes the target every model trains on. Until
+    then, a Pareto/NBD number on electronics is in occasion units and the models'
+    are in line-item units, and the two are not directly comparable.
     """
     panel = train_panel.copy()
     panel[time_col] = pd.to_datetime(panel[time_col])
     cal_end = panel[time_col].max()
 
-    # Active periods only (an occasion = a period with positive count).
+    # Active periods only — these fix the customer's own clock (first / last).
     active = panel[panel[target_col] > 0]
     first_t = active.groupby(id_col)[time_col].min()
     last_t = active.groupby(id_col)[time_col].max()
