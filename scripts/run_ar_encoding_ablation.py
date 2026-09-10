@@ -93,8 +93,17 @@ CLEAN = REPO_ROOT / "Datasets" / "Dataset_clean"
 # Matches the archived electronics suites so the `ar_unbounded` arm is comparable with
 # what is already on disk -- which is this script's own sanity check (see `report`).
 N_TRIALS = 50
-N_STUDIES = 20         # per shard; two shards per arm gives 40 replications
+N_STUDIES = 20         # per shard; five shards per arm gives 100 replications
 N_SIMULATIONS = 300    # Monte Carlo paths per forecast (docs/loss-functions.md §6 floor)
+
+# Why 100 and not the 40 the first four arms were run at, and why nothing else moved:
+# `.scratch/ar-encoding-support/issues/03-ablation-arms-for-the-new-encodings.md`.
+# In short, measured on those 40: 40 replications resolve a 9-point difference in mean
+# bias against the winning flag arm and 100 resolve 5.7, which is the size the new arms
+# are expected to differ by. `N_TRIALS` and `N_SIMULATIONS` stay put because changing
+# either would force a re-run of all four archived arms before anything could be compared
+# to them -- and because Monte Carlo noise is already under 1.2% of the across-replication
+# variance at 300 paths, so more paths buy nothing.
 
 # The feature sets under test. Only this mapping differs between arms.
 #
@@ -207,7 +216,11 @@ def arms_for(panel: str) -> dict[str, tuple[str, ...]]:
     }
 
 
-SHARDS: dict[str, int] = {"a": 42, "b": 62}
+# Five shards of `N_STUDIES`, seeded so the ranges are contiguous and disjoint:
+# a -> 43..62, b -> 63..82, c -> 83..102, d -> 103..122, e -> 123..142. Shards a and b
+# reproduce the seeds the four archived arms were run at, so an arm extended from 40 to
+# 100 replications keeps its existing rows rather than starting over.
+SHARDS: dict[str, int] = {"a": 42, "b": 62, "c": 82, "d": 102, "e": 122}
 
 
 def electronics_config(ar_features: tuple[str, ...]) -> PanelConfig:
@@ -392,6 +405,10 @@ def report(panel: str, suffix: str | None = None) -> None:
 
     rows: list[dict[str, object]] = []
     arms = arms_for(panel)
+    # The first dataset actually built, kept for scoring the all-zero reference below.
+    # Holdout actuals are the same for every arm -- only the feature channels differ --
+    # so whichever arm happened to build first will do.
+    any_data: dict | None = None
     for arm, ar_features in arms.items():
         data = None
         for shard, base_seed in SHARDS.items():
@@ -405,6 +422,7 @@ def report(panel: str, suffix: str | None = None) -> None:
                 data = panel_dataset.prepare_dataset(
                     panel_df, build_config(ar_features), verbose=False
                 )
+                any_data = any_data or data
             for row in score_suite(root, data, base_seed):
                 rows.append({"arm": arm, "shard": shard, **row})
 
@@ -417,7 +435,7 @@ def report(panel: str, suffix: str | None = None) -> None:
     # short count rather than silently shrinking an arm's sample.
     coverage = per_study.groupby(["arm", "shard"]).size().unstack(fill_value=0)
     print(f"\n{len(per_study)} replications across {per_study.arm.nunique()} arms")
-    print("\nreplications per shard (10 expected each):")
+    print(f"\nreplications per shard ({N_STUDIES} expected each):")
     print(coverage.to_string())
 
 
@@ -427,6 +445,11 @@ def report(panel: str, suffix: str | None = None) -> None:
         n=("bias_percent", "size"),
         bias_mean=("bias_percent", "mean"),
         bias_sd=("bias_percent", lambda s: s.std(ddof=1)),
+        # Median and IQR alongside the mean because the distributions are right-skewed
+        # (skew +0.4 to +1.3 on the archived arms, +2.5 on ar_unbounded), so the two
+        # separate and a mean alone overstates the typical replication.
+        bias_median=("bias_percent", "median"),
+        bias_iqr=("bias_percent", lambda s: s.quantile(0.75) - s.quantile(0.25)),
         bias_min=("bias_percent", "min"),
         bias_max=("bias_percent", "max"),
         abs_bias_mean=("bias_percent", lambda s: s.abs().mean()),
@@ -439,13 +462,30 @@ def report(panel: str, suffix: str | None = None) -> None:
     order = [a for a in arms if a in summary.index]
     print(summary.loc[order].round(3).to_string())
 
+    # The all-zero forecast, scored on this panel's own actuals. Printed next to the
+    # RMSE column because it is the only thing that makes that column readable: the
+    # panels are ~98% zeros, so predicting nothing lands within 0.4% of the best model
+    # this package produces, and an RMSE difference in the fourth decimal is not evidence
+    # of anything. Bias and Spearman together are what exclude a degenerate forecast --
+    # all-zero scores bias -100, and a constant non-zero forecast scores spearman 0.
+    actual = holdout_actuals(any_data)
+    degenerate = compute_forecast_metrics(actual, np.zeros_like(actual, dtype=float))
+
     print(
-        "\nAccept a bounded arm only if BOTH hold against ar_unbounded:"
-        "\n  |bias| falls substantially, AND spearman is no worse."
-        "\nmape_aggregate is the aggregate-accuracy metric that separates these arms;"
-        "\nit shows the bounded AR channels beating the no-AR baseline where |bias|"
-        "\nalone does not. RMSE is shown for completeness only: it is dominated by the"
-        "\nzeros and its arm-to-arm differences land in the fourth decimal."
+        "\nAcceptance (all must hold, per arm, per panel — see"
+        "\n`.scratch/ar-encoding-support/issues/03-ablation-arms-for-the-new-encodings.md`):"
+        "\n  1. level          mean bias no further from 0, and mape no worse, than the"
+        "\n                    winning flag arm"
+        "\n  2. reliability    bias_sd no more than 1.33x the flag arm's (the smallest"
+        f"\n                    ratio {N_STUDIES * len(SHARDS)} replications can resolve)"
+        "\n  3. discrimination spearman non-inferior to the flag arm at a margin of 0.02"
+        "\n  4. not degenerate rmse at least 0.001 below the all-zero forecast below"
+        "\nCriteria 1-3 are an intersection-union test, so no correction applies inside an"
+        "\narm; apply Holm across the three new arms within a panel. Panels are reported"
+        "\nseparately, never pooled."
+        f"\n\nAll-zero forecast on {panel}: rmse={degenerate['rmse']:.4f}, "
+        f"bias={degenerate['bias_percent']:+.1f}%, mape={degenerate['mape_aggregate']:.1f} "
+        f"({float((actual == 0).mean()):.1%} of holdout cells are zero)."
     )
     if "ar_unbounded" in summary.index:
         got = summary.loc["ar_unbounded", "bias_mean"]

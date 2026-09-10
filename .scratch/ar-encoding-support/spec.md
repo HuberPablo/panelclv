@@ -156,7 +156,32 @@ force: CDNOW's `ar_bounded_32` arm was nominally bounded and still lost, because
 3.5% of calibration cells sat beyond its deepest bin while 68.9% of holdout cells did.
 None of the encodings here can be adopted on the strength of the tables above.
 
-Issue 03 defines the arms. The bar is set by the existing ablation: `|bias|` back at or
-below the no-AR baseline (22.4% electronics, 14.6% CDNOW) **and** per-customer Spearman
-at or above the bounded flag arms (0.267 electronics, 0.438 CDNOW), because an arm that
-fixes the level by going blind is the failure mode this family is meant to avoid.
+Issue 03 defines the arms and the statistical design, both settled against the 320
+archived replications rather than by convention. The load-bearing decisions:
+
+- **100 replications per arm**, five shards of 20, with `no_ar` and the winning flag arm
+  extended from 40 to 100 as well. 40 resolves a 9-point difference in mean bias against
+  the flag arm; 100 resolves 5.7, which is the size the new arms are expected to differ
+  by. Beyond 100 the return collapses, since required n grows with the square of the
+  resolution.
+- **`N_TRIALS` and `N_SIMULATIONS` frozen** at 50 and 300. Changing either forces a re-run
+  of all four archived arms, and Monte Carlo noise is already under 1.2% of the
+  across-replication variance at 300 paths.
+- **Mean and SD are separate pre-registered claims** for `bias_percent`,
+  `mape_aggregate` and `rmse`, because `|bias|` conflates them: electronics
+  `ar_bounded_32` scores 22.5 with a mean of +3.5 and an SD of 30.5, `no_ar` scores 22.4
+  with a mean of +22.0 and an SD of 14.9 — unbiased-but-erratic against reliably-biased.
+- **Spearman non-inferiority at a margin of 0.02**, one-sided, with Holm across the three
+  new arms within a panel and the two panels never pooled.
+
+**RMSE cannot be a decision endpoint on these panels, and that is measured.** A forecast
+of zero in every cell scores 0.3775 on electronics against 0.3760 for the best real arm,
+and 0.1521 on CDNOW against 0.1474. The panels are 98.0-98.6% zeros, so predicting
+nothing is within 0.4% of the best model this package produces, while 100 replications
+resolve an RMSE difference of 0.0002. An RMSE test would return highly significant
+p-values across a range in which the degenerate solution is nearly optimal. It is
+reported with the all-zero figure printed beside it and used only as a guardrail.
+
+What actually excludes a degenerate forecast is bias together with Spearman: all-zero
+scores bias -100 and MAPE 100, while a constant non-zero forecast can reach bias 0 but
+scores Spearman 0.
