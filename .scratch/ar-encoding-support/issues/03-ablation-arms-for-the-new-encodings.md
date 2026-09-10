@@ -142,3 +142,62 @@ All three arms build on both panels and complete a full study end to end: datase
 Optuna search, ADR-0008 refit, Monte Carlo rollout with the new AR channels rebuilt each
 step, metrics written. Probes at 2 trials / 10 simulations / 1 replication, so the
 numbers they produced are meaningless and were discarded with the suites.
+
+**2026-09-11 — run complete. All three encodings FAIL. The flags stand.**
+
+Ten rented boxes, 45 shards, 900 studies, $2.88 total. 1088 of 1100 forecasts: one CDNOW
+`ar_ratio` shard finished 8 of 20 before its box was reaped, and the arm fails that panel
+by roughly ten standard errors, so the missing twelve cannot change the verdict.
+
+Against the pre-registered criteria, every new arm fails on both panels, and the reason
+is the same one every time: **the level**.
+
+| panel | arm | mean bias | vs flag | mape | vs flag | rho gap | verdict |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| electronics | `ar_bounded_52` | -8.19 | — | 45.39 | — | — | comparator |
+| | `ar_bounded_32` | +1.16 | — | 46.26 | — | — | comparator |
+| | `ar_log` | +41.52 | worse | 62.98 | +16.7 | **+0.035** | FAIL level, mape, reliability |
+| | `ar_saturating` | -11.58 | worse | **43.30** | **-2.96** | **+0.042** | FAIL level only |
+| | `ar_ratio` | +47.15 | worse | 70.39 | +24.1 | **+0.047** | FAIL level, mape |
+| cdnow | `ar_bounded_16` | -8.51 | — | 22.63 | — | — | comparator |
+| | `ar_log` | +20.52 | worse | 33.29 | +10.7 | -0.002 | FAIL level, mape |
+| | `ar_saturating` | +12.90 | worse | 27.37 | +4.7 | -0.002 | FAIL level, mape |
+| | `ar_ratio` | +24.23 | worse | 34.68 | +12.1 | -0.003 | FAIL level, mape |
+
+**The prediction in the spec was wrong, and wrong in an informative direction.** §3 argued
+that log1p is the coordinate in which Pareto/NBD's log-survival is linear, so a network's
+inevitable linear extrapolation would decay at roughly the right rate instead of
+flattening — and therefore that the level would improve. It did not. `ar_log` over-predicts
+by 41.5% on electronics where `ar_bounded_32` sits at 1.2%.
+
+What the coordinate change actually bought was **discrimination**. All three encodings beat
+both electronics flag arms on Spearman, and `ar_ratio` — the arm with no exposed
+extrapolation at all — has the best ranking of anything measured here, 0.304 against 0.257
+for the best flag arm and 0.041 for no AR features. Resolution past the deepest bin is
+worth something after all; it is just worth it for ordering customers, not for pricing them.
+
+That splits the two halves of the §1 argument. Collapsing the tail non-injectively (the
+flags) protects the level, because every long silence maps onto a value calibration is
+full of and the model answers with a calibration-typical rate, which is close to the
+truth. Shortening the distance outside (log, saturating) keeps the tail distinguishable,
+which helps rank customers and lets the model extrapolate a slope fitted where the hazard
+is higher — so it over-predicts. Support distance was the right diagnostic for the
+mechanism and the wrong predictor of the outcome.
+
+**`ar_saturating` is the one to keep in view.** It fails on mean bias alone (-11.58 against
+-8.19) while beating both flag arms on MAPE (43.30, the best of any arm on electronics),
+carrying the lowest bias SD of the three, and adding 0.042 of Spearman over `ar_bounded_32`.
+On CDNOW it is the least bad of the three and matches the flags on ranking. An arm that
+wins aggregate accuracy and ranking while losing the level by three points is a real
+trade, not a failure of the encoding idea.
+
+**What the extension to 100 replications changed.** Nothing qualitative, which is itself
+worth recording: electronics `ar_bounded_32` moved from +3.51 to +1.16 mean bias and
+`no_ar` Spearman from 0.027 to 0.041, both inside the resolution the 40-replication design
+had. The comparators are now tight enough that the failures above are not sampling noise —
+every one of them is many standard errors wide.
+
+**Open.** Whether a bounded encoding can be made to carry the level as well as the flags
+do. The obvious next arm is the flags *plus* one compressed channel, which would keep the
+non-injective collapse that protects the level and add back the tail resolution that
+`ar_ratio` shows is worth 0.047 of Spearman. Not run.
