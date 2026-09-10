@@ -692,3 +692,78 @@ guessing. A shrinking fleet is the reaper's *success* condition, not a symptom.
 **Fix.** Restart what was killed, and confirm exactly one of each is running — `pkill -f`
 is unreliable here (F13), so kill by PID from `pgrep -af` and re-check. Duplicated
 reapers race on the same instances.
+
+## F26 — Two launchers started the same box, and both trainers wrote the same suites
+
+**Symptom.** A worker's log opened normally and then said:
+
+    [1/6] electronics/no_ar/c: PARTIAL (1/20) — a suite folder cannot be resumed,
+          so this needs deleting before a re-run. Skipping.
+
+on a box that had been training for two minutes. `ps` showed **four** processes where
+there should be two:
+
+    800 bash -c  /venv/main/bin/python scripts/run_ar_encoding_ablation.py --worker 2/10
+    802 /venv/main/bin/python scripts/run_ar_encoding_ablation.py --worker 2/10
+    994 bash -c  /venv/main/bin/python scripts/run_ar_encoding_ablation.py --worker 2/10
+    996 /venv/main/bin/python scripts/run_ar_encoding_ablation.py --worker 2/10
+
+**Cause.** Two launchers were in flight against the same fleet. The first had been
+started, found five of seven boxes unreachable (F27, below) and was still waiting on the
+other two; a second launcher was written to fix that and started before the first had
+exited. Both reached the same box and both ran `start_shard.sh`, whose final step is an
+unconditional `setsid nohup ... &` — it does not ask whether a trainer is already there.
+
+The damage is not the wasted CPU. Both runners walk the *same* worklist slice, so the
+second creates suite roots the first is mid-way through, or skips them as partial and
+races ahead to shards the first has not reached yet, which the first then finds
+occupied. The slice ends up half-done by each with no record of which is which.
+
+**Check.** Count the trainer processes, anchored so the probe does not match itself:
+
+    ps -eo cmd | grep -c '^/[^ ]*python.* scripts/run_'
+
+Two per box (the `bash -c` wrapper and the interpreter) is one runner. Four is two.
+`pgrep -f run_ar_encoding_ablation` also matches the ssh command carrying the probe and
+reported 4 where there was 1 — F13, in a diagnostic rather than in a killer, and just as
+misleading.
+
+**Fix.** Kill both runners, delete the box's `Studies/` tree and `shard.log`, and start
+once. Nothing there is salvageable: a suite root cannot be resumed, so a partially
+written one has to be discarded regardless of which runner wrote it.
+
+Prevention is a marker per box, checked before starting, and exactly one launcher
+running at a time. `pkill -f` cannot be used to enforce this (F7, F13) — find the PIDs
+with `pgrep -af` and kill by number.
+
+## F27 — start_shard on a `loading` box looks exactly like a box with no key
+
+**Symptom.** Seven boxes launched, five returned `rc=2` from `start_shard.sh` within
+ninety seconds:
+
+    FATAL: no ssh after ~90s — the key was almost certainly not injected (F21).
+
+Read literally, five of seven boxes were dead and should be destroyed. They were fine.
+Ten minutes later all five were training.
+
+**Cause.** `start_shard.sh`'s reachability probe exists to catch F21, where a box
+answers `Permission denied (publickey)` forever, and it gives up after six tries so such
+a box does not absorb the full twenty-minute provisioning wait. But it was called while
+the instances were still `loading` — pulling the image, with no sshd yet. A box that is
+not listening and a box that refuses the key are indistinguishable to a probe that only
+asks "did the connection succeed".
+
+They are distinguishable one level up. `Connection refused` is a box still coming up;
+`Permission denied (publickey)` is F21 and terminal.
+
+**Check.** Ask the API for `actual_status` before starting, and if the probe fails, ssh
+by hand and read the actual error:
+
+    vastai show instances --raw | python3 -c "import json,sys; print([(i['id'], i['actual_status']) for i in json.load(sys.stdin)])"
+
+**Fix.** Wait for `actual_status: running` before calling `start_shard.sh`, and retry a
+few times after that — `running` is the container, not sshd, so the probe can still lose
+the race. `VastAI/launch/add_workers.sh` does both. One box in that fleet *was* genuinely
+keyless, answering `Permission denied (publickey)` on both its direct and its proxy
+endpoint after four attempts spanning six minutes; that one was destroyed and replaced,
+which is the right response to F21 and the wrong response to this.
