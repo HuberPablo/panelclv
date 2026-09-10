@@ -67,8 +67,18 @@ WINDOW_CAPPED = ("period_since_first_transaction", "period_since_last_transactio
 RUNNING_COUNTERS = ("cumulative_transactions", "cumulative_count")
 # Bounded and stationary by construction.
 BOUNDED = ("has_transacted_before", "active_in_last_4_periods", "transaction_rate")
+# The support-safe re-encodings under test (`.scratch/ar-encoding-support/spec.md`).
+# Each is a monotone function of one of the two window-capped clocks, so it carries the
+# same information; §4 below measures what it changes.
+RE_ENCODED = (
+    "log_period_since_last_transaction",
+    "log_period_since_first_transaction",
+    "saturating_recency_8_periods",
+    "saturating_tenure_8_periods",
+    "recency_over_tenure",
+)
 
-ALL_FEATURES = WINDOW_CAPPED + RUNNING_COUNTERS + BOUNDED
+ALL_FEATURES = WINDOW_CAPPED + RUNNING_COUNTERS + BOUNDED + RE_ENCODED
 
 
 # --------------------------------------------------------------------------- #
@@ -165,6 +175,23 @@ def _escape_fraction(trajectory: np.ndarray, t_cal: int) -> float:
     """
     calibration, holdout = trajectory[:, :t_cal], trajectory[:, t_cal:]
     return float(((holdout < calibration.min()) | (holdout > calibration.max())).mean())
+
+
+def _z_beyond_ceiling(trajectory: np.ndarray, t_cal: int) -> float:
+    """How far the holdout's peak sits above the calibration ceiling, in z units.
+
+    The escape *fraction* above is invariant to any monotone re-encoding (§4), so it
+    cannot rank two encodings of the same counter. This can. `standardize_covariates`
+    fits mean and standard deviation on calibration, so the model sees each channel in
+    these units, and Theorem 1 of Xu et al. (2021) says a network's prediction drifts
+    linearly with distance from the fitted region -- making that distance the multiplier
+    on the damage rather than the mere fact of being outside.
+    """
+    calibration, holdout = trajectory[:, :t_cal], trajectory[:, t_cal:]
+    sd = calibration.std()
+    if sd == 0:
+        return 0.0
+    return float((holdout.max() - calibration.max()) / sd)
 
 
 # --------------------------------------------------------------------------- #
@@ -406,4 +433,80 @@ def test_ar_feature_names_travel_with_the_dataset(prepared):
     assert not missing, (
         f"every AR feature needs calibration (mean, std) for the rollout to restandardise "
         f"the values it recomputes; missing: {missing}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 4. Ranking the re-encodings: the escape fraction cannot do it, distance can.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "raw,re_encoded",
+    [
+        ("period_since_last_transaction", "log_period_since_last_transaction"),
+        ("period_since_last_transaction", "saturating_recency_8_periods"),
+        ("period_since_first_transaction", "log_period_since_first_transaction"),
+        ("period_since_first_transaction", "saturating_tenure_8_periods"),
+    ],
+)
+def test_escape_fraction_is_invariant_to_a_monotone_re_encoding(
+    raw, re_encoded, trajectories
+):
+    """Compressing a counter does not move a single cell in or out of support.
+
+    This is the correction to the framing in §1: an order-preserving map cannot change
+    which cells fall outside `[min, max]`, so `log1p(recency)` escapes on exactly the
+    same cells as `recency`. Any claim that a transform "fixes the escape" has to mean
+    something else -- either a non-injective map (the `active_in_last_K` flags collapse
+    the whole tail onto a value calibration already contains) or a shorter distance
+    outside (the next test).
+    """
+    t_cal = trajectories["__t_cal__"]
+    assert _escape_fraction(trajectories[raw], t_cal) == pytest.approx(
+        _escape_fraction(trajectories[re_encoded], t_cal)
+    ), f"{re_encoded!r} should escape on exactly the cells {raw!r} does"
+
+
+@pytest.mark.parametrize(
+    "raw,re_encoded",
+    [
+        ("period_since_last_transaction", "log_period_since_last_transaction"),
+        ("period_since_last_transaction", "saturating_recency_8_periods"),
+        ("period_since_first_transaction", "log_period_since_first_transaction"),
+        ("period_since_first_transaction", "saturating_tenure_8_periods"),
+    ],
+)
+def test_re_encoding_shortens_the_distance_outside_the_fitted_range(
+    raw, re_encoded, trajectories
+):
+    """A concave compression leaves the same cells outside, much closer to the edge.
+
+    Measured on the real panels the gap is large: electronics recency sits 1.90 z past
+    its calibration ceiling raw and 0.36 z past it under log1p, and CDNOW moves from
+    3.92 z to 0.71 z. That is the quantity a bounded encoding drives to zero and a
+    compressed one merely shrinks -- which is the trade this family exists to offer,
+    since compression keeps the resolution the flags discard.
+    """
+    t_cal = trajectories["__t_cal__"]
+    raw_z = _z_beyond_ceiling(trajectories[raw], t_cal)
+    re_z = _z_beyond_ceiling(trajectories[re_encoded], t_cal)
+    assert re_z < raw_z, (
+        f"{re_encoded!r} sits {re_z:.2f} z past its calibration ceiling against "
+        f"{raw_z:.2f} z for {raw!r}; it was expected to be closer"
+    )
+
+
+def test_recency_over_tenure_cannot_leave_the_calibration_range(trajectories):
+    """The one recency encoding with no exposed extrapolation at all.
+
+    Both terms of `(T - t_x) / T` advance through the holdout, so the ratio stays in
+    the region calibration already covered rather than marching off the end of it. It
+    is the Box-Jenkins move -- difference or divide until the input's distribution is
+    the same in-sample and out -- applied to a customer clock.
+    """
+    t_cal = trajectories["__t_cal__"]
+    escaped = _escape_fraction(trajectories["recency_over_tenure"], t_cal)
+    assert escaped == 0.0, (
+        f"recency_over_tenure should never leave its calibration range, got {escaped:.1%}"
     )

@@ -237,6 +237,14 @@ and the exposed features are pure functions of it:
 | `cumulative_count` | `cum_cnt` | total count (≥ `cum_txn`; differs when a period holds several transactions) |
 | `period_since_first_transaction` | `tenure` | observation age **T** |
 | `transaction_rate` | `cum_txn / max(tenure, 1)` | empirical Poisson rate **λ** |
+| `log_period_since_last_transaction` | `log(1 + since)` | the coordinate the Lomax log-survival is linear in |
+| `log_period_since_first_transaction` | `log(1 + tenure)` | the same compression applied to **T** |
+| `saturating_recency_<C>_periods` | `since / (since + C)` | bounded recency, `1/2` at a gap of `C`, `C ≥ 1` |
+| `saturating_tenure_<C>_periods` | `tenure / (tenure + C)` | bounded observation age |
+| `recency_over_tenure` | `(T − t_x) / T`, `0` before the first purchase | the share of an observed life spent silent |
+
+The last five re-encode the two window-capped clocks; "Which ones to prefer" below
+measures what that buys and `.scratch/ar-encoding-support/spec.md` derives them.
 
 Notes on the conventions, which matter for reproducibility:
 
@@ -254,15 +262,34 @@ Notes on the conventions, which matter for reproducibility:
 **Which ones to prefer.** Measured on the electronics panel (104 calibration periods, 52
 holdout periods), as the share of holdout cells whose value falls outside the `[min, max]`
 the channel took anywhere in calibration — the region where the shared covariate
-projection extrapolates rather than interpolates:
+projection extrapolates rather than interpolates. `z` is how far the worst holdout cell
+sits past the calibration ceiling in calibration standard deviations, which is the unit
+the model reads after standardisation:
 
-| feature | escapes calibration range | why |
-| --- | ---: | --- |
-| `period_since_first_transaction` | **88.8%** | capped by the window length while fitted, then keeps counting |
-| `period_since_last_transaction` | **37.7%** | same cap; only customers quiet longer than anyone was in calibration escape |
-| `cumulative_transactions` | 0.04% | unbounded in principle, but the heaviest calibration buyer sets a high maximum |
-| `cumulative_count` | 0.04% | as above |
-| `transaction_rate`, `has_transacted_before`, `active_in_last_<K>_periods` | **0%** | bounded and stationary by construction |
+| feature | escapes calibration range | z past the ceiling | why |
+| --- | ---: | ---: | --- |
+| `period_since_first_transaction` | **88.8%** | 1.74 | capped by the window length while fitted, then keeps counting |
+| `period_since_last_transaction` | **37.7%** | 1.90 | same cap; only customers quiet longer than anyone was in calibration escape |
+| `cumulative_transactions` | 0.04% | 0.64 | unbounded in principle, but the heaviest calibration buyer sets a high maximum |
+| `cumulative_count` | 0.04% | 0.64 | as above |
+| `transaction_rate`, `has_transacted_before`, `active_in_last_<K>_periods` | **0%** | — | bounded and stationary by construction |
+
+`scripts/measure_ar_support.py` regenerates this for either panel, and the two columns
+have to be read together. **On CDNOW `cumulative_transactions` escapes on only 0.176% of
+cells but by 9.19 z at the worst cell and 3.87 z on average** — further outside than
+either window-capped clock. A channel can escape rarely and catastrophically, so "in
+range in practice" is a claim about the count and not about the distance.
+
+**The escape fraction cannot rank two encodings of one feature.** It is invariant to
+every order-preserving transform, so `log(1 + recency)` escapes on exactly the cells
+`recency` does, to the last cell. That leaves two ways an encoding can actually help, and
+naming them is what makes the next paragraph's fix legible: collapse the tail
+**non-injectively** onto a value calibration already contains, which is what the nested
+`active_in_last_<K>` flags do and why they discard resolution; or **shorten the distance**
+travelled outside, which a concave compression does while keeping it. The family built on
+that second route is specified in `.scratch/ar-encoding-support/spec.md`, with the
+Pareto/NBD derivation that picks out `log(1 + gap)` as the coordinate in which the true
+response is a straight line.
 
 The two families that matter are therefore **not** the bounded and the unbounded ones. The
 hazard is being **capped by the calibration window length**: `period_since_first_transaction`
@@ -343,7 +370,9 @@ but out of the range the weights were trained on all the same. What standardisat
 neutralise is *scale*: an unbounded channel no longer dominates the shared covariate
 projection merely for being measured in larger units. So the case for preferring a
 bounded feature is extrapolation alone, which is a judgement about the length of your
-holdout rather than about the architecture.
+holdout rather than about the architecture. It does, however, set the *units* that
+judgement is made in, which is why the distance column above is measured in calibration
+standard deviations rather than in periods.
 
 **Where else this failure is known.** Nothing above is specific to customer-base analysis.
 The general statement is that a fitted model holds no evidence about a region its inputs
@@ -737,9 +766,11 @@ drift.
   and keep counting through the holdout, so they leave their fitted range (§4: 88.8% and
   37.7% of holdout cells on electronics). `cumulative_*` is unbounded in principle but
   stays in range in practice (0.04%). The measured replacement is a set of nested
-  `active_in_last_<K>_periods` flags; `transaction_rate` is the bounded stand-in for the
+  `active_in_last_<K>_periods` flags, or one of the compressed encodings added alongside
+  them (`log_period_since_*`, `saturating_*`, `recency_over_tenure`), which keep the
+  resolution the flags discard; `transaction_rate` is the bounded stand-in for the
   frequency counters. §4 places this against the wider literature on extrapolating outside
-  the training support.
+  the training support, and `scripts/measure_ar_support.py` measures it for a new panel.
 - **Uniform panels only.** Every customer must have an identical number of periods in
   each window; ragged panels must be padded upstream (`notebooks/archive/dataset_building.ipynb`).
 - **Static covariates must already be broadcast** to every row of a customer and must be

@@ -35,6 +35,29 @@ Supported names:
                                     Pareto/NBD shrinks toward); bounded and
                                     stationary where the two counters are not.
 
+The two clocks above -- recency and tenure -- cannot exceed the calibration window
+length while being fitted, because there are only that many periods to count, and
+they keep counting through the holdout. The four names below carry the same
+information in coordinates where that costs less; the measurements are in
+`.scratch/ar-encoding-support/spec.md`.
+
+    log_period_since_last_transaction   log(1 + recency). Pareto/NBD's lifetime is
+                                    gamma-mixed exponential, so survival is Lomax
+                                    and log S(t) = -s*log(1 + t/beta) is LINEAR in
+                                    this coordinate; a model's linear behaviour
+                                    outside its fitted range then points the right
+                                    way instead of the wrong one.
+    log_period_since_first_transaction  log(1 + tenure). Same compression applied to
+                                    the observation age T.
+    saturating_recency_<C>_periods  recency / (recency + C), bounded in [0, 1) and
+                                    equal to 1/2 at a gap of C periods. C >= 1.
+    saturating_tenure_<C>_periods   tenure / (tenure + C). Same, for the age.
+    recency_over_tenure             (T - t_x) / T, the share of a customer's
+                                    observed life spent silent. Both terms advance
+                                    through the holdout, so this is the one recency
+                                    encoding that cannot leave its calibration
+                                    range at all. 0 before the first transaction.
+
 All features derive from a small per-customer running state:
     since     periods since the last transaction (0 this period)
     ever      whether any transaction has occurred yet
@@ -49,6 +72,11 @@ so:
     cumulative_count               = cum_cnt
     period_since_first_transaction = tenure
     transaction_rate               = cum_txn / max(tenure, 1)
+    log_period_since_last_transaction  = log1p(since)
+    log_period_since_first_transaction = log1p(tenure)
+    saturating_recency_C_periods   = since / (since + C)
+    saturating_tenure_C_periods    = tenure / (tenure + C)
+    recency_over_tenure            = since / max(tenure, 1) if ever else 0
 
 Counts are treated as non-negative integers (the multinomial class indices), so
 the cumulative state is integer-valued and the two compute paths agree exactly.
@@ -126,6 +154,34 @@ def _render(name: str, states: dict[str, np.ndarray]) -> np.ndarray:
         return states["cum_cnt"].astype(np.float32)
     if kind == "tenure":
         return states["tenure"].astype(np.float32)
+    # The compressed re-encodings of the two window-capped clocks. Each is a
+    # monotone function of the same counter, so it carries identical information;
+    # what changes is how far past the calibration ceiling the holdout lands, which
+    # is what the covariate projection extrapolates over. See
+    # `.scratch/ar-encoding-support/spec.md` for the measurements.
+    if kind == "log_recency":
+        # log1p, because Pareto/NBD's gamma-mixed exponential lifetime gives a Lomax
+        # survival: log S(t) = -s * log(1 + t/beta) is LINEAR in log(1 + gap), so a
+        # network's linear out-of-range behaviour points the right way here.
+        return np.log1p(states["since"]).astype(np.float32)
+    if kind == "log_tenure":
+        return np.log1p(states["tenure"]).astype(np.float32)
+    if kind == "sat_recency":
+        # gap / (gap + C): bounded in [0, 1), reaching 1/2 at a gap of C periods.
+        # Its derivative falls as 1/gap^2, so the holdout tail is nearly flat.
+        return (states["since"] / (states["since"] + k)).astype(np.float32)
+    if kind == "sat_tenure":
+        return (states["tenure"] / (states["tenure"] + k)).astype(np.float32)
+    if kind == "recency_ratio":
+        # (T - t_x) / T: the share of a customer's observed life spent silent.
+        # Numerator and denominator both advance through the holdout, so the ratio
+        # stays inside the range calibration already covered -- unlike either clock
+        # on its own. Gated to 0 before the first transaction, where tenure is 0 and
+        # `since` counts up from the start of the series, which would otherwise make
+        # the ratio unbounded. That gate collides with "transacted this period", so
+        # pair this with `has_transacted_before` when the distinction matters.
+        ratio = states["since"] / np.maximum(states["tenure"], 1)
+        return np.where(states["ever"] == 1, ratio, 0.0).astype(np.float32)
     # rate: per-period purchase intensity; max(tenure, 1) guards the first
     # period (tenure == 0) from a zero divide without distorting later steps.
     denom = np.maximum(states["tenure"], 1)

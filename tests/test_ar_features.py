@@ -32,11 +32,24 @@ NEW_FEATURES = [
     "period_since_first_transaction",
     "transaction_rate",
 ]
+# The support-safe re-encodings (`.scratch/ar-encoding-support/spec.md`): the same
+# information as the two window-capped clocks, in coordinates the holdout leaves by
+# less or not at all. Kept out of NEW_FEATURES because they are not all 0 for a
+# never-transacting customer -- `since` counts up from the start of the series, so
+# its log and its saturating form count up with it.
+SUPPORT_SAFE = [
+    "log_period_since_last_transaction",
+    "log_period_since_first_transaction",
+    "saturating_recency_8_periods",
+    "saturating_tenure_8_periods",
+    "recency_over_tenure",
+]
 ALL_FEATURES = [
     "period_since_last_transaction",
     "has_transacted_before",
     "active_in_last_3_periods",
     *NEW_FEATURES,
+    *SUPPORT_SAFE,
 ]
 
 
@@ -102,10 +115,35 @@ def test_count_greater_than_one_separates_txn_count_from_event_count():
         ("cumulative_count", "cum_cnt"),
         ("period_since_first_transaction", "tenure"),
         ("transaction_rate", "rate"),
+        ("log_period_since_last_transaction", "log_recency"),
+        ("log_period_since_first_transaction", "log_tenure"),
+        ("recency_over_tenure", "recency_ratio"),
     ],
 )
 def test_parse_new_features(name, kind):
     assert parse_ar_feature(name) == (kind, None)
+
+
+@pytest.mark.parametrize(
+    "name,kind,window",
+    [
+        ("active_in_last_4_periods", "active", 4),
+        ("saturating_recency_8_periods", "sat_recency", 8),
+        ("saturating_tenure_26_periods", "sat_tenure", 26),
+    ],
+)
+def test_parse_windowed_families(name, kind, window):
+    assert parse_ar_feature(name) == (kind, window)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["saturating_recency_0_periods", "saturating_tenure_0_periods"],
+)
+def test_saturating_window_must_be_positive(name):
+    """C = 0 would divide by the gap itself and return a constant 1."""
+    with pytest.raises(ValueError):
+        parse_ar_feature(name)
 
 
 def test_validate_accepts_the_full_feature_set():
@@ -168,3 +206,91 @@ def test_rollout_handles_first_transaction_inside_the_holdout():
         step = state.update(full[:, t_cal + h])
         for name in NEW_FEATURES:
             np.testing.assert_allclose(step[name], full_cols[name][:, t_cal + h], rtol=1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# 4. The support-safe re-encodings.
+#
+# Each is a *monotone* function of a counter that already exists, so it carries
+# the same information; what it changes is how far past the calibration ceiling
+# the holdout lands. `tests/test_ar_feature_support.py` measures that distance on
+# real panels. Here we only pin the arithmetic and the invariants a rollout needs.
+# --------------------------------------------------------------------------- #
+# TINY is one customer with counts 0 2 0 0 1 0, so:
+#   since  (periods since last txn):   1   0   1   2   0   1
+#   tenure (periods since first txn):  0   0   1   2   3   4
+TINY_SINCE = np.array([[1, 0, 1, 2, 0, 1]], dtype=np.float64)
+TINY_TENURE = np.array([[0, 0, 1, 2, 3, 4]], dtype=np.float64)
+
+
+def test_log_recency_is_log1p_of_the_counter():
+    out = compute_ar_feature_columns(TINY, ["log_period_since_last_transaction"])
+    np.testing.assert_allclose(
+        out["log_period_since_last_transaction"], np.log1p(TINY_SINCE), rtol=1e-6
+    )
+
+
+def test_log_tenure_is_log1p_of_the_counter():
+    out = compute_ar_feature_columns(TINY, ["log_period_since_first_transaction"])
+    np.testing.assert_allclose(
+        out["log_period_since_first_transaction"], np.log1p(TINY_TENURE), rtol=1e-6
+    )
+
+
+def test_saturating_recency_is_half_at_a_gap_of_c():
+    """gap / (gap + C) reaches exactly 1/2 when the gap equals C -- the point of C."""
+    gaps = np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=np.int64)  # 8 silent periods
+    out = compute_ar_feature_columns(gaps, ["saturating_recency_4_periods"])
+    # A customer that never transacts has since = t + 1, so period index 3 has gap 4.
+    assert out["saturating_recency_4_periods"][0, 3] == pytest.approx(0.5)
+
+
+def test_saturating_forms_match_their_closed_form():
+    out = compute_ar_feature_columns(
+        TINY, ["saturating_recency_8_periods", "saturating_tenure_8_periods"]
+    )
+    np.testing.assert_allclose(
+        out["saturating_recency_8_periods"], TINY_SINCE / (TINY_SINCE + 8), rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        out["saturating_tenure_8_periods"], TINY_TENURE / (TINY_TENURE + 8), rtol=1e-6
+    )
+
+
+def test_recency_over_tenure_is_one_for_a_single_purchase_then_silence():
+    """The Pareto/NBD "bought once and vanished" state maps to exactly 1.
+
+    A customer with one transaction has since == tenure at every later period, so
+    the ratio pins at 1 however long the silence runs -- which is why this channel
+    cannot leave its calibration range no matter how long the holdout is.
+    """
+    once = np.array([[0, 1, 0, 0, 0, 0, 0, 0]], dtype=np.int64)
+    out = compute_ar_feature_columns(once, ["recency_over_tenure"])["recency_over_tenure"]
+    np.testing.assert_array_equal(out[0, 2:], np.ones(6, dtype=np.float32))
+
+
+def test_recency_over_tenure_is_gated_before_the_first_transaction():
+    """Before any purchase tenure is 0 while `since` counts up, so the raw ratio
+    would be unbounded. It is gated to 0 instead -- the value it also takes in a
+    transacting period, which is why `has_transacted_before` belongs alongside it."""
+    late = np.array([[0, 0, 0, 0, 3, 0]], dtype=np.int64)
+    out = compute_ar_feature_columns(late, ["recency_over_tenure"])["recency_over_tenure"]
+    np.testing.assert_array_equal(out[0, :5], np.zeros(5, dtype=np.float32))
+
+
+@pytest.mark.parametrize("seed", [0, 3, 11])
+def test_bounded_encodings_stay_in_the_unit_interval(seed):
+    """The three bounded channels never leave [0, 1] on any history.
+
+    This is the property the whole re-encoding exists for: a value outside the
+    range seen in calibration is one the covariate projection extrapolates over,
+    and a channel confined to [0, 1] whose endpoints both occur in calibration has
+    nowhere outside to go.
+    """
+    rng = np.random.default_rng(seed)
+    full = rng.integers(0, 4, size=(20, 60)).astype(np.int64)
+    full[full == 1] = 0
+    bounded = ["saturating_recency_8_periods", "saturating_tenure_8_periods",
+               "recency_over_tenure"]
+    for name, col in compute_ar_feature_columns(full, bounded).items():
+        assert col.min() >= 0.0 and col.max() <= 1.0, name

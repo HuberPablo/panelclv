@@ -141,6 +141,17 @@ PANEL_DEPTHS: dict[str, tuple[int, int]] = {
     "cdnow":       (16, 32),
 }
 
+# The half-saturation constant C of the `saturating_*` family: the feature equals 1/2 at
+# a gap of C periods. Unlike a bin edge it cannot go degenerate -- the channel keeps
+# resolving gaps above C, just more slowly -- so it is chosen for where the resolution
+# should sit rather than against `check_arm_depth`. Roughly a quarter of the calibration
+# window on each panel, which puts the steep part of the curve over the silences that
+# actually occur while fitting.
+PANEL_SATURATION: dict[str, int] = {
+    "electronics": 26,
+    "cdnow":       10,
+}
+
 
 def arms_for(panel: str) -> dict[str, tuple[str, ...]]:
     """`{arm name: ar_features}` for one panel. Only this mapping differs between arms.
@@ -148,13 +159,51 @@ def arms_for(panel: str) -> dict[str, tuple[str, ...]]:
     Tenure and `cumulative_transactions` are dropped from the bounded arms rather than
     left searchable: the Optuna objective is teacher-forced validation loss, which is
     blind to the rollout drift, which is why the search selected them in the first place.
+
+    The three arms after the flags test the alternative route documented in
+    `.scratch/ar-encoding-support/spec.md`. The flags fix the level by collapsing every
+    gap past the deepest bin onto one value, which necessarily discards the distinctions
+    above it; these keep the resolution and instead shorten the distance the holdout
+    travels outside the fitted range.
+
+        ar_log         the coordinate change ALONE, feature set held identical to
+                       `ar_unbounded`, so the comparison isolates log1p. Pareto/NBD's
+                       gamma-mixed exponential lifetime gives a Lomax survival, so
+                       log S(t) = -s*log(1 + t/beta) is linear in log(1 + gap) -- the
+                       coordinate in which a network's linear out-of-range behaviour is
+                       the correct behaviour (Xu et al. 2021, Hypothesis 1).
+        ar_saturating  the same two clocks bounded in [0, 1) instead of compressed,
+                       with `transaction_rate` for the frequency. Measured furthest
+                       inside the fitted range of anything that is not exactly bounded.
+        ar_ratio       the bounded Pareto/NBD triple: `recency_over_tenure` for t_x/T,
+                       `transaction_rate` for x/T, and a saturating age for T. The first
+                       two escape on zero cells because numerator and denominator both
+                       advance through the holdout. `has_transacted_before` disambiguates
+                       the ratio's gate at 0.
     """
     shallow, deep = PANEL_DEPTHS[panel]
+    c = PANEL_SATURATION[panel]
     return {
         "no_ar": (),
         "ar_unbounded": UNBOUNDED,
         f"ar_bounded_{shallow}": bounded_flags(shallow),
         f"ar_bounded_{deep}": bounded_flags(deep),
+        "ar_log": (
+            "log_period_since_last_transaction",
+            "cumulative_transactions",
+            "log_period_since_first_transaction",
+        ),
+        "ar_saturating": (
+            f"saturating_recency_{c}_periods",
+            "transaction_rate",
+            f"saturating_tenure_{c}_periods",
+        ),
+        "ar_ratio": (
+            "recency_over_tenure",
+            "transaction_rate",
+            f"saturating_tenure_{c}_periods",
+            "has_transacted_before",
+        ),
     }
 
 
