@@ -32,13 +32,18 @@ SSH_E="ssh -i $KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HO
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
 while true; do
-  mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python -c "
+  # F22: an instance gets EITHER a direct ip=/port= or an sshN.vast.ai proxy endpoint.
+  # Emitting the direct form alone made every proxy-only box invisible here, so it was
+  # never pulled from and never destroyed — it just billed. Prefer direct, fall back to
+  # the proxy.
+  mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin)
 except Exception: raise SystemExit
 for i in d:
     ip=(i.get('public_ipaddr') or '').strip(); p=(i.get('ports') or {}).get('22/tcp') or []
-    print(i['id'], ip or '-', (p[0].get('HostPort') if p else '-'), i.get('actual_status') or '?')
+    host, port = (ip, p[0].get('HostPort')) if (ip and p) else (i.get('ssh_host'), i.get('ssh_port'))
+    print(i['id'], host or '-', port or '-', i.get('actual_status') or '?')
 ")
   if [ "${#rows[@]}" -eq 0 ]; then
     log "no instances left — nothing to reap"
@@ -62,7 +67,7 @@ for i in d:
     # shell matches its own command line (F13).
     state=$("${SSH[@]}" -p "$port" "root@$ip" '
       if [ -f /root/.shard_exit ]; then echo "exit=$(cat /root/.shard_exit)";
-      elif pgrep -f "[r]un_(pnbd_grid|real_panel_arms)" >/dev/null 2>&1; then echo running;
+      elif pgrep -f "[r]un_(pnbd_grid|real_panel_arms|ar_encoding_ablation)" >/dev/null 2>&1; then echo running;
       else echo none; fi' 2>/dev/null | tail -1)
     case "$state" in
       running|none|"") continue ;;
