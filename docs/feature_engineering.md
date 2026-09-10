@@ -345,6 +345,66 @@ projection merely for being measured in larger units. So the case for preferring
 bounded feature is extrapolation alone, which is a judgement about the length of your
 holdout rather than about the architecture.
 
+**Where else this failure is known.** Nothing above is specific to customer-base analysis.
+The general statement is that a fitted model holds no evidence about a region its inputs
+never covered during training, and a window-capped counter guarantees the holdout lands in
+exactly that region. It is worth separating from *covariate shift* in the usual sense
+(Shimodaira, 2000, *Journal of Statistical Planning and Inference* 90(2), 227–244,
+[doi:10.1016/S0378-3758(00)00115-4](https://doi.org/10.1016/S0378-3758(00)00115-4)), where
+the input distribution moves but the two supports still overlap, so reweighting the
+training likelihood can repair the fit. Here the supports are nearly disjoint — 88.8% of
+tenure cells sit above *every* calibration value — and there is nothing to reweight.
+
+What a model does in that region depends on the architecture, and neither answer is good:
+
+- **Neural.** Xu, Zhang, Li, Du, Kawarabayashi & Jegelka (2021), ["How Neural Networks
+  Extrapolate: From Feedforward to Graph Neural Networks"](https://arxiv.org/abs/2009.11848),
+  ICLR 2021, prove that "ReLU MLPs quickly converge to linear functions along any direction
+  from the origin". A network therefore does not go quiet past its training range; it
+  continues along whatever slope the sparse tail of the training data implied, and does so
+  confidently. That is the measured failure above: under teacher forcing the predicted rate
+  stops decaying with silence and settles near five times the true long-silence rate. The
+  theorem is stated for ReLU MLPs; the models here are not MLPs, but a numeric channel
+  reaches the stack through a *linear* map either way — the shared `covariate_proj` of
+  `ProjectedEmbedder`, or the model's own `input_projection` where `ValendinEmbedder`
+  concatenates the raw value — so the first thing done to an out-of-range value is to
+  multiply it by a fitted weight.
+- **Trees.** A regression tree is piecewise constant: beyond the outermost split its
+  prediction is the mean of that terminal region, by construction (Hastie, Tibshirani &
+  Friedman, *The Elements of Statistical Learning*, 2nd ed., 2009, §9.2). It cannot
+  extrapolate a trend at all. This is why the standing applied-forecasting advice is never
+  to hand a raw time index to a gradient-boosted model.
+
+**The remedy is old.** Differencing a series to stationarity before fitting is this same
+correction, and it is the first step of the Box–Jenkins procedure (Box & Jenkins, 1970,
+*Time Series Analysis: Forecasting and Control*, Holden-Day): make the input's distribution
+the same in-sample and out-of-sample, then fit. Replacing a level with a rate
+(`transaction_rate`) or with a bounded step encoding (nested `active_in_last_<K>_periods`)
+is the same move in a different coordinate. The preprocessing guidelines in Hewamalage,
+Bergmeir & Bandara (2021), ["Recurrent Neural Networks for Time Series Forecasting: Current
+status and future directions"](https://arxiv.org/abs/1909.00590), *IJF* 37(1), 388–427, are
+the modern restatement for RNN forecasters.
+
+In production ML the symptom is catalogued as **training–serving skew** (Zinkevich, ["Rules
+of Machine Learning"](https://developers.google.com/machine-learning/guides/rules-of-ml),
+rule 29 onward), and the standard defence is precisely the escape-fraction table above:
+record the range each feature took in training, then check the served values against it.
+Breck, Polyzotis, Whang, Roy & Zinkevich (2019), ["Data Validation for Machine
+Learning"](https://mlsys.org/Conferences/2019/doc/2019/167.pdf), MLSys, describe the
+schema-based form of that check as shipped in TensorFlow Data Validation. Reading the
+escape fractions before choosing `ar_features` is the same discipline applied at design
+time rather than in monitoring.
+
+**The contrast with this package's own benchmark is the sharpest argument for the bounded
+encoding.** Pareto/NBD conditions on the *same three quantities* — recency `t_x`, frequency
+`x` and observation age `T` (Schmittlein, Morrison & Colombo, 1987, *Management Science*
+33(1), 1–24, [doi:10.1287/mnsc.33.1.1](https://doi.org/10.1287/mnsc.33.1.1)) — and suffers
+none of this. Its likelihood encodes the decay analytically, so an age beyond anything
+observed is evaluated by the formula rather than inferred from neighbouring examples. A
+classifier has to learn that shape from cells, and past the calibration window there are
+none to learn it from. The quantities are not the problem; unbounded *encodings* of them
+are.
+
 **Adding a new AR feature.** Extend the running state in `_base_states` (the vectorised
 `(N, T)` precompute), mirror the increment in `ARFeatureState.update` (the per-step
 rollout), add a branch in `_render` and a name in `parse_ar_feature`. The three must stay
@@ -678,7 +738,8 @@ drift.
   37.7% of holdout cells on electronics). `cumulative_*` is unbounded in principle but
   stays in range in practice (0.04%). The measured replacement is a set of nested
   `active_in_last_<K>_periods` flags; `transaction_rate` is the bounded stand-in for the
-  frequency counters.
+  frequency counters. §4 places this against the wider literature on extrapolating outside
+  the training support.
 - **Uniform panels only.** Every customer must have an identical number of periods in
   each window; ragged panels must be padded upstream (`notebooks/archive/dataset_building.ipynb`).
 - **Static covariates must already be broadcast** to every row of a customer and must be
