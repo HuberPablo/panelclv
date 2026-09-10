@@ -17,19 +17,28 @@
 # suite directories that are already complete).
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
-export PATH="$HOME/venvs/panelclv/bin:$PATH"
+# Both orchestrators this has run from keep their venv in a different place.
+export PATH="$HOME/venvs/panelclv/bin:$HOME/thesis-agent/venv/bin:$PATH"
 INTERVAL="${1:-1200}"
 KEY="$HOME/.ssh/id_ed25519"
 SSH_OPTS="ssh -i $KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts_vast -o BatchMode=yes -o ConnectTimeout=15"
 
 while true; do
-  mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python -c "
+  # F22: vast returns EITHER a direct ip=/port= or an sshN.vast.ai proxy endpoint, and
+  # which one an instance gets is not predictable — in one eight-box fleet six had a
+  # direct endpoint and two had only the proxy. This used to emit the direct form alone,
+  # so those two were skipped every cycle, silently, and their results were never pulled.
+  # Prefer direct (no proxy hop) and fall back to the proxy rather than dropping the box.
+  mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin)
 except Exception: raise SystemExit
 for i in d:
     ip=(i.get('public_ipaddr') or '').strip(); p=(i.get('ports') or {}).get('22/tcp') or []
-    if ip and p: print(i['id'], ip, p[0].get('HostPort'))
+    if ip and p and p[0].get('HostPort'):
+        print(i['id'], ip, p[0]['HostPort'])
+    elif i.get('ssh_host') and i.get('ssh_port'):
+        print(i['id'], i['ssh_host'], i['ssh_port'])
 ")
   before=$(find Studies -name results.csv 2>/dev/null | wc -l)
   for row in "${rows[@]:-}"; do

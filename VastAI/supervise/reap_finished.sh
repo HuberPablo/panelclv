@@ -16,7 +16,8 @@
 # Read-only until the gate passes. Boxes that are still training are left alone.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
-export PATH="$HOME/venvs/panelclv/bin:$PATH"
+# Both orchestrators this has run from keep their venv in a different place.
+export PATH="$HOME/venvs/panelclv/bin:$HOME/thesis-agent/venv/bin:$PATH"
 INTERVAL="${1:-300}"
 GRID="${2:-seasonal_4x4x10}"   # which grid to reconcile against once the fleet empties
 # The completeness gate. reconcile_grid.py expands a GridSpec, so a real-panel
