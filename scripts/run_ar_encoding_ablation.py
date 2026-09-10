@@ -222,6 +222,62 @@ def arms_for(panel: str) -> dict[str, tuple[str, ...]]:
 # 100 replications keeps its existing rows rather than starting over.
 SHARDS: dict[str, int] = {"a": 42, "b": 62, "c": 82, "d": 102, "e": 122}
 
+# Which arms this run takes to the full 100 replications, per panel. Declared here
+# rather than derived from `arms_for`, because "every arm" is the wrong answer and the
+# difference is a design decision:
+#
+#   * The three new encodings are the question being asked.
+#   * `no_ar` and the flag arms are the comparators the acceptance criteria in
+#     `.scratch/ar-encoding-support/issues/03-...md` name. The comparator carries half
+#     the variance of a difference, so leaving one at 40 while the new arms run 100
+#     costs ~25% of the resolution.
+#   * Electronics carries BOTH flag arms because they split the verdict: `ar_bounded_52`
+#     wins the level (|bias| 14.3 against 22.5) and `ar_bounded_32` wins discrimination
+#     (rho 0.267 against 0.202). Two criteria, two comparators, both need the resolution.
+#   * `ar_unbounded` deliberately stays at its archived 40. Its effect is enormous
+#     (+235% and +335% against baselines near zero) and resolved at about 3
+#     replications; it is a demonstration, not a comparator, and 60 more of it would
+#     buy nothing.
+FULL_N_ARMS: dict[str, tuple[str, ...]] = {
+    "electronics": ("no_ar", "ar_bounded_32", "ar_bounded_52",
+                    "ar_log", "ar_saturating", "ar_ratio"),
+    "cdnow":       ("no_ar", "ar_bounded_16",
+                    "ar_log", "ar_saturating", "ar_ratio"),
+}
+
+
+def work_items(only_missing: bool = False) -> list[tuple[str, str, str]]:
+    """Every (panel, arm, shard) this run owes, newest-first is not meaningful here.
+
+    One item is one worker-job: `--panel P --arm A --shard S`, `N_STUDIES` replications.
+    With `only_missing`, drops the shards already complete on this machine, so a resumed
+    run rents for the work left rather than the work declared. That is the same property
+    Rules.md §5 requires of a grid shard — re-running a finished one is a no-op — moved
+    up to the level that decides how many boxes to rent.
+    """
+    items: list[tuple[str, str, str]] = []
+    for panel, arms in FULL_N_ARMS.items():
+        for arm in arms:
+            if arm not in arms_for(panel):
+                raise ValueError(f"{arm!r} is declared for {panel!r} but not in arms_for")
+            for shard in SHARDS:
+                if only_missing and _forecasts_on_disk(panel, arm, shard) >= N_STUDIES:
+                    continue
+                items.append((panel, arm, shard))
+    return items
+
+
+def _forecasts_on_disk(panel: str, arm: str, shard: str) -> int:
+    """Replications finished for one shard, counted from the forecasts themselves.
+
+    Not from `results.csv`: `run_study_suite` writes each forecast inside its loop and
+    `results.csv` only after the last one, so a shard cut short by its watchdog leaves
+    finished replications that `results.csv` does not describe (F19, and the same reason
+    `score_suite` reads predictions).
+    """
+    predictions = STUDIES_BASE / suite_name(panel, arm, shard) / "LSTM" / "Predictions"
+    return len(list(predictions.glob("Prediction_*.csv"))) if predictions.is_dir() else 0
+
 
 def electronics_config(ar_features: tuple[str, ...]) -> PanelConfig:
     """The electronics panel as the ARCHIVED suites read it, with `ar_features` varying.
@@ -391,6 +447,43 @@ def score_suite(root: Path, data: dict, base_seed: int) -> list[dict[str, object
     return rows
 
 
+def check_complete(worklist: bool = False) -> int:
+    """Report every declared shard that is missing or short. Non-zero if any are.
+
+    F19: a shard can exit 0 with suites untrained, and F9: a crashed shard can report
+    itself finished. Neither is visible from the worker's exit status, so completeness is
+    established by counting forecasts on disk here, against `FULL_N_ARMS` x `SHARDS`.
+
+    `worklist` prints the outstanding items one per line as `panel arm shard`, which is
+    what the launcher consumes — so the fleet is sized from the same declaration the
+    completeness gate checks, and the two cannot disagree.
+    """
+    outstanding = work_items(only_missing=True)
+    if worklist:
+        for panel, arm, shard in outstanding:
+            print(f"{panel} {arm} {shard}")
+        return 0
+
+    print(f"expecting {N_STUDIES} forecasts per shard, {len(SHARDS)} shards per declared "
+          f"arm ({N_STUDIES * len(SHARDS)} replications)\n")
+    total = 0
+    for panel, arms in FULL_N_ARMS.items():
+        for arm in arms:
+            counts = [_forecasts_on_disk(panel, arm, shard) for shard in SHARDS]
+            total += sum(counts)
+            flag = "" if sum(counts) >= N_STUDIES * len(SHARDS) else "  <- outstanding"
+            print(f"  {panel:12s} {arm:14s} " +
+                  " ".join(f"{s}={c:2d}" for s, c in zip(SHARDS, counts)) +
+                  f"   {sum(counts):3d}/{N_STUDIES * len(SHARDS)}{flag}")
+    declared = len(work_items()) * N_STUDIES
+    print(f"\n{total}/{declared} forecasts on disk, "
+          f"{len(outstanding)} shard(s) outstanding")
+    if outstanding:
+        return 1
+    print("complete")
+    return 0
+
+
 def report(panel: str, suffix: str | None = None) -> None:
     """Pool every arm's shards and print bias and discrimination side by side.
 
@@ -515,7 +608,19 @@ def main() -> None:
         "--report", action="store_true",
         help="pool every finished suite for this panel and print the comparison",
     )
+    parser.add_argument(
+        "--worklist", action="store_true",
+        help="print the outstanding shards as `panel arm shard` lines, for the launcher",
+    )
+    parser.add_argument(
+        "--check-complete", action="store_true",
+        help="list every (panel, arm, shard) whose forecasts are missing or short, and "
+             "exit non-zero if any are — the gate a reaper runs before calling a run done",
+    )
     args = parser.parse_args()
+
+    if args.check_complete or args.worklist:
+        raise SystemExit(check_complete(worklist=args.worklist))
 
     if args.report:
         report(args.panel, args.suite_suffix)
