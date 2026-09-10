@@ -589,6 +589,104 @@ def report(panel: str, suffix: str | None = None) -> None:
         )
 
 
+def run_shard(panel: str, arm: str, shard: str, n_studies: int, n_trials: int,
+              n_simulations: int, suffix: str | None = None) -> Path:
+    """Train and forecast one (panel, arm, shard). Returns the suite root."""
+    arms = arms_for(panel)
+    panel_path, build_config = PANELS[panel]
+    if not panel_path.exists():
+        raise FileNotFoundError(
+            f"{panel_path} not found. Datasets/ is gitignored, so a rented worker needs "
+            f"the panel pushed to it (VastAI/Rules.md §3)."
+        )
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    data_full = panel_dataset.prepare_dataset(pd.read_csv(panel_path), build_config(arms[arm]))
+    data_full["panel_name"] = panel
+    check_arm_depth(arm, data_full)
+
+    STUDIES_BASE.mkdir(parents=True, exist_ok=True)
+    config = StudySuiteConfig(
+        studies_base_path=str(STUDIES_BASE),
+        suite_name=suite_name(panel, arm, shard, suffix),
+        n_studies_per_model=n_studies,
+        n_simulations=n_simulations,
+        device=device,
+        data=data_full,
+        models=[
+            ModelSpec(
+                name="LSTM",
+                model_type="lstm",
+                n_trials=n_trials,
+                search_space=dict(SHARED_SEARCH_SPACE),
+                training=dict(SHARED_TRAINING),
+            )
+        ],
+        base_seed=SHARDS[shard],
+        keep_only_best_checkpoint=True,
+    )
+
+    root = run_study_suite(config)
+    print(f"\nStudy suite written to: {root}")
+    print(f"panel={panel}  arm={arm}  shard={shard}  ar_features={arms[arm]}")
+    return root
+
+
+def run_worker(index: int, total: int, n_studies: int, n_trials: int,
+               n_simulations: int) -> int:
+    """Run this worker's stride of the outstanding worklist, one shard at a time.
+
+    Worker `index` of `total` takes items `index::total` — **strided, not a contiguous
+    block**, for the reason Rules.md §5 gives: a lost worker then costs an even slice of
+    every panel and arm rather than wiping out whole arms. The list is the outstanding
+    one, so a resumed run picks up what is left instead of redoing finished shards.
+
+    A shard that raises is reported and the worker moves on. Losing the rest of a
+    worker's slice to one bad shard is the expensive failure here; a shard that fails
+    twice is a bug in the code, which re-renting hardware does not fix, so nothing is
+    retried in a loop.
+    """
+    items = work_items(only_missing=True)[index::total]
+    print(f"worker {index}/{total}: {len(items)} shard(s) — " +
+          ", ".join(f"{p}/{a}/{s}" for p, a, s in items), flush=True)
+    failed: list[str] = []
+    partial: list[str] = []
+    for n, (panel, arm, shard) in enumerate(items, 1):
+        label = f"{panel}/{arm}/{shard}"
+        done = _forecasts_on_disk(panel, arm, shard)
+        if done >= n_studies:
+            print(f"\n[{n}/{len(items)}] {label}: already complete, skipping", flush=True)
+            continue
+        # A suite root that already exists cannot be written into: `create_suite_root`
+        # refuses one rather than mixing two runs' results. So a shard interrupted
+        # part-way is NOT resumable -- it has to be deleted and restarted from study 1.
+        # That is a decision with data at stake (the replications it did finish are
+        # genuine, and `score_suite` counts them), so it is not made automatically here.
+        # The shard is skipped and named; `--check-complete` reports it as short.
+        if (STUDIES_BASE / suite_name(panel, arm, shard)).exists():
+            partial.append(f"{label}: {done}/{n_studies} forecasts, suite folder exists")
+            print(f"\n[{n}/{len(items)}] {label}: PARTIAL ({done}/{n_studies}) — a suite "
+                  f"folder cannot be resumed, so this needs deleting before a re-run. "
+                  f"Skipping.", flush=True)
+            continue
+        print(f"\n[{n}/{len(items)}] {label}: starting", flush=True)
+        try:
+            run_shard(panel, arm, shard, n_studies, n_trials, n_simulations)
+        except Exception as exc:                                      # noqa: BLE001
+            failed.append(f"{label}: {type(exc).__name__}: {exc}")
+            print(f"[{n}/{len(items)}] {label}: FAILED — {exc}", flush=True)
+    if partial:
+        print(f"\nworker {index}/{total} skipped {len(partial)} un-resumable partial(s):")
+        for p in partial:
+            print(f"  {p}")
+    if failed or partial:
+        for f in failed:
+            print(f"  FAILED {f}")
+        return 1
+    print(f"\nworker {index}/{total} finished all {len(items)} shard(s)")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--panel", choices=sorted(PANELS), default="electronics")
@@ -596,6 +694,11 @@ def main() -> None:
     # take their depth from the calibration window), so it is validated below.
     parser.add_argument("--arm")
     parser.add_argument("--shard", choices=sorted(SHARDS))
+    parser.add_argument(
+        "--worker", metavar="i/N",
+        help="run worker i of N: this worker's stride of the outstanding worklist, one "
+             "shard after another. The unit a rented box is given (VastAI/Rules.md §5).",
+    )
     parser.add_argument("--n-studies", type=int, default=N_STUDIES)
     parser.add_argument("--n-trials", type=int, default=N_TRIALS)
     parser.add_argument("--n-simulations", type=int, default=N_SIMULATIONS)
@@ -625,6 +728,17 @@ def main() -> None:
     if args.report:
         report(args.panel, args.suite_suffix)
         return
+
+    if args.worker:
+        try:
+            index, total = (int(v) for v in args.worker.split("/"))
+        except ValueError:
+            parser.error("--worker takes i/N, e.g. --worker 3/10")
+        if not 0 <= index < total:
+            parser.error(f"--worker index must be in 0..{total - 1}, got {index}")
+        raise SystemExit(run_worker(index, total, args.n_studies, args.n_trials,
+                                    args.n_simulations))
+
     if not args.arm or not args.shard:
         parser.error("--arm and --shard are required unless --report is given")
 
@@ -635,44 +749,9 @@ def main() -> None:
             f"choose from {sorted(arms)}"
         )
 
-    panel_path, build_config = PANELS[args.panel]
-    if not panel_path.exists():
-        raise FileNotFoundError(
-            f"{panel_path} not found. Datasets/ is gitignored, so a rented worker needs "
-            f"the panel pushed to it (VastAI/Rules.md §3)."
-        )
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    panel = pd.read_csv(panel_path)
-    data_full = panel_dataset.prepare_dataset(panel, build_config(arms[args.arm]))
-    data_full["panel_name"] = args.panel
-    check_arm_depth(args.arm, data_full)
-
-    STUDIES_BASE.mkdir(parents=True, exist_ok=True)
-    config = StudySuiteConfig(
-        studies_base_path=str(STUDIES_BASE),
-        suite_name=suite_name(args.panel, args.arm, args.shard, args.suite_suffix),
-        n_studies_per_model=args.n_studies,
-        n_simulations=args.n_simulations,
-        device=device,
-        data=data_full,
-        models=[
-            ModelSpec(
-                name="LSTM",
-                model_type="lstm",
-                n_trials=args.n_trials,
-                search_space=dict(SHARED_SEARCH_SPACE),
-                training=dict(SHARED_TRAINING),
-            )
-        ],
-        base_seed=SHARDS[args.shard],
-        keep_only_best_checkpoint=True,
-    )
-
-    root = run_study_suite(config)
-    print(f"\nStudy suite written to: {root}")
-    print(f"arm={args.arm}  shard={args.shard}  ar_features={arms[args.arm]}")
-
+    root = run_shard(args.panel, args.arm, args.shard, args.n_studies,
+                     args.n_trials, args.n_simulations, args.suite_suffix)
+    panel_path, _ = PANELS[args.panel]
     table = study_metrics(root, panel_path, standard_deviation=True)
     print(f"\nForecast metrics (mean over {args.n_studies} studies, +- SD):")
     print(table.to_string())
