@@ -103,8 +103,12 @@ for pair in "$@"; do
     # Wait for `running` before calling start_shard, whose probe would otherwise spend
     # its patience on an image pull (F27). `gone` is terminal: there is no box to start,
     # keyed or not, so nothing is attempted on it (F31).
+    #
+    # 15 minutes (30 checks x 30 s). Over the 2026-09-13 runs, every box that went on to
+    # train reached `running` within ~10 minutes of rental, most in 1-6; one still loading
+    # past 15 is stuck, and the previous 30-minute limit only paid for more of it.
     HOST=- PORT=- STATUS=unknown
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 30); do
       read -r HOST PORT STATUS < <(endpoint "$ID")
       [ "$STATUS" = "running" ] || [ "$STATUS" = "gone" ] && break
       sleep 30
