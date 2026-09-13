@@ -774,3 +774,160 @@ the race. `VastAI/launch/add_workers.sh` does both. One box in that fleet *was* 
 keyless, answering `Permission denied (publickey)` on both its direct and its proxy
 endpoint after four attempts spanning six minutes; that one was destroyed and replaced,
 which is the right response to F21 and the wrong response to this.
+
+## F28 — The budget watchdog exits the moment it is started, because the fleet is still empty
+
+**Symptom.** Started beside the launcher for the 2026-09-13 benchmark run, the watchdog
+logged one line and quit:
+
+    [17:08:49] fleet=0 $0/hr, spent so far $0.000 of $5
+    [17:08:49] fleet empty — watchdog exiting
+
+The first box existed six seconds later. For 25 minutes twenty boxes billed with no
+budget bound at all, and nothing said so until a status check read the log.
+
+**Cause.** `budget_watchdog.sh` treats `fleet=0` as "the run is over". That is true at the
+end of a run and false at its start, and the script cannot tell the two apart, so the
+natural launch order — supervisors first, then rent — disarms it.
+
+**Check.** `pgrep -af budget_watchdog` after the first box is up, and read its log.
+
+**Fix.** Arm on the first non-empty fleet: exit on `fleet=0` only after at least one
+instance has been seen. Until then, start the watchdog *after* the first instance is listed.
+
+## F29 — The launcher reaches boxes through vast's proxy, and gives up on boxes that are fine
+
+**Symptom.** `add_workers.sh` reported `start attempt 4 rc=2` for a box and moved on. The
+same box, reached on its direct endpoint, answered at once, was fully provisioned, and
+trained as soon as `start_shard.sh` was pointed at `ip:port` by hand. In the benchmark
+run this left workers 2, 14 and 19 rented and idle for 15-27 minutes each.
+
+**Cause.** `add_workers.sh` resolves the endpoint from `ssh_host`/`ssh_port`, the proxy
+form. F1 already records that the proxy does not reliably accept an instance-attached key,
+and `healthcheck.sh`, `pull_results.sh` and `reap_finished.sh` all prefer the direct
+endpoint for that reason. The launcher is the one place that was never switched.
+
+**Check.** When a start fails, retry by hand on the direct endpoint before concluding
+anything:
+
+    vastai show instances --raw | python3 -c "import json,sys
+    for i in json.load(sys.stdin):
+        p=(i.get('ports') or {}).get('22/tcp') or []
+        print(i['id'], i.get('public_ipaddr'), p[0]['HostPort'] if p else None, i.get('ssh_host'), i.get('ssh_port'))"
+
+**Fix.** Resolve direct-first, proxy as fallback, in the launcher too — the rule F1 set.
+
+## F30 — A box whose host cannot reach GitHub waits out every timeout and never says why
+
+**Symptom.** Worker 8 was rented at 17:10, reported four failed starts, and was still
+billing at 18:02 with no `.onstart_done`. Its `/root/onstart.log` ended:
+
+    fatal: unable to access 'https://github.com/HuberPablo/panelclv.git/':
+    Failed to connect to github.com port 443 after 136120 ms: Couldn't connect to server
+
+53 minutes billed for a box that was dead two minutes after boot.
+
+**Cause.** `vast_onstart.sh` runs under `set -e`, so the failed clone ends it — silently,
+from the outside. The only signal it leaves is the *absence* of `.onstart_done`, and
+absence is exactly what a slow image pull also looks like, so `start_shard.sh` gives it
+the full 20-minute provisioning wait, and the launcher repeats that wait per attempt.
+
+**Check.** On any box not provisioned after ~10 minutes: `tail /root/onstart.log`.
+
+**Fix.** A failed onstart must leave a marker as positive as the success one: trap the
+error, write `/root/.onstart_failed` with the failing step, and have the provisioning wait
+return at once with a distinct exit code when it appears. A terminal failure found in
+seconds costs seconds.
+
+## F31 — Instances vanish from the API before they are ever reachable
+
+**Symptom.** Five instances across three launch rounds (workers 6, 17 and 19, then 17 and
+19 again) were created, logged `instance N -> worker i/20`, and were then simply absent
+from `vastai show instances`. Their start attempts ran against host `-`:
+
+    [-:- worker 6/20] FATAL: no ssh after ~90s — the key was almost certainly not injected (F21).
+
+**Cause.** Not established. The instance is created and started successfully and later
+disappears, which fits a host that could not allocate the GPU after all — the queued
+case F12 describes, resolved by removal instead of by waiting. The F21 message is wrong for
+it: there is no box, keyed or not.
+
+**Check.** Before blaming the key, ask the API whether the instance still exists.
+`add_workers.sh`'s wait loop already sees `gone` — it breaks out and then calls
+`start_shard.sh` anyway.
+
+**Fix.** Treat `gone` as terminal in the launcher: log it and put the worker index on a
+replacement list rather than spending four start attempts on a box that does not exist.
+
+## F32 — A launcher that gives up leaves the box rented, and nothing else is watching
+
+**Symptom.** This is the failure the others compound into. Twenty boxes launched at 17:08.
+At 17:33, when a status check was finally run by hand, 8 were training, 4 had finished —
+and 10 were rented and doing nothing: 3 keyless (F21), 3 vanished (F31), 2 proxy-refused
+(F29), 2 still loading. Nobody had noticed, because each failure was printed once into
+`add_workers.log` among hundreds of lines, and no process was looking for boxes that are
+*rented but not training*.
+
+**Cause.** Every piece of tooling owns one transition and reports it. The launcher gives up
+after four attempts and exits the subshell, leaving the box to bill. The reaper acts only
+on boxes with a `.shard_exit`. The puller copies whatever exists. `watch_fleet.sh` is
+read-only by design and was not running. The state "rented, never started" has no owner.
+
+A second-order cost: when a launcher is superseded, its in-flight retries keep running
+against their instances — after worker 8's box was destroyed, the original launcher was
+still calling `start_shard.sh` on its old proxy endpoint, which vast can hand to another
+customer's box. It had to be killed by PID.
+
+**Check.** On every run, within ten minutes of launch and then every cycle:
+
+    python VastAI/supervise/fleet_status.py      # one line per box: training, how far
+
+and compare the count of training boxes against the count rented.
+
+**Fix.** See "Start-up failures: the strategy" below.
+
+## F33 — "Permission denied" on a box minutes old is not proof it is keyless
+
+**Symptom.** Workers 9 and 10 were destroyed at 17:35 as F21 after `Permission denied
+(publickey)` on the direct endpoint `1.208.108.242`. At 18:03 a new instance on the same
+host accepted the key and trained normally.
+
+**Cause.** Undetermined. Either those two instances really were keyless, or the key had
+not yet been injected when they were probed. F27 separates `Connection refused` (still
+booting) from `Permission denied` (terminal) — that rule was applied here and may be
+too strong for a box still within its first minutes.
+
+**Check / Fix.** Retry a `Permission denied` a few times over ~5 minutes of the box's
+life before destroying it, and record the instance age with the verdict.
+
+## Start-up failures: the strategy
+
+F28-F33 happened in one run, and all of them are start-up failures: the box never becomes
+a training worker. Each costs little alone; the expensive part was that none of them was
+*found* until a human asked. The rule the tooling should enforce:
+
+**Every rented box reaches a verdict — training, or destroyed and queued for replacement —
+within a bounded time, and the process that renders the verdict acts on it.**
+
+1. **Launch gate (owner: `add_workers.sh`).** Per box, in order: wait for `running`
+   (treat `gone` as terminal, F31); resolve the direct endpoint first (F29); probe ssh,
+   retrying `Permission denied` for ~5 minutes of box age before calling it F21 (F33); wait
+   for `.onstart_done` *or* `.onstart_failed` (F30); start; then **confirm the trainer is
+   running** — one python process and the runner's first log line within 60 s. Any
+   terminal verdict: copy `onstart.log`/`shard.log` locally, `vastai destroy instance -y`,
+   and append `<instance> <worker> <reason>` to `VastAI/state/needs_replacement.txt`.
+2. **Onstart fails loudly (owner: `vast_onstart.sh`).** Trap errors into
+   `/root/.onstart_failed`, so a dead box is recognisable in seconds, not after 20 minutes.
+3. **A watcher for rented-but-idle (owner: `reap_finished.sh`, which already polls every
+   box).** A box older than 25 minutes with no trainer and no `.shard_exit` is destroyed
+   and queued for replacement, with its logs saved first. This is the backstop for every
+   launch-gate bug not yet found.
+4. **Budget bound from the first rental (owner: `budget_watchdog.sh`).** Arms on the
+   first non-empty fleet (F28).
+5. **One launcher at a time.** A replacement launch happens only after the previous
+   launcher has exited; `needs_replacement.txt` is its input, so replacing is a command,
+   not a judgement made while reading logs.
+
+With these, the 17:33 state above would have been: 3 keyless and 3 vanished boxes
+destroyed and queued within ~10 minutes, 2 proxy-refused boxes started, worker 8 found
+dead at its first provisioning check, and the watchdog armed throughout.
