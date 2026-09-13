@@ -106,8 +106,29 @@ almost nothing and is not a basis for a ranking.
   for only 5 epochs, which is one place to look.
 - **Level.** ValendinLSTM under-forecasts CDNOW (-23.7%) and gift (-15.7%) and
   over-forecasts electronics (+46.0%) and multichannel (+66.6%). Pareto/NBD is closer to
-  the level on CDNOW, gift and multichannel, and badly under on electronics (-63.0%). On
-  gift ValendinLSTM has the better aggregate MAPE (29.7 against 43.1) despite its bias.
+  the level on CDNOW, gift and multichannel. On gift ValendinLSTM has the better aggregate
+  MAPE (29.7 against 43.1) despite its bias.
+- **Pareto/NBD's -63.0% on electronics is a unit mismatch, not a failed fit.** Pareto/NBD
+  models purchase *occasions*: `benchmarks/pareto_nbd.py` builds `x` from active weeks, as
+  BTYDplus does. The electronics target counts *line items*, 2.43 per active week in the
+  holdout, against 1.02–1.05 on the other three panels. Scored against active weeks, the
+  same forecast is within a few points of its error on the other panels:
+
+  | panel | items per active week | Pareto/NBD predicted | actual items | actual active weeks | bias vs items | bias vs active weeks |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | cdnow | 1.05 | 1,592 | 1,895 | 1,804 | -16.0% | -11.7% |
+  | electronics | 2.43 | 543 | 1,467 | 604 | -63.0% | -10.2% |
+  | gift | 1.04 | 1,033 | 1,146 | 1,103 | -9.9% | -6.3% |
+  | multichannel | 1.02 | 244 | 228 | 224 | +6.9% | +8.8% |
+
+  So on electronics the Pareto/NBD row and the ValendinLSTM row are forecasts of different
+  quantities, and neither electronics bias is comparable with the other panels. The fit
+  itself passes the ADR-0004 gate (`scripts/validate_pareto_benchmark.py`: aggregate
+  within 1.6% of BTYDplus, per-customer correlation 0.995). Counting items in the
+  Pareto/NBD statistics instead is not an option: single-week multi-item buyers get
+  `x > 0` with `t_x = 0` and the sampler diverges (`_build_cbs` docstring).
+  ValendinLSTM trains on counts clipped at 6 but is scored on the unclipped holdout; that
+  shaves about 5 points off its electronics bias and does not explain the +46%.
 - **Spread.** Replication-to-replication SD of bias is 15–20 points on CDNOW, electronics
   and gift, and 55 on multichannel, whose holdout holds 228 transactions. A difference
   between two models smaller than that SD is not a result on that panel.
