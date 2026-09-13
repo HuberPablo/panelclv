@@ -30,6 +30,26 @@ order on multichannel (`docs/dataset-preparation.md`).
 
 ## Results
 
+### Summary
+
+ValendinLSTM as mean ± sd over 20 replications; Pareto/NBD and the all-zero forecast are
+single values. The per-panel tables below add median, IQR, min and max.
+
+| panel | model | bias % | MAPE | RMSE | Spearman |
+| --- | --- | ---: | ---: | ---: | ---: |
+| cdnow | ValendinLSTM | −23.73 ± 20.18 | 36.20 ± 8.16 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
+| | Pareto/NBD | −15.97 | 21.03 | 0.1455 | 0.450 |
+| | all-zero | −100 | 100 | 0.1506 | — |
+| electronics | ValendinLSTM | +46.03 ± 14.84 | 70.80 ± 6.37 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
+| | Pareto/NBD | −63.02 | 65.65 | 0.3758 | 0.297 |
+| | all-zero | −100 | 100 | 0.3775 | — |
+| gift | ValendinLSTM | −15.65 ± 16.37 | 29.74 ± 4.91 | 0.1064 ± 0.0001 | 0.368 ± 0.018 |
+| | Pareto/NBD | −9.86 | 43.13 | 0.1066 | 0.383 |
+| | all-zero | −100 | 100 | 0.1075 | — |
+| multichannel | ValendinLSTM | +66.64 ± 55.45 | 96.61 ± 39.70 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
+| | Pareto/NBD | +6.87 | 55.86 | 0.0567 | 0.189 |
+| | all-zero | −100 | 100 | 0.0569 | — |
+
 ValendinLSTM is reported as its distribution across the 20 replications. Pareto/NBD is a
 single fit. The all-zero forecast is printed beside RMSE because the panels are 98–99.7%
 zeros: predicting nothing lands within 0.1–2.6% of the best RMSE here, so RMSE separates
