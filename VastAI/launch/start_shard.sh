@@ -64,30 +64,64 @@ say() { echo "[$HOST:$PORT $MODEL $SHARD] $*"; }
 # slow image pull, so without this check such a box absorbs the full 20 minutes and then
 # bills until a human looks: six of fourteen did exactly that, ~7 idle hours each (F21).
 # One round trip, a few retries for a container still booting, then give up fast.
+#
+# Exit codes are the launcher's verdict, so each terminal state has its own:
+#   1 generic setup failure (worth one retry)   2 unreachable / key rejected
+#   3 onstart failed on the box                 4 trainer did not start or crashed at once
+#   5 a trainer is already running on this box (F26) — not a failure of the box
+#
+# The probe keeps the last ssh error, because the two causes need different patience.
+# `Connection refused` / timeouts are a container still booting (F27). `Permission
+# denied` is usually F21, but a box minutes old has been seen to reject the key and a
+# later box on the same host to accept it (F33), so it gets the same ~5 minutes before
+# the verdict rather than a 90-second one.
+#
+# A stale host key is not a dead box. vast recycles ip:port pairs across rentals, so the
+# known_hosts entry for this address can belong to the PREVIOUS tenant, and
+# `StrictHostKeyChecking=accept-new` accepts unknown hosts but refuses a changed key:
+# "Host key verification failed", on every retry, on a healthy box (F34). This script
+# is only pointed at an instance just rented, so that entry is stale by definition and
+# is dropped before the first contact. The key the new instance presents is then
+# recorded and still checked for the rest of the rental.
+ssh-keygen -R "[$HOST]:$PORT" -f "$HOME/.ssh/known_hosts_vast" >/dev/null 2>&1 || true
 say "reachability probe"
 reachable=0
-for attempt in $(seq 1 6); do
-    if ssh -n "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=15 "root@$HOST" true 2>/dev/null; then
+last_err=""
+for attempt in $(seq 1 30); do
+    if last_err=$(ssh -n "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=15 "root@$HOST" true 2>&1); then
         reachable=1
         break
     fi
     sleep 10
 done
 if [ "$reachable" = 0 ]; then
-    say "FATAL: no ssh after ~90s — the key was almost certainly not injected (F21)."
-    say "       This box will never work. Destroy it: vastai destroy instance -y <id>"
-    exit 2                     # 2 = dead box, distinct from a genuine setup failure
+    last_err=$(echo "$last_err" | grep -v -e '^Welcome' -e '^Have fun' | tail -1)
+    say "FATAL: no ssh after ~5 min — last error: ${last_err:-none}"
+    case "$last_err" in
+        *"Permission denied"*) say "       key rejected throughout: F21 (see F33 before blaming the host)" ;;
+        *) say "       unreachable throughout: box never came up (F27/F31)" ;;
+    esac
+    exit 2
 fi
 
 # --- 1. wait for provisioning ------------------------------------------------
 # vast_onstart.sh only touches .onstart_done if every step succeeded, so its absence
 # means we would be racing a pip install still in flight.
 say "waiting for /root/.onstart_done (image pull + pip install take several minutes)"
+# `.onstart_failed` ends the wait at once: a box whose onstart died (a host that cannot
+# reach GitHub, F30) is as dead after two minutes as after twenty.
 for attempt in $(seq 1 80); do
-    if ssh -n "${SSH_OPTS[@]}" "root@$HOST" 'test -f /root/.onstart_done' 2>/dev/null; then
-        say "provisioned"
-        break
-    fi
+    state=$(ssh -n "${SSH_OPTS[@]}" "root@$HOST" \
+        'if [ -f /root/.onstart_done ]; then echo done;
+         elif [ -f /root/.onstart_failed ]; then echo "failed $(cat /root/.onstart_failed)";
+         else echo waiting; fi' 2>/dev/null | tail -1 || true)
+    case "$state" in
+        done) say "provisioned"; break ;;
+        failed*)
+            say "FATAL: onstart failed on the box — ${state#failed }"
+            ssh -n "${SSH_OPTS[@]}" "root@$HOST" 'tail -5 /root/onstart.log' 2>/dev/null | sed 's/^/    /' || true
+            exit 3 ;;
+    esac
     [ "$attempt" = 80 ] && { say "FATAL: never finished provisioning"; exit 1; }
     sleep 15
 done
@@ -115,6 +149,15 @@ rsync -az --partial -e "ssh ${SSH_OPTS[*]}" \
       "$LOCAL_DATA/" "root@$HOST:$REPO_DIR/$DATA_DST/"
 
 # --- 3. start the shard ------------------------------------------------------
+# One trainer per box. A second one walks the same slice and leaves suites half-written
+# by each (F26). The pattern is anchored at the start of the command line so it cannot
+# match the ssh command carrying the probe (F13).
+TRAINER_COUNT='ps -eo cmd | grep -c "^/[^ ]*python.* scripts/run_"'
+running=$(ssh -n "${SSH_OPTS[@]}" "root@$HOST" "$TRAINER_COUNT" 2>/dev/null | tail -1 || true)
+if [[ "$running" =~ ^[0-9]+$ ]] && [ "$running" -gt 0 ]; then
+    say "REFUSED: a trainer is already running on this box (F26) — not starting a second"
+    exit 5
+fi
 say "starting shard"
 ssh "${SSH_OPTS[@]}" "root@$HOST" bash -s <<REMOTE
 set -euo pipefail
@@ -133,10 +176,12 @@ echo '$ARM' > /root/.shard_arm
 # Record the exit STATUS, not merely the fact that the command returned. Writing an
 # unconditional done-marker made a shard that crashed in seconds indistinguishable
 # from one that trained for hours — the health check read "done" and moved on.
-# `\\\$?` reaches the remote shell as `\$?`, so the inner bash expands it after the
-# trainer returns. A single `\$?` arrives as `$?` inside this double-quoted string and
-# is expanded by the OUTER remote shell before the trainer even starts, recording the
-# preceding `echo`'s 0 for every run, crashed or not (F9, re-found 2026-09-13).
+# The exit status is escaped three times (backslash, backslash, dollar) so it reaches the
+# remote shell still escaped and the INNER bash expands it after the trainer returns.
+# Escaped once, the OUTER remote shell expands it before the trainer starts and records
+# the preceding command's 0 for every run, crashed or not (F9, re-found 2026-09-13).
+# No backticks in these comments: this is an unquoted heredoc, so a backtick here is a
+# command substitution run on the orchestrator.
 setsid nohup bash -c "
     \$PY $RUNNER_CMD
     echo \\\$? > /root/.shard_exit
@@ -144,5 +189,29 @@ setsid nohup bash -c "
 sleep 2
 head -5 /root/shard.log || true
 REMOTE
+
+# --- 4. confirm it is training -----------------------------------------------
+# `setsid nohup ... &` returns success whether or not the trainer survives its first
+# second, so "started" is checked rather than assumed: after 60 s either a trainer
+# process exists, or the run is over and `.shard_exit` says how. A trainer that died at
+# once is exit 4 with its log, not a box reported STARTED that then sits idle (F32).
+sleep 60
+verdict=$(ssh -n "${SSH_OPTS[@]}" "root@$HOST" \
+    "if [ -f /root/.shard_exit ]; then echo exit=\$(cat /root/.shard_exit); else echo trainers=\$($TRAINER_COUNT); fi" \
+    2>/dev/null | tail -1 || true)
+case "$verdict" in
+    trainers=0|"")
+        say "FATAL: no trainer running 60 s after start, and no exit status (${verdict:-no answer})"
+        ssh -n "${SSH_OPTS[@]}" "root@$HOST" 'tail -5 /root/shard.log' 2>/dev/null | sed 's/^/    /' || true
+        exit 4 ;;
+    exit=0)
+        say "trainer already finished with exit 0 (slice had nothing left to do)" ;;
+    exit=*)
+        say "FATAL: trainer crashed at once (${verdict})"
+        ssh -n "${SSH_OPTS[@]}" "root@$HOST" 'tail -8 /root/shard.log' 2>/dev/null | sed 's/^/    /' || true
+        exit 4 ;;
+    *)
+        say "confirmed training (${verdict})" ;;
+esac
 
 say "running — tail with: ssh ${SSH_OPTS[*]} root@$HOST 'tail -f /root/shard.log'"

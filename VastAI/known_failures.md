@@ -909,6 +909,14 @@ a training worker. Each costs little alone; the expensive part was that none of 
 **Every rented box reaches a verdict — training, or destroyed and queued for replacement —
 within a bounded time, and the process that renders the verdict acts on it.**
 
+**Implemented 2026-09-13** in the files named below, and tested live on three boxes (a
+healthy trainer, a trainer that crashes at once, and a box rented but never started).
+`start_shard.sh` returns a verdict code — 0 training confirmed, 2 unreachable/keyless,
+3 onstart failed, 4 trainer did not start or crashed at once, 5 a trainer already runs
+there — and `add_workers.sh` acts on it. `VastAI/state/needs_replacement.txt` collects every
+retired box as `<instance> <worker> <reason>`; replacing is re-running `add_workers.sh`
+with fresh offers for those workers, and the file is cleared once they are placed.
+
 1. **Launch gate (owner: `add_workers.sh`).** Per box, in order: wait for `running`
    (treat `gone` as terminal, F31); resolve the direct endpoint first (F29); probe ssh,
    retrying `Permission denied` for ~5 minutes of box age before calling it F21 (F33); wait
@@ -931,3 +939,39 @@ within a bounded time, and the process that renders the verdict acts on it.**
 With these, the 17:33 state above would have been: 3 keyless and 3 vanished boxes
 destroyed and queued within ~10 minutes, 2 proxy-refused boxes started, worker 8 found
 dead at its first provisioning check, and the watchdog armed throughout.
+
+## F34 — A recycled ip:port presents a new host key, and `accept-new` refuses it forever
+
+**Symptom.** Found by the live test of the start gate. A healthy box was retired as
+unreachable after five minutes of probing; its start log's last ssh error was
+
+    Host key verification failed.
+
+**Cause.** vast hands the same `ip:port` to successive rentals on a host, and each new
+container has a new host key. Every VastAI script connects with
+`StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts_vast`, and
+`accept-new` records an *unknown* host but refuses a *changed* key. The file still held
+the key of the timing-probe box rented on the same host that afternoon, so the new box was
+refused on every attempt. Earlier start failures on reused hosts in the same session (F33
+among them) may share this cause; it cannot be established after the fact.
+
+**Check.** `ssh-keygen -F "[<ip>]:<port>" -f ~/.ssh/known_hosts_vast` — an entry for a box
+you have only just rented is a previous tenant's.
+
+**Fix.** `start_shard.sh` removes the address's entry (`ssh-keygen -R`) before its first
+contact, since it is only ever pointed at a fresh rental. Host keys are still checked:
+the key the new box presents is recorded and holds for the rest of the rental.
+
+## F35 — Two bugs the start-gate test found in its own first version
+
+Recorded because both are easy to reintroduce.
+
+- **Backticks in a comment inside an unquoted heredoc execute on the orchestrator.** A
+  comment explaining the F9 escaping was written inside `start_shard.sh`'s `<<REMOTE`
+  block with backticked code; bash ran it as command substitution and logged
+  `$?: command not found`. Comments inside that block must not contain backticks.
+- **The reaper raced the launcher for a box that crashed at start.** The reaper saw
+  `.shard_exit=3` and destroyed the box while `start_shard.sh` was inside its 60-second
+  confirmation; the launcher then retired an already-destroyed box and the worker was
+  queued for replacement twice. The reaper now leaves any box alone while a launcher holds
+  `add_workers.lock` and has not marked that box `VastAI/state/started/<id>`.

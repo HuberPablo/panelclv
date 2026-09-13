@@ -8,7 +8,7 @@ Two other files sit behind it and neither repeats what is here:
 - **`Rules.md`** — the *contract*. Why the work is split the way it is, why each
   (model, arm) gets its own tree, how machines are chosen, what the money rules are.
   Read it once before your first run, and again before changing how a run is split.
-- **`known_failures.md`** — the *catalogue*, F1–F33. Every entry cost real billed hours.
+- **`known_failures.md`** — the *catalogue*, F1–F35. Every entry cost real billed hours.
   Read it before renting; you will hit some of them.
 
 ## The shape of a run
@@ -94,6 +94,21 @@ for i in json.load(sys.stdin):
     p=(i.get('ports') or {}).get('22/tcp') or []
     print(i['id'], (i.get('public_ipaddr') or '').strip(), p[0]['HostPort'] if p else None)"
 ```
+
+For a real-panel run, `add_workers.sh` is the launcher: it takes explicit
+`OFFER:WORKER` pairs and gives every box a verdict — confirmed training, or logs saved,
+destroyed, and listed in `VastAI/state/needs_replacement.txt` (`known_failures.md`,
+"Start-up failures: the strategy"). Only one launcher runs at a time; it holds
+`VastAI/state/add_workers.lock`.
+
+```bash
+RUNNER=scripts/run_real_panel_benchmarks.py TOTAL=20 ./VastAI/launch/add_workers.sh <OFFER>:1 <OFFER>:2 ...
+cat VastAI/state/needs_replacement.txt      # workers to re-rent, with the reason
+```
+
+Start `budget_watchdog.sh` before renting — it waits for the first instance and arms
+then (F28). The reaper retires any box idle past `IDLE_MINUTES` (default 35) once no
+launcher is running (F32).
 
 Then either drive the whole fleet:
 

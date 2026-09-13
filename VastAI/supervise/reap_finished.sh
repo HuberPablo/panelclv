@@ -24,6 +24,11 @@ GRID="${2:-seasonal_4x4x10}"   # which grid to reconcile against once the fleet 
 # ablation overrides this with its own equivalent:
 #   RECONCILE_CMD="scripts/run_real_panel_arms.py --check-complete"
 RECONCILE_CMD="${RECONCILE_CMD:-scripts/reconcile_grid.py --grid $GRID}"
+# A box older than this with no trainer and no exit status, while no launcher is running,
+# is retired and queued for replacement (F32). Longer than a slow image pull plus the
+# launcher's own start-up verdict, so it only ever catches what the launch gate missed.
+IDLE_MINUTES="${IDLE_MINUTES:-35}"
+mkdir -p VastAI/state/worker_logs
 KEY="$HOME/.ssh/id_ed25519"
 SSH=(ssh -n -i "$KEY" -o StrictHostKeyChecking=accept-new
      -o UserKnownHostsFile="$HOME/.ssh/known_hosts_vast" -o BatchMode=yes -o ConnectTimeout=15)
@@ -37,13 +42,14 @@ while true; do
   # never pulled from and never destroyed — it just billed. Prefer direct, fall back to
   # the proxy.
   mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python3 -c "
-import json,sys
+import json,sys,time
 try: d=json.load(sys.stdin)
 except Exception: raise SystemExit
 for i in d:
     ip=(i.get('public_ipaddr') or '').strip(); p=(i.get('ports') or {}).get('22/tcp') or []
     host, port = (ip, p[0].get('HostPort')) if (ip and p) else (i.get('ssh_host'), i.get('ssh_port'))
-    print(i['id'], host or '-', port or '-', i.get('actual_status') or '?')
+    age = int((time.time() - float(i.get('start_date') or time.time())) / 60)
+    print(i['id'], host or '-', port or '-', i.get('actual_status') or '?', age)
 ")
   if [ "${#rows[@]}" -eq 0 ]; then
     log "no instances left — nothing to reap"
@@ -51,7 +57,7 @@ for i in d:
   fi
 
   for row in "${rows[@]}"; do
-    set -- $row; id=$1; ip=$2; port=$3; status=$4
+    set -- $row; id=$1; ip=$2; port=$3; status=$4; age=${5:-0}
 
     # An exited box cannot be pulled from, and restarting one re-pulls the image and
     # bills bandwidth per GB (F14). Report rather than destroy: its disk may still hold
@@ -63,24 +69,60 @@ for i in d:
     [ "$ip" = "-" ] || [ "$port" = "-" ] && continue
 
     # `.shard_exit` is written by start_shard.sh when the trainer returns; its absence
-    # means still running (or never started). Bracket the pgrep pattern or the remote
-    # shell matches its own command line (F13).
+    # means still running (or never started). The trainer is counted by its python command line, anchored at the start so the
+    # probe's own ssh command cannot match (F13) and any `scripts/run_*` runner counts
+    # without this list having to name it.
     state=$("${SSH[@]}" -p "$port" "root@$ip" '
       if [ -f /root/.shard_exit ]; then echo "exit=$(cat /root/.shard_exit)";
-      elif pgrep -f "[r]un_(pnbd_grid|real_panel_arms|real_panel_benchmarks|ar_encoding_ablation)" >/dev/null 2>&1; then echo running;
+      elif [ "$(ps -eo cmd | grep -c "^/[^ ]*python.* scripts/run_")" -gt 0 ]; then echo running;
       else echo none; fi' 2>/dev/null | tail -1)
+    # A box whose launcher is still in flight and has not yet confirmed it training
+    # belongs to that launcher: acting on it here raced the launcher's own verdict,
+    # destroyed the box under it and queued the worker for replacement twice.
+    if [ ! -f "VastAI/state/started/$id" ] && ! flock -n VastAI/state/add_workers.lock true; then
+      continue
+    fi
     case "$state" in
-      running|none|"") continue ;;
+      running|"") continue ;;
+      none)
+        # Rented, not training, and no exit status: the state nothing else owns (F32).
+        # While a launcher holds its lock it is still rendering this box's verdict, so
+        # the start-up window is left to it; with no launcher running, a box this old
+        # and idle is a start-up failure the launch gate missed.
+        if [ "$age" -lt "$IDLE_MINUTES" ] || ! flock -n VastAI/state/add_workers.lock true; then
+          continue
+        fi
+        idx=$(awk -v id="$id" '$1==id {print $2}' VastAI/state/assignments.txt 2>/dev/null | tail -1)
+        log "$id IDLE for ${age} min with no trainer and no exit status — retiring (F32)"
+        rsync -az --partial --timeout=180 -e "$SSH_E -p $port" \
+          "root@$ip:/root/panelclv/Studies/" "Studies/" 2>/dev/null
+        for f in onstart.log shard.log; do
+          rsync -az --timeout=60 -e "$SSH_E -p $port" "root@$ip:/root/$f" \
+            "VastAI/state/worker_logs/idle_${id}_$f" 2>/dev/null
+        done
+        vastai destroy instance "$id" -y >/dev/null 2>&1 && log "  destroyed $id"
+        echo "$id ${idx:-?} idle-${age}min" >> VastAI/state/needs_replacement.txt
+        continue ;;
     esac
 
     code="${state#exit=}"
     if [ "$code" != "0" ]; then
-      # A non-zero exit is a code bug, not hardware — re-renting reproduces it. Keep the
-      # log locally so the box does not have to stay alive to be read.
-      log "$id shard CRASHED exit=$code — copying shard.log, leaving box up for inspection"
-      rsync -az --timeout=60 -e "$SSH_E -p $port" \
-        "root@$ip:/root/shard.log" "VastAI/state/crashed_${id}_shard.log" 2>/dev/null \
-        && log "  saved VastAI/state/crashed_${id}_shard.log"
+      # A non-zero exit is a code bug, not hardware — re-renting reproduces it, so the
+      # replacement entry says so. Everything the box can tell us is copied first (its
+      # finished suites and its log), after which keeping it up only bills: an idle box
+      # waiting for a human is F32 again.
+      log "$id shard CRASHED exit=$code — pulling suites and shard.log, then destroying"
+      rsync -az --partial --timeout=180 -e "$SSH_E -p $port" \
+        "root@$ip:/root/panelclv/Studies/" "Studies/" 2>/dev/null
+      if rsync -az --timeout=60 -e "$SSH_E -p $port" \
+           "root@$ip:/root/shard.log" "VastAI/state/crashed_${id}_shard.log" 2>/dev/null; then
+        log "  saved VastAI/state/crashed_${id}_shard.log"
+        idx=$(awk -v id="$id" '$1==id {print $2}' VastAI/state/assignments.txt 2>/dev/null | tail -1)
+        vastai destroy instance "$id" -y >/dev/null 2>&1 && log "  destroyed $id"
+        echo "$id ${idx:-?} crashed-exit=$code(fix-the-code-first)" >> VastAI/state/needs_replacement.txt
+      else
+        log "  could not copy shard.log — box left up for one more cycle"
+      fi
       continue
     fi
 

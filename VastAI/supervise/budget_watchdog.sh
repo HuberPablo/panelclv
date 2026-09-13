@@ -20,6 +20,7 @@ export PATH="$HOME/venvs/panelclv/bin:$HOME/thesis-agent/venv/bin:$PATH"
 MAX="${1:?usage: budget_watchdog.sh <max_spend_usd>}"
 INTERVAL=300
 SPENT=0
+ARMED=0
 LAST=$(date +%s)
 KEY="$HOME/.ssh/id_ed25519"
 SSH_E="ssh -i $KEY -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts_vast -o BatchMode=yes -o ConnectTimeout=15"
@@ -39,7 +40,14 @@ print(sum(i.get('dph_total') or 0 for i in d))
   N=$(vastai show instances --raw 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
   log "fleet=$N \$$DPH/hr, spent so far \$$(printf '%.3f' "$SPENT") of \$$MAX"
 
-  if [ "$N" = "0" ]; then log "fleet empty — watchdog exiting"; exit 0; fi
+  # An empty fleet means "run over" only once there has been a fleet. Started beside the
+  # launcher, the watchdog sees zero instances before the first rental lands, and exiting
+  # then left twenty boxes with no budget bound for 25 minutes (F28).
+  if [ "$N" != "0" ]; then ARMED=1; fi
+  if [ "$N" = "0" ]; then
+    if [ "$ARMED" = 1 ]; then log "fleet empty — watchdog exiting"; exit 0; fi
+    log "no instances yet — waiting for the first rental"
+  fi
 
   if python3 -c "import sys; sys.exit(0 if $SPENT >= $MAX else 1)"; then
     log "BUDGET REACHED — pulling everything, then destroying the fleet"

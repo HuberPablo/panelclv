@@ -24,6 +24,15 @@ JUPYTER_PORT=8080
 exec > >(tee -a /root/onstart.log) 2>&1
 echo "=== panelclv onstart: $(date -u '+%F %T UTC') ==="
 
+# A failure must leave a marker as positive as the success one. Without it the only
+# signal is the ABSENCE of .onstart_done, which is also what a slow image pull looks
+# like, so a box whose host cannot reach GitHub was given every timeout in turn and
+# billed 53 idle minutes (F30). `set -e` and the explicit `exit 1`s both end in the EXIT
+# trap, which names the step that was running.
+STEP="python probe"
+rm -f /root/.onstart_failed
+trap 'rc=$?; [ "$rc" -ne 0 ] && echo "step=\"$STEP\" exit=$rc" > /root/.onstart_failed' EXIT
+
 # onstart runs in a non-interactive shell: ~/.bashrc is never sourced, so the
 # image's conda/venv activation has not happened and `python` may be off PATH
 # entirely. Probe the layouts vast's PyTorch images actually use.
@@ -39,6 +48,7 @@ echo "python: $PY ($("$PY" --version 2>&1))"
 # seconds later — leaving a rented machine that bills but installed nothing. Still
 # fatal after the grace period, because a sweep that silently ran on CPU costs the
 # whole rental.
+STEP="cuda probe"
 for attempt in $(seq 1 20); do
     "$PY" -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)' && break
     [ "$attempt" = 20 ] && { echo "FATAL: no CUDA device after 100s — wrong image or CPU-only host"; exit 1; }
@@ -49,12 +59,14 @@ echo "gpu: $("$PY" -c 'import torch; print(torch.cuda.get_device_name(0))')"
 
 # git to clone, rsync for the data push/pull (needed on BOTH ends), tmux to keep
 # runs alive across SSH drops.
+STEP="apt-get install"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq && apt-get install -y -qq git rsync tmux >/dev/null
 
 # vast replays onstart on every instance start, so the clone must be idempotent.
 # Deliberately a fast-forward pull, not `reset --hard`: edits made on the box are
 # kept, and a diverged checkout warns instead of being silently destroyed.
+STEP="git clone/pull"
 if [ -d "$REPO_DIR/.git" ]; then
     git -C "$REPO_DIR" pull --ff-only origin "$BRANCH" \
         || echo "WARNING: could not fast-forward — keeping the existing checkout"
@@ -67,6 +79,7 @@ echo "HEAD: $(git -C "$REPO_DIR" log -1 --oneline)"
 # torch unpinned, so pip sees the image's CUDA build as already satisfying it and
 # leaves it alone. Forcing a reinstall pulls a generic wheel and breaks the
 # numpy/scipy ABI the image was built against.
+STEP="pip install panelclv"
 "$PY" -m pip install -q -e "$REPO_DIR"
 
 # --- JupyterLab ---------------------------------------------------------------
@@ -79,6 +92,7 @@ echo "HEAD: $(git -C "$REPO_DIR" log -1 --oneline)"
 # bind keeps the server off the public internet.
 #
 # onstart replays on every instance start, so skip if a server is already up.
+STEP="jupyterlab"
 if ! pgrep -f "jupyter.*--port=?$JUPYTER_PORT" >/dev/null 2>&1; then
     "$PY" -m pip install -q jupyterlab
 
