@@ -67,7 +67,7 @@ for i in d:
     # shell matches its own command line (F13).
     state=$("${SSH[@]}" -p "$port" "root@$ip" '
       if [ -f /root/.shard_exit ]; then echo "exit=$(cat /root/.shard_exit)";
-      elif pgrep -f "[r]un_(pnbd_grid|real_panel_arms|ar_encoding_ablation)" >/dev/null 2>&1; then echo running;
+      elif pgrep -f "[r]un_(pnbd_grid|real_panel_arms|real_panel_benchmarks|ar_encoding_ablation)" >/dev/null 2>&1; then echo running;
       else echo none; fi' 2>/dev/null | tail -1)
     case "$state" in
       running|none|"") continue ;;

@@ -175,6 +175,13 @@ and reports `CRASHED:<code>` for anything non-zero.
 cannot distinguish success from failure is worse than no marker, because it is
 trusted.
 
+**The first fix never worked (found 2026-09-13).** The line sat inside an unquoted
+heredoc and a double-quoted `bash -c "…"`, and escaped only once, so the *outer* remote
+shell expanded `$?` before the trainer ran and every shard recorded `0` — a probe whose
+four trainers all crashed in seconds on a missing directory wrote `.shard_exit = 0` on
+every box. The marker needs `\\\$?` in the heredoc. Checked by running both forms against
+a trainer that exits 3: the old one records 0, the fixed one 3.
+
 ---
 
 ## F10 — rsync dies with a broken pipe mid-transfer

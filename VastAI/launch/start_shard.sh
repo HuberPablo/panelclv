@@ -133,9 +133,13 @@ echo '$ARM' > /root/.shard_arm
 # Record the exit STATUS, not merely the fact that the command returned. Writing an
 # unconditional done-marker made a shard that crashed in seconds indistinguishable
 # from one that trained for hours — the health check read "done" and moved on.
+# `\\\$?` reaches the remote shell as `\$?`, so the inner bash expands it after the
+# trainer returns. A single `\$?` arrives as `$?` inside this double-quoted string and
+# is expanded by the OUTER remote shell before the trainer even starts, recording the
+# preceding `echo`'s 0 for every run, crashed or not (F9, re-found 2026-09-13).
 setsid nohup bash -c "
     \$PY $RUNNER_CMD
-    echo \$? > /root/.shard_exit
+    echo \\\$? > /root/.shard_exit
 " > /root/shard.log 2>&1 &
 sleep 2
 head -5 /root/shard.log || true

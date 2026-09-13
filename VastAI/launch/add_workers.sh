@@ -8,6 +8,11 @@
 # to the box, not derived from its neighbours.
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 export PATH="$HOME/venvs/panelclv/bin:$HOME/thesis-agent/venv/bin:$PATH"
+# Which run the boxes join. Defaults are the AR-encoding ablation this was written for;
+# any runner taking `--worker I/N` fits:
+#   RUNNER=scripts/run_real_panel_benchmarks.py TOTAL=20 ./VastAI/launch/add_workers.sh ...
+RUNNER="${RUNNER:-scripts/run_ar_encoding_ablation.py}"
+TOTAL="${TOTAL:-10}"
 LOG=VastAI/state/add_workers.log
 mkdir -p VastAI/state/worker_logs VastAI/state/started
 
@@ -15,7 +20,7 @@ say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
 for pair in "$@"; do
   OFFER="${pair%%:*}"; IDX="${pair##*:}"
-  say "renting offer $OFFER for worker $IDX/10"
+  say "renting offer $OFFER for worker $IDX/$TOTAL"
   OUT=$(./VastAI/launch/vast_launch.sh "$OFFER" 2>&1)
   echo "$OUT" >> "$LOG"
   # The instance id is the one thing the launcher reports that the API cannot yet be
@@ -23,7 +28,7 @@ for pair in "$@"; do
   # else -- host, port, status -- is read back from `show instances --raw` (F22).
   ID=$(echo "$OUT" | grep -oP 'instance id: \K[0-9]+' | head -1)
   if [ -z "$ID" ]; then say "  offer $OFFER did not produce an instance — skipping"; continue; fi
-  say "  instance $ID -> worker $IDX/10"
+  say "  instance $ID -> worker $IDX/$TOTAL"
   echo "$ID $IDX" >> VastAI/state/assignments.txt
   (
     # Wait for `running` before calling start_shard: its reachability probe gives up
@@ -46,8 +51,8 @@ PY
     done
     for attempt in 1 2 3 4; do
       INSTANCE_ID="$ID" DATA_SRC=Datasets/Dataset_clean DATA_DST=Datasets/Dataset_clean \
-      RUNNER_CMD="scripts/run_ar_encoding_ablation.py --worker $IDX/10" \
-        ./VastAI/launch/start_shard.sh "$HOST" "$PORT" ar_encoding lstm "$IDX/10" \
+      RUNNER_CMD="$RUNNER --worker $IDX/$TOTAL" \
+        ./VastAI/launch/start_shard.sh "$HOST" "$PORT" "$(basename "$RUNNER" .py)" worker "$IDX/$TOTAL" \
         >> VastAI/state/worker_logs/start_${ID}_w${IDX}.log 2>&1
       rc=$?
       if [ $rc = 0 ]; then
