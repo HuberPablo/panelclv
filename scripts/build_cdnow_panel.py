@@ -18,15 +18,16 @@ raw file, which is also the number of distinct days on which the customer bought
 money. CDNOW carries no covariates, so the panel has none; none are fabricated.
 
 **Week numbering** comes from `data_preparation.period_calendar`, the package's one
-calendar-time <-> period-index convention, rather than being restated here. That
-makes `week_start` the exact inverse of the bucketing, which is what the window
-dates in the study config are sliced on.
+calendar-time <-> period-index convention (Valendin's `dayofyear // 7`, ADR-0009), rather
+than being restated here. That makes `week_start` the exact inverse of the bucketing,
+which is what the window dates in the study configs are sliced on.
 
-**The grid is trimmed to complete weeks.** The raw data stops on 1998-06-30, mid-week;
-a panel that kept that partial week would report a genuine low count for it and the
-last holdout period would read as a drop in demand that is really a drop in
-observation. The last kept week is therefore the last one whose seven days all fall
-within the data window.
+**The grid is trimmed to complete weeks** (`period_calendar.complete_week_grid`). A
+partial week would report a genuine low count and read as a drop in demand that is
+really a drop in observation. On this grid CDNOW's window happens to end on a week
+boundary: 1998 week 25 is Jun 24..30, so nothing is trimmed and the panel runs 1997 w0 ..
+1998 w25, 78 weeks. Week 0 of each year is six days (Jan 1..6), which is the cost of
+sharing the Valendin grid.
 
 Usage:
     python scripts/build_cdnow_panel.py                  # default paths
@@ -40,11 +41,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from panelclv.data_preparation.period_calendar import (
-    WEEKS_PER_YEAR,
-    week_of_year,
-    week_start,
-)
+from panelclv.data_preparation.period_calendar import complete_week_grid, week_of_year
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RAW = REPO_ROOT / "Datasets" / "cdnow.csv"
@@ -80,33 +77,6 @@ def read_transactions(path: Path) -> pd.DataFrame:
         tx["Date"] = pd.to_datetime(tx["Date"].astype(str), format="%Y%m%d")
     tx["Id"] = tx["Id"].astype("int64")
     return tx[["Id", "Date"]]
-
-
-def complete_week_grid(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """Every (year, week) cell whose seven days lie inside [start, end].
-
-    Returned in calendar order, so the panel's period axis is already sorted the way
-    `prepare_dataset` reshapes it.
-    """
-    years = range(start.year, end.year + 1)
-    grid = pd.DataFrame(
-        [(y, w) for y in years for w in range(WEEKS_PER_YEAR)],
-        columns=["year", "week"],
-    )
-    starts = week_start(grid["year"], grid["week"])
-    # A week is complete when both its first day and its last day are observed, and
-    # its last day is the day before the NEXT bucket begins. That is `start + 7` for
-    # every week but the year's last, which absorbs the calendar's leftover days (8 in
-    # a common year, 9 in a leap year) and therefore ends on Dec 31. Deriving the next
-    # start rather than adding seven is what keeps a truncated year-end week out: with
-    # a flat +7 the test would accept 1997 w51 on data that stops on Dec 30.
-    is_last_of_year = grid["week"] == WEEKS_PER_YEAR - 1
-    next_starts = starts.where(
-        ~is_last_of_year, pd.to_datetime((grid["year"] + 1).astype(str) + "-01-01")
-    )
-    next_starts = next_starts.mask(~is_last_of_year, starts + pd.Timedelta(days=7))
-    keep = (starts >= start) & (next_starts <= end + pd.Timedelta(days=1))
-    return grid.loc[keep].reset_index(drop=True)
 
 
 def build_weekly_panel(tx: pd.DataFrame) -> pd.DataFrame:

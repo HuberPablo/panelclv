@@ -68,12 +68,11 @@ HOLDOUT_START = "1996-01-01"
 HOLDOUT_END = "1998-12-31"
 
 # The notebook's own week grid, re-implemented here rather than imported from
-# `panelclv.data_preparation.period_calendar`, and deliberately so — note it is not even
-# the package's convention: this is `dayofyear // 7` (week 0 holds six days), the package
-# uses `(dayofyear - 1) // 7`. Two reasons to keep it. A reproduction has to run the grid
-# it reproduces, and a gate that imports the code it gates stops being a gate — a future
-# edit to the shared convention would move both the benchmark and this check together and
-# still land in the band.
+# `panelclv.data_preparation.period_calendar`, and deliberately so, even though the
+# package adopted this same `dayofyear // 7` grid (ADR-0009). Two reasons to keep the copy.
+# A reproduction has to run the grid it reproduces, and a gate that imports the code it
+# gates stops being a gate — a future edit to the shared convention would move both the
+# benchmark and this check together and still land in the band.
 WEEKS_PER_YEAR = 52
 VALIDATION_SPLIT = 0.1
 BATCH_SIZE_TRAIN = 32

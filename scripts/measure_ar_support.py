@@ -100,9 +100,9 @@ def cdnow_config() -> PanelConfig:
     return PanelConfig(
         id_col="Id", target_col="Transactions", frequency="weekly",
         time_cols=("year", "week"),
-        training_start="1997-01-01", validation_start="1997-08-06",
-        training_end="1997-09-30",
-        holdout_start="1997-10-01", holdout_end="1998-06-30",
+        training_start="1997-01-01", validation_start="1997-08-05",
+        training_end="1997-09-29",
+        holdout_start="1997-09-30", holdout_end="1998-06-30",
         clip_target_upper=4, ar_features=(), embedded_cols={"Transactions": "auto"},
     )
 

@@ -67,7 +67,7 @@ def build_panel_config() -> PanelConfig:
     The windows follow the standard CDNOW calibration/holdout split, snapped to the
     package's week grid: calibration is 1997 weeks 0-38 (39 weeks, the classic
     39-week calibration period) and the holdout is 1997 w39 through the last complete
-    week of the data, 1998 w24 (38 weeks). The last eight calibration weeks are the
+    week of the data, 1998 w25 (39 weeks). The last eight calibration weeks are the
     temporal validation window (ADR-0001) — early stopping and trial selection see
     them, the weights never train on them.
 
@@ -84,7 +84,7 @@ def build_panel_config() -> PanelConfig:
     September. A `week_sin`/`week_cos` pair is not identifiable from less than one
     cycle: with no second January to compare against, whatever the model reads as
     seasonality is confounded with CDNOW's own acquisition decay (the cohort all buys
-    in Q1 1997 and thins out afterwards). Worse, 13 of the 38 holdout periods —
+    in Q1 1997 and thins out afterwards). Worse, 13 of the 39 holdout periods —
     1997 w39..w51, October to December — sit at week-of-year phases that never occur
     in training, so those channels would be extrapolated exactly where the forecast is
     scored. Two embedders handling that extrapolation differently is not the thing
@@ -100,10 +100,10 @@ def build_panel_config() -> PanelConfig:
         frequency="weekly",
         time_cols=("year", "week"),
         training_start="1997-01-01",
-        validation_start="1997-08-06",   # 1997 week 31 — last 8 calibration weeks
-        training_end="1997-09-30",       # inclusive of 1997 week 38
-        holdout_start="1997-10-01",      # 1997 week 39
-        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w24
+        validation_start="1997-08-05",   # 1997 week 31 — last 8 calibration weeks
+        training_end="1997-09-29",       # inclusive of 1997 week 38
+        holdout_start="1997-09-30",      # 1997 week 39
+        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w25
         # The cap sets the softmax head size (5 classes: 0..4). Measured on the built
         # panel, the 181,489 customer-weeks split 175,142 / 6,055 / 269 / 19 / 1 over
         # counts 0..4, with exactly three cells above 4 (one each at 5, 6 and 7) — so

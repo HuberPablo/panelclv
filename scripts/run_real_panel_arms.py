@@ -341,8 +341,8 @@ def electronics_config(arm: Arm) -> PanelConfig:
 def cdnow_config(arm: Arm) -> PanelConfig:
     """The CDNOW panel exactly as the archived ablations read it, with the arm varying.
 
-    A harsher test of the same hazard than electronics: the holdout is nearly as long as
-    the calibration window (38 vs 39 periods, against 52 vs 104), so capped counters
+    A harsher test of the same hazard than electronics: the holdout is as long as the
+    calibration window (39 vs 39 periods, against 52 vs 104), so capped counters
     drift proportionally further.
 
     Its default carries no calendar column at all -- inherited from the archived configs
@@ -361,10 +361,10 @@ def cdnow_config(arm: Arm) -> PanelConfig:
         frequency="weekly",
         time_cols=("year", "week"),
         training_start="1997-01-01",
-        validation_start="1997-08-06",   # 1997 week 31 - last 8 calibration weeks
-        training_end="1997-09-30",       # inclusive of 1997 week 38
-        holdout_start="1997-10-01",      # 1997 week 39
-        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w24
+        validation_start="1997-08-05",   # 1997 week 31 - last 8 calibration weeks
+        training_end="1997-09-29",       # inclusive of 1997 week 38
+        holdout_start="1997-09-30",      # 1997 week 39
+        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w25
         clip_target_upper=4,             # 5-class head; 3 cells in 181,489 exceed it
         ar_features=arm.ar_features,
         cluster_features=arm.cluster_features,

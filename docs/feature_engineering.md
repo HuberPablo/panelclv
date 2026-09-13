@@ -131,49 +131,33 @@ one declaration rather than restated in three.
 `periods_per_year`.** A weekly panel carries its own `week` column and the divisor is the
 declared `periods_per_year` (52 by convention). A daily panel has no week column, so the
 week-of-year is read off the date by the package's single week convention
-(`data_preparation/period_calendar.py`): a year is **52 weeks of seven days, numbered
-0..51**, week `w` covering days-of-year `7w+1 .. 7w+7`, with the trailing day or two of
-the calendar year folded back into week 51. The divisor there is 52 because that is how
+(`data_preparation/period_calendar.py`): Valendin's `dayofyear // 7`, capped at 51, so a
+year is **52 weeks numbered 0..51**. Week 0 is six days (Jan 1..6), weeks 1..50 are seven
+days starting on day-of-year `7w`, and week 51 absorbs everything from day-of-year 357 to
+Dec 31. The divisor there is 52 because that is how
 many weeks the cycle has — on a daily panel `periods_per_year` counts *days* (365), and
 using it would compress the year into a seventh of the sine's period. This is deliberately
 not ISO 8601: ISO gives some years a 53rd week, which aliases exactly onto week 0 under a
 52-week sine and would encode New Year's Eve as New Year's Day.
 
-**A stored panel may not agree with that convention, and nothing checks it.** The
-convention above is what `period_calendar.week_of_year` implements and what
-`week_start` inverts, but a panel arrives with its `week` column already computed by
-whatever built it — the package never re-derives it from a date. The two builders in
-this repo disagree by one day:
-
-| builder | rule | week 0 | week 51 |
-|---|---|---|---|
-| `notebooks/archive/dataset_building.ipynb` (electronics, apparel, gift, multichannel) | `dayofyear // 7` | Jan 1–6 (6 days) | 9 days |
-| `period_calendar.week_of_year` / `scripts/build_cdnow_panel.py` (CDNOW) | `(dayofyear − 1) // 7` | Jan 1–7 | 8 days |
-
-Measured, not inferred — rebuilding the stored electronics panel from
-`Datasets/Electronic.csv` under each rule:
+**Every stored panel is built on the same rule (ADR-0009).** A panel arrives with its
+`week` column already computed and the package never re-derives it from a date, yet
+`prepare_dataset` cuts windows on `week_start`, which inverts only the package's rule. A
+panel built on another rule is silently misaligned, and a mid-year cut then moves a
+whole week across the boundary. The panels used to be mixed — electronics on
+`dayofyear // 7`, CDNOW, gift and multichannel on `(dayofyear − 1) // 7` — and were
+rebuilt. Measured against the raw transactions under `dayofyear // 7`:
 
 ```
-dayofyear // 7        (archived notebook):      0 mismatched cells of 172432
-(dayofyear - 1) // 7  (package week_of_year):  913 mismatched cells of 172432
+gift          0 mismatched cells of 8561
+multichannel  0 mismatched cells of 2904
+cdnow         0 mismatched cells of 6369
+electronics   0 mismatched cells of 3335
 ```
 
-So for the electronics family, the panel's week `w` sits one day earlier than
-`week_start(year, w)` places it on the calendar. Two consequences, one live and one
-latent:
-
-- **Cross-dataset:** "week 39" is not the same seven days on an electronics panel as on
-  CDNOW. Comparing a seasonal position between the two families is off by a day.
-- **Window slicing:** `prepare_dataset` cuts the calibration/holdout windows on
-  `week_start`, so a boundary falling mid-week could place up to one day of transactions
-  in the wrong window. **Neither current config is affected** — every electronics window
-  date is a year boundary, where both rules agree the year's last bucket ends on Dec 31,
-  and CDNOW's mid-year boundaries were built with the package rule, so `week_start` is
-  its exact inverse. The risk arrives with the first mid-year boundary on a panel from
-  the archived builder.
-
-A panel built outside this package is trusted as given. If you build one, use
-`period_calendar.week_of_year` so `week_start` inverts it.
+Build a new panel with `period_calendar.week_of_year` and `complete_week_grid`, as
+`scripts/build_cdnow_panel.py` and `scripts/build_rdata_panel.py` do, so `week_start`
+inverts it.
 
 **Why sin/cos rather than the raw index.** A raw week number is a discontinuous
 encoding of a circular quantity: weeks 52 and 1 are adjacent in the world but maximally
@@ -197,8 +181,8 @@ workflow requires it, but it is a prime candidate for `removable_features` (§8)
 rollout-based selection metric exists partly to catch exactly this.
 
 **`period_start`.** Independently of the flags, the pipeline adds a single `period_start`
-Timestamp so both windows are sliced by one uniform rule (weekly: `Jan-1 of year + 7·week`
-days; monthly: first of month; daily: the date itself). It is a slicing anchor, not a
+Timestamp so both windows are sliced by one uniform rule (weekly: `Jan-1 of year +
+max(7·week − 1, 0)` days; monthly: first of month; daily: the date itself). It is a slicing anchor, not a
 model feature. The weekly rule is the same convention `week_sin`/`week_cos` read, and both
 come from `period_calendar` — the anchor and the feature cannot drift apart.
 
@@ -274,8 +258,8 @@ the model reads after standardisation:
 | `cumulative_count` | 0.04% | 0.64 | as above |
 | `transaction_rate`, `has_transacted_before`, `active_in_last_<K>_periods` | **0%** | — | bounded and stationary by construction |
 
-`scripts/measure_ar_support.py` regenerates this for either panel, and the two columns
-have to be read together. **On CDNOW `cumulative_transactions` escapes on only 0.176% of
+`scripts/measure_ar_support.py` regenerates this for either panel (the CDNOW figures
+predate ADR-0009's rebuilt panel), and the two columns have to be read together. **On CDNOW `cumulative_transactions` escapes on only 0.176% of
 cells but by 9.19 z at the worst cell and 3.87 z on average** — further outside than
 either window-capped clock. A channel can escape rarely and catastrophically, so "in
 range in practice" is a claim about the count and not about the distance.
@@ -307,7 +291,8 @@ to the whole cohort in the same direction.
 **What this costs, and what fixes it — measured on both panels.** A configuration
 carrying `(period_since_last_transaction, cumulative_transactions,
 period_since_first_transaction)` was ablated against a bounded replacement at two depths,
-40 replications per arm, by `scripts/run_ar_encoding_ablation.py`. `|bias|` is the mean
+40 replications per arm, by `scripts/run_ar_encoding_ablation.py`. The CDNOW rows predate ADR-0009:
+they were measured on the earlier 38-week holdout panel. `|bias|` is the mean
 per-replication magnitude; `rho` is the Spearman rank correlation between per-customer
 predicted and actual holdout totals, i.e. how well the forecast separates heavy customers
 from light ones.

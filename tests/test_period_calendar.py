@@ -18,6 +18,7 @@ import pytest
 
 from panelclv.data_preparation.period_calendar import (
     WEEKS_PER_YEAR,
+    complete_week_grid,
     days_per_period,
     flat_week_index,
     week_of_year,
@@ -31,10 +32,25 @@ from panelclv.data_preparation.period_calendar import (
 # ---------------------------------------------------------------------------
 
 
-def test_week_of_year_starts_at_zero_on_january_first():
-    """Day-of-year 1..7 is week 0, 8..14 is week 1 — 0-based, aligned to Jan 1."""
-    dates = pd.Series(pd.to_datetime(["2019-01-01", "2019-01-07", "2019-01-08"]))
+def test_week_of_year_is_the_valendin_grid():
+    """`dayofyear // 7`: week 0 is Jan 1..6, week 1 opens on Jan 7 (ADR-0009).
+
+    Pinned on the day where it differs from `(dayofyear - 1) // 7`, the rule this package
+    used before: Jan 7 is week 1 here and was week 0 there.
+    """
+    dates = pd.Series(pd.to_datetime(["2019-01-01", "2019-01-06", "2019-01-07"]))
     np.testing.assert_array_equal(week_of_year(dates), [0, 0, 1])
+
+
+@pytest.mark.parametrize(
+    "year, first_day_of_week_51", [(2019, "2019-12-23"), (2020, "2020-12-22")]
+)
+def test_week_51_opens_on_day_357_and_runs_to_new_years_eve(year, first_day_of_week_51):
+    """The year-end bucket is nine days in a common year, ten in a leap year."""
+    days = pd.Series(pd.date_range(first_day_of_week_51, f"{year}-12-31", freq="D"))
+    assert (week_of_year(days) == WEEKS_PER_YEAR - 1).all()
+    day_before = pd.Series([pd.Timestamp(first_day_of_week_51) - pd.Timedelta(days=1)])
+    assert week_of_year(day_before).item() == WEEKS_PER_YEAR - 2
 
 
 @pytest.mark.parametrize("year", [2019, 2020])       # a common and a leap year
@@ -59,10 +75,53 @@ def test_week_start_and_week_of_year_are_inverses():
     np.testing.assert_array_equal(week_of_year(week_start(years, weeks)), weeks)
 
 
-def test_week_start_anchors_on_january_first_plus_seven_days_per_week():
-    """The (year, week) -> date direction, spelled out on one known case."""
-    starts = week_start(pd.Series([2019, 2019]), pd.Series([0, 3]))
-    assert list(starts) == [pd.Timestamp("2019-01-01"), pd.Timestamp("2019-01-22")]
+def test_week_start_anchors_week_zero_on_january_first_and_later_weeks_a_day_early():
+    """The (year, week) -> date direction, spelled out on known cases.
+
+    CDNOW's calibration cut is the one that matters: 1997 week 39 opens on Sep 30.
+    """
+    starts = week_start(pd.Series([2019, 2019, 1997]), pd.Series([0, 3, 39]))
+    assert list(starts) == [
+        pd.Timestamp("2019-01-01"), pd.Timestamp("2019-01-21"), pd.Timestamp("1997-09-30"),
+    ]
+
+
+def test_week_start_inverts_every_day_of_a_leap_and_a_common_year():
+    """Each day reads back to a week whose start is on or before it, and the next
+    week's start is after it — the property window slicing on `period_start` needs."""
+    days = pd.Series(pd.date_range("2019-01-01", "2020-12-31", freq="D"))
+    weeks = week_of_year(days)
+    years = days.dt.year
+    assert (week_start(years, weeks) <= days).all()
+    not_last = weeks < WEEKS_PER_YEAR - 1
+    assert (week_start(years[not_last], weeks[not_last] + 1) > days[not_last]).all()
+
+
+# ---------------------------------------------------------------------------
+# complete_week_grid: which weeks a panel builder keeps
+# ---------------------------------------------------------------------------
+
+
+def test_complete_week_grid_keeps_the_short_first_and_long_last_week_of_a_full_year():
+    grid = complete_week_grid(pd.Timestamp("2020-01-01"), pd.Timestamp("2020-12-31"))
+    assert len(grid) == WEEKS_PER_YEAR
+    assert grid.iloc[0].tolist() == [2020, 0]
+    assert grid.iloc[-1].tolist() == [2020, WEEKS_PER_YEAR - 1]
+
+
+def test_complete_week_grid_drops_a_week_the_data_only_partly_covers():
+    """CDNOW's window: 1997-01-01..1998-06-30 ends exactly on 1998 week 25 (Jun 24..30),
+    and stopping a day earlier loses that week."""
+    grid = complete_week_grid(pd.Timestamp("1997-01-01"), pd.Timestamp("1998-06-30"))
+    assert grid.iloc[-1].tolist() == [1998, 25]
+    assert len(grid) == WEEKS_PER_YEAR + 26
+    shorter = complete_week_grid(pd.Timestamp("1997-01-01"), pd.Timestamp("1998-06-29"))
+    assert shorter.iloc[-1].tolist() == [1998, 24]
+
+
+def test_complete_week_grid_drops_a_year_end_week_missing_new_years_eve():
+    grid = complete_week_grid(pd.Timestamp("2019-01-01"), pd.Timestamp("2019-12-30"))
+    assert grid.iloc[-1].tolist() == [2019, WEEKS_PER_YEAR - 2]
 
 
 # ---------------------------------------------------------------------------

@@ -277,13 +277,15 @@ question, and `docs/hurdle-models-vs-pareto-nbd.md` §2 read it as though it wer
 
 ## 9. Two things this turned up about the repo
 
-**(a) The committed CDNOW panel is not JFH's holdout.** It carries 38 holdout periods
-and 1,858 transactions where the published split has 39 and 1,882: the builder trims to
-complete weeks under the package's calendar (`scripts/build_cdnow_panel.py`, "the grid
-is trimmed to complete weeks") and 1998-06-25..30 falls outside the last complete one.
-The trimming is correct and deliberate — a partial week would read as a demand drop —
-but any comparison between a repo CDNOW number and a published CDNOW number is off by
-that week and those 24 transactions.
+**(a) The committed CDNOW panel is not JFH's split, by one day.** When this was written
+the panel carried 38 holdout periods and 1,858 transactions against the published 39 and
+1,882: under the package's former `(dayofyear − 1) // 7` calendar, 1998-06-25..30 fell
+outside the last complete week and was trimmed. Since ADR-0009 the panel is on
+Valendin's `dayofyear // 7`, where 1998-06-30 closes week 25, so the holdout is 39 weeks —
+but 1997 week 39 now opens on Sep 30, so calibration ends Sep 29 and the holdout holds
+1,895 transactions: JFH's 1,882 plus the 13 made on 1997-09-30. Any comparison between a
+repo CDNOW number and a published CDNOW number is off by that day. Figures in this
+document that went through the weekly panel were computed on the earlier 38-week one.
 
 **(b) Config B loses ~2 points of bias against config A on identical data.** Same
 sampler, same seeds, same cohort, same 39-week holdout; the only difference is that B

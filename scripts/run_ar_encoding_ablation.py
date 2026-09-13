@@ -311,8 +311,8 @@ def electronics_config(ar_features: tuple[str, ...]) -> PanelConfig:
 def cdnow_config(ar_features: tuple[str, ...]) -> PanelConfig:
     """The CDNOW panel exactly as `run_loss_ablation.py` reads it, `ar_features` varying.
 
-    A much harsher test of the same hazard than electronics: the holdout is nearly as
-    long as the calibration window (38 vs 39 periods, against 52 vs 104), so the capped
+    A much harsher test of the same hazard than electronics: the holdout is as long as
+    the calibration window (39 vs 39 periods, against 52 vs 104), so the capped
     counters drift proportionally further -- recency escapes its fitted range on 56.9% of
     holdout cells here against 37.7% there -- and the per-cell rate falls 2.52x between
     the windows rather than 1.60x.
@@ -323,10 +323,10 @@ def cdnow_config(ar_features: tuple[str, ...]) -> PanelConfig:
         frequency="weekly",
         time_cols=("year", "week"),
         training_start="1997-01-01",
-        validation_start="1997-08-06",   # 1997 week 31 - last 8 calibration weeks
-        training_end="1997-09-30",       # inclusive of 1997 week 38
-        holdout_start="1997-10-01",      # 1997 week 39
-        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w24
+        validation_start="1997-08-05",   # 1997 week 31 - last 8 calibration weeks
+        training_end="1997-09-29",       # inclusive of 1997 week 38
+        holdout_start="1997-09-30",      # 1997 week 39
+        holdout_end="1998-06-30",        # inclusive of the last complete week, 1998 w25
         clip_target_upper=4,             # 5-class head; 3 cells in 181,489 exceed it
         ar_features=ar_features,
         embedded_cols={"Transactions": "auto"},

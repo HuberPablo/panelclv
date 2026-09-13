@@ -12,10 +12,21 @@ every caller reads it from here.
 
 The weekly convention, stated once
 ----------------------------------
-A year is ``WEEKS_PER_YEAR = 52`` weeks of seven days, numbered **0..51**, and week
-``w`` of year ``Y`` starts on ``Y-01-01 + 7w`` days. That covers days 1..364 of the
-calendar year; the one or two days left over (Dec 31, plus Dec 30 in a leap year) fold
-back into week 51 rather than opening a 53rd week.
+A date's week is ``dayofyear // 7``, capped at 51: ``WEEKS_PER_YEAR = 52`` weeks numbered
+**0..51**. This is the grid of the Valendin et al. reference notebook, and every panel in
+this project is built on it (ADR-0009), so "week w" is the same days on every dataset and
+in the reference code the benchmark reproduces.
+
+The rule makes the two ends of the year irregular, and it is worth knowing where:
+
+- week 0 is **six** days, Jan 1..6 (day-of-year 1..6);
+- week ``w`` for ``1 <= w <= 50`` is seven days starting ``Y-01-01 + 7w − 1``, i.e.
+  day-of-year ``7w .. 7w+6``;
+- week 51 starts on day-of-year 357 (Dec 23, or Dec 22 in a leap year) and absorbs the
+  rest of the year — nine days, ten in a leap year — rather than opening a 53rd week.
+
+A cut date that falls on a week's first day therefore lands one day earlier than a
+seven-days-from-Jan-1 reading suggests: 1997 week 39 starts on Sep 30, not Oct 1.
 
 This is deliberately *not* ISO 8601. ISO weeks are 1-based, do not start on Jan 1, and
 give some years 53 of them — and a 53rd week aliases straight onto week 0 under a
@@ -75,23 +86,49 @@ def days_per_period(frequency: str) -> float:
 def week_of_year(dates: pd.Series) -> pd.Series:
     """0-based week-of-year (0..51) of each date in `dates`.
 
-    The date-to-week direction of the convention: day-of-year 1..7 is week 0, 8..14 is
-    week 1, and the year's trailing day or two fold into week 51.
+    The date-to-week direction of the convention: day-of-year 1..6 is week 0, 7..13 is
+    week 1, and everything from day-of-year 357 on folds into week 51.
     """
     doy = pd.to_datetime(dates).dt.dayofyear.astype(np.int64)
-    return ((doy - 1) // 7).clip(upper=WEEKS_PER_YEAR - 1)
+    return (doy // 7).clip(upper=WEEKS_PER_YEAR - 1)
 
 
 def week_start(years: pd.Series, weeks: pd.Series) -> pd.Series:
     """Timestamp on which 0-based week `weeks` of calendar year `years` begins.
 
     The inverse direction of `week_of_year`, and the anchor a train/holdout split is
-    cut on: Jan 1 of the year, plus seven days per elapsed week.
+    cut on. Week `w >= 1` begins on day-of-year `7w`, i.e. `7w − 1` days after Jan 1;
+    week 0 begins on Jan 1 itself, which is why the offset is floored at zero.
     """
+    offset_days = np.maximum(weeks.astype(np.int64) * 7 - 1, 0)
     return (
         pd.to_datetime(years.astype(str) + "-01-01")
-        + pd.to_timedelta(weeks.astype(np.int64) * 7, unit="D")
+        + pd.to_timedelta(offset_days, unit="D")
     )
+
+
+def complete_week_grid(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Every `(year, week)` cell whose days all lie inside `[start, end]`.
+
+    A panel builder keeps only these: a week the data only partly observes would report
+    a genuine low count for it, and a forecast would read a drop in observation as a drop
+    in demand. A week ends the day before the NEXT bucket begins, which is derived rather
+    than taken as `start + 7` because the buckets are not all seven days: week 0 is six,
+    and week 51 runs to Dec 31. Returned in calendar order, which is the order
+    `prepare_dataset` reshapes the period axis in.
+    """
+    grid = pd.DataFrame(
+        [(y, w) for y in range(start.year, end.year + 1) for w in range(WEEKS_PER_YEAR)],
+        columns=["year", "week"],
+    )
+    starts = week_start(grid["year"], grid["week"])
+    is_last_of_year = grid["week"] == WEEKS_PER_YEAR - 1
+    next_starts = week_start(grid["year"], (grid["week"] + 1).clip(upper=WEEKS_PER_YEAR - 1))
+    next_starts = next_starts.mask(
+        is_last_of_year, pd.to_datetime((grid["year"] + 1).astype(str) + "-01-01")
+    )
+    keep = (starts >= start) & (next_starts <= end + pd.Timedelta(days=1))
+    return grid.loc[keep].reset_index(drop=True)
 
 
 def year_and_week(week_index, start_year: int):
