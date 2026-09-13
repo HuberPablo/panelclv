@@ -121,6 +121,9 @@ no token above; it predates the vocabulary.
 ⁴ Every one of the nine ran a different budget, several of them evidently probes (1 trial,
 1 simulation). Treat them as exploratory, not as replications of each other.
 
+Family F's results are reported in `docs/insights-cluster-ablation.md` — the K sweep
+(`kmeans_4/8/16`), how K was chosen, and why the calibration objective cannot rank it.
+
 **Every neural suite in every family above used `cross_entropy` loss and the `valendin`
 embedder**, except family I, whose whole point is the loss axis.
 
