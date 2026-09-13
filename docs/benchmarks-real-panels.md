@@ -102,8 +102,8 @@ almost nothing and is not a basis for a ranking.
   per-customer holdout totals is 0.05 (electronics) and 0.07 (multichannel), against 1.12
   and 1.21 for Pareto/NBD and 1.92 for the same model on CDNOW (replication r00). A
   forecast that gives every customer the same number cannot rank them, which is the
-  near-zero Spearman above. Not yet diagnosed; the refits in the timing probe trained
-  for only 5 epochs, which is one place to look.
+  near-zero Spearman above. This is not specific to ValendinLSTM or to this run; see
+  "The forecast collapse on long sparse panels" below.
 - **Level.** ValendinLSTM under-forecasts CDNOW (-23.7%) and gift (-15.7%) and
   over-forecasts electronics (+46.0%) and multichannel (+66.6%). Pareto/NBD is closer to
   the level on CDNOW, gift and multichannel. On gift ValendinLSTM has the better aggregate
@@ -135,6 +135,117 @@ almost nothing and is not a basis for a ranking.
 - **Electronics is not the paper's cohort.** 829 customers against Valendin et al.'s
   3,782, and its transactions are line items rather than purchase occasions, so neither
   benchmark's electronics number is comparable with the published one.
+
+## The forecast collapse on long sparse panels
+
+Measured over all 2,638 stored forecasts on the real panels in `Studies/`. CV is the
+coefficient of variation of per-customer holdout totals (std / mean); a model that gives
+every customer the same number scores 0. Pareto/NBD's electronics CV is 1.11.
+
+**Every neural model collapses on electronics when the count is its only per-customer
+input**, and has since the earliest suites:
+
+| model | inputs (experiment) | forecasts | median CV | mean Spearman |
+| --- | --- | ---: | ---: | ---: |
+| ValendinLSTM | count + week (this run) | 20 | 0.05 | 0.03 |
+| ValendinLSTM | count only (`real_panel_arms`) | 20 | 0.08 | 0.03 |
+| LSTM | count only (`ar_encoding` no_ar) | 100 | 0.07 | 0.04 |
+| LSTM | count + sin/cos (oldest `cross_entropy_cfg_2y…NoCov` suites) | 23 | 0.09–0.20 | 0.04 |
+| Transformer | count + calendar (no_ar arms, old NoCov suites) | 53 | 0.08–0.28 | 0.01–0.15 |
+| LSTM | + bounded activity flags | 200 | 0.30–0.32 | 0.20–0.26 |
+| LSTM | + saturating / ratio / log AR encodings | 300 | 0.43–1.47 | 0.29–0.30 |
+| LSTM / Transformer / ValendinLSTM | + k-means cluster | 200 | 0.9–1.5 | 0.26–0.31 |
+
+**The trigger is the panel, not the architecture.** The same count-only configuration
+does not collapse on CDNOW (39 calibration weeks: CV 1.10–1.45, Spearman 0.35–0.43 against
+Pareto/NBD's 0.45), collapses partly on gift (CV 0.65, Spearman 0.37), and fully on
+multichannel (CV 0.09, Spearman 0.005). Electronics, gift and multichannel all have 104
+calibration weeks; electronics and multichannel are the sparsest.
+
+Measured facts:
+
+- **Collapsed forecasts ignore the customer's own history.** Rank correlation of the
+  per-customer forecast with calibration frequency: Pareto/NBD 0.87 on electronics,
+  ValendinLSTM 0.10, count-only LSTM 0.09; ValendinLSTM on multichannel −0.03. The same
+  ValendinLSTM reaches 0.84 on CDNOW and 0.62 on gift.
+- **What history effect there is fades within weeks.** On electronics ValendinLSTM
+  forecasts 1.51× more for customers active in the last 12 calibration weeks in holdout
+  week 1, and 1.03× over the whole holdout (count-only LSTM: 1.60× and 1.05×). Pareto/NBD
+  holds 3.5× throughout. The per-week spread in the collapsed models is sampling noise that
+  averages out of the totals.
+- **A persistent customer-level channel restores the spread.** Bounded flags lift the
+  week-1 active/inactive ratio to 4.15 and the total CV to 0.37; clusters to 0.9–1.5.
+- **Hyperparameters barely matter.** 5 of 140 count-only LSTM replications on electronics
+  escape (CV > 0.2), leaning to batch size 64 and higher learning rates; no single
+  parameter correlates with CV beyond |ρ| = 0.46. No ValendinLSTM replication on
+  electronics or multichannel escapes.
+
+**Hypothesis, not tested.** With only the count as input the network has to carry a
+customer's identity in its state through about 104 mostly-zero weeks. The fitted model
+keeps a short memory: recent activity moves the next few weeks, then every customer
+converges to the same cohort rate, and the rollout, feeding back its own mostly-zero
+samples, drives all of them to the same state. CDNOW's 39 weeks fit inside that memory.
+Candidate tests: retrain electronics on its last 39 calibration weeks, inspect the hidden
+state at the end of calibration, and score teacher-forced one-step predictions.
+
+## Against the bounded-AR models
+
+The developed LSTM and Transformer with bounded activity flags (`active_in_last_<K>_periods`
+plus `has_transacted_before`), next to the benchmarks. Bounded-AR runs exist only on
+electronics and CDNOW, and only for those two models: ValendinLSTM cannot read an AR
+channel (ADR-0004). Each experiment's own `no_ar` arm is shown beside its bounded arm,
+because that pair — same experiment, same budget — is the clean comparison.
+
+Metrics are each suite's own `results.csv`, mean ± sd over replications. Spearman is
+recomputed from the stored forecasts where the cohort rebuilds exactly: electronics, and
+this run's CDNOW. The archived CDNOW suites predate ADR-0009 and use a 38-week holdout
+starting 1997-10-01 against this run's 39 weeks from 09-30, so they are close to, not
+identical with, the benchmark's window, and their Spearman is not recomputed.
+
+| panel | model and features | n | trials / paths | bias % | MAPE | RMSE | Spearman |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
+| electronics | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
+| electronics | **Benchmark: Pareto/NBD** | 1 | — | −63.0 | 65.7 | 0.3758 | 0.297 |
+| electronics | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | +22.4 ± 16.4 | 56.3 ± 7.5 | 0.3767 ± 0.0003 | 0.041 ± 0.065 |
+| electronics | LSTM ar_bounded_32 (`ar_encoding`) | 100 | 50 / 300 | +1.2 ± 23.6 | 46.3 ± 8.4 | 0.3760 ± 0.0003 | 0.257 ± 0.044 |
+| electronics | LSTM ar_bounded_52 (`ar_encoding`) | 100 | 50 / 300 | −8.2 ± 16.4 | 45.4 ± 5.0 | 0.3760 ± 0.0004 | 0.202 ± 0.121 |
+| electronics | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | +23.8 ± 12.8 | 56.3 ± 6.6 | 0.3769 ± 0.0004 | 0.036 ± 0.073 |
+| electronics | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.0 ± 31.1 | 48.4 ± 11.2 | 0.3762 ± 0.0005 | 0.249 ± 0.038 |
+| electronics | Transformer no_ar (`real_panel_arms`) | 20 | 50 / 200 | +15.9 ± 19.2 | 53.0 ± 6.3 | 0.3792 ± 0.0006 | 0.113 ± 0.107 |
+| electronics | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.5 ± 19.9 | 49.5 ± 4.6 | 0.3763 ± 0.0003 | 0.201 ± 0.135 |
+| cdnow | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
+| cdnow | **Benchmark: Pareto/NBD** | 1 | — | −16.0 | 21.0 | 0.1455 | 0.450 |
+| cdnow | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | −0.7 ± 16.2 | 22.4 ± 8.2 | 0.1475 ± 0.0003 | — |
+| cdnow | LSTM ar_bounded_16 (`ar_encoding`) | 100 | 50 / 300 | −8.5 ± 15.2 | 22.6 ± 5.7 | 0.1473 ± 0.0002 | — |
+| cdnow | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | −0.5 ± 23.2 | 26.7 ± 12.4 | 0.1479 ± 0.0007 | — |
+| cdnow | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −11.8 ± 9.9 | 21.0 ± 3.3 | 0.1475 ± 0.0002 | — |
+| cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 ± 17.3 | 25.6 ± 6.9 | 0.1479 ± 0.0006 | — |
+
+The CDNOW Transformer no_ar suite is a partial run (19 forecasts, no `results.csv`) and is
+left out.
+
+Reading:
+
+- **On electronics the bounded flags beat both benchmarks on the level and on MAPE.** The
+  LSTM with flags is within a few points of zero bias (+1.2 and −8.2 in `ar_encoding`,
+  +2.0 in `real_panel_arms`) against ValendinLSTM's +46.0, and its MAPE is 45–48 against
+  70.8 for ValendinLSTM and 65.7 for Pareto/NBD. Pareto/NBD's −63.0 is the unit mismatch
+  described above, so its electronics level is not a like-for-like row.
+- **On electronics the flags fix ranking relative to the count-only models, but do not
+  reach Pareto/NBD.** Spearman rises from 0.03–0.11 without AR to 0.20–0.26 with flags;
+  Pareto/NBD has 0.297. This is the collapse above being lifted by a persistent channel.
+- **On CDNOW the flags move almost nothing, and the count-only LSTM already beats the
+  ValendinLSTM benchmark on level and MAPE.** CDNOW does not collapse, so there is little
+  for the flags to add: bias shifts by 8–11 points towards under-forecasting, MAPE stays
+  within 21–27. Pareto/NBD's MAPE of 21.0 is matched by the LSTM with flags in
+  `real_panel_arms` (21.0 ± 3.3). These CDNOW differences are within one SD and partly
+  confounded by the one-week window difference.
+- **The budgets differ, so the benchmark rows are not a budget-matched comparison.**
+  ValendinLSTM ran 100 trials and 500 paths, the developed models 50 trials and 200–300
+  paths. Monte Carlo noise at 200+ paths is under 2% of the replication SD, so the path
+  count does not move these conclusions; the trial count favours the benchmark.
+- **RMSE separates nothing**: every row on a panel is within 0.003 of the all-zero
+  forecast (0.3775 electronics, 0.1506 CDNOW).
 
 ## The run
 
