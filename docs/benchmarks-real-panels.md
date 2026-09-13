@@ -247,6 +247,58 @@ Reading:
 - **RMSE separates nothing**: every row on a panel is within 0.003 of the all-zero
   forecast (0.3775 electronics, 0.1506 CDNOW).
 
+## LSTM with bounded flags on all four panels
+
+`scripts/run_real_panel_lstm_ar.py --encodings bounded32`, 2026-09-13: the LSTM with the
+transaction count, `week_sin` / `week_cos` and `ar_bounded_32`
+(`active_in_last_{2,4,8,16,32}_periods` + `has_transacted_before`), on the benchmark's
+windows and cohort. 100 replications per panel, each a 100-trial Optuna search and a
+500-path forecast — the benchmark's trial and path budget, so unlike the table above this
+comparison is budget-matched. Depth 32 on CDNOW too, by decision. Scored by the same code
+as the benchmark rows, on the same customers.
+
+| panel | model | n | bias % | MAPE | RMSE | Spearman |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| cdnow | **LSTM + bounded32, sin/cos** | 100 | +37.1 ± 47.7 | 65.3 ± 30.7 | 0.1498 ± 0.0026 | 0.085 ± 0.170 |
+| cdnow | ValendinLSTM (benchmark) | 20 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
+| cdnow | Pareto/NBD (benchmark) | 1 | −16.0 | 21.0 | 0.1455 | 0.450 |
+| cdnow | all-zero | — | −100.0 | 100.0 | 0.1506 | — |
+| electronics | **LSTM + bounded32, sin/cos** | 100 | −1.7 ± 18.9 | 45.0 ± 4.5 | 0.3757 ± 0.0002 | 0.263 ± 0.042 |
+| electronics | ValendinLSTM (benchmark) | 20 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
+| electronics | Pareto/NBD (benchmark) | 1 | −63.0 | 65.7 | 0.3758 | 0.297 |
+| electronics | all-zero | — | −100.0 | 100.0 | 0.3775 | — |
+| gift | **LSTM + bounded32, sin/cos** | 100 | −18.5 ± 15.3 | 31.4 ± 5.2 | 0.1066 ± 0.0001 | 0.331 ± 0.035 |
+| gift | ValendinLSTM (benchmark) | 20 | −15.7 ± 16.4 | 29.7 ± 4.9 | 0.1064 ± 0.0001 | 0.368 ± 0.017 |
+| gift | Pareto/NBD (benchmark) | 1 | −9.9 | 43.1 | 0.1066 | 0.383 |
+| gift | all-zero | — | −100.0 | 100.0 | 0.1075 | — |
+| multichannel | **LSTM + bounded32, sin/cos** | 100 | +17.0 ± 20.0 | 53.2 ± 8.2 | 0.0569 ± 0.0000 | 0.096 ± 0.054 |
+| multichannel | ValendinLSTM (benchmark) | 20 | +66.6 ± 55.5 | 96.6 ± 39.7 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
+| multichannel | Pareto/NBD (benchmark) | 1 | +6.9 | 55.9 | 0.0567 | 0.189 |
+| multichannel | all-zero | — | −100.0 | 100.0 | 0.0569 | — |
+
+Reading:
+
+- **Electronics: the best level and error of anything measured here.** Bias −1.7 ± 18.9
+  and MAPE 45.0 ± 4.5, against ValendinLSTM's +46.0 / 70.8, and Spearman 0.263, close to
+  Pareto/NBD's 0.297. It reproduces the AR-encoding ablation's `ar_bounded_32` electronics
+  arm (+1.2 bias, 46.3 MAPE, 0.257) at twice its trial budget.
+- **Multichannel: the flags lift the collapse, partly.** Bias +17.0 against the
+  benchmark's +66.6 and MAPE 53.2 against 96.6 — slightly better than Pareto/NBD's 55.9 —
+  with a far tighter spread (SD 20 against 55). Ranking rises from 0.005 to 0.096, still
+  half of Pareto/NBD's 0.189.
+- **Gift: on a par with ValendinLSTM, not better.** Every metric overlaps the benchmark
+  within one SD; Spearman is slightly lower (0.331 against 0.368). Gift is the panel that
+  only half-collapsed without AR features, so there was less for the flags to recover.
+- **CDNOW: this configuration fails.** Bias +37.1 with an SD of 47.7, MAPE 65.3 and
+  Spearman 0.085 ± 0.170 — worse than both benchmarks and near no ranking at all, where
+  the archived CDNOW LSTM runs sat at −8.5 to −11.8 bias and ~0.4 Spearman. Two things
+  changed from those runs and this one cannot separate them: the deepest flag is 32 weeks
+  on a 39-week calibration window (they used 16, because a 32-week silence barely occurs
+  while fitting), and the model now reads `week_sin` / `week_cos` (they read no calendar),
+  while weeks 39–51 of the year never occur in CDNOW's calibration. Either is enough to
+  put the holdout outside what was fitted.
+- **RMSE separates nothing**, as before: every row within 0.004 of the all-zero forecast.
+
 ## The run
 
 80 ValendinLSTM studies on rented vast.ai boxes (20 workers, 4 studies each), Pareto/NBD
