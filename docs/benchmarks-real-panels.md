@@ -367,8 +367,47 @@ Reading:
   - *Multichannel:* bounded32 for the level (+17.0, MAPE 53.2 — best MAPE on the panel);
     Pareto/NBD remains the best overall (+6.9, 55.9, 0.189).
 - **The obvious next arm is the combination**: the flags, which hold the level where it is
-  hard, plus the ratio triple, which holds the ranking. The ablation ticket named it and it
-  has not been run.
+  hard, plus the ratio triple, which holds the ranking. Run below.
+
+### Flags plus ratio
+
+`--encodings bounded32ratio`, 2026-09-14: the five flags, `has_transacted_before` and the
+ratio triple together, same model, windows and budget. Bounded32 and ratio repeated for
+reference.
+
+| panel | encoding | n | bias % | MAPE | RMSE | Spearman |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| cdnow | bounded32 | 100 | +37.1 ± 47.7 | 65.3 ± 30.7 | 0.1498 ± 0.0026 | 0.085 ± 0.170 |
+| cdnow | ratio | 100 | +17.6 ± 24.0 | 32.2 ± 14.4 | 0.1466 ± 0.0012 | 0.439 ± 0.009 |
+| cdnow | **bounded32 + ratio** | 100 | +26.5 ± 32.4 | 40.7 ± 26.3 | 0.1466 ± 0.0017 | 0.425 ± 0.025 |
+| electronics | bounded32 | 100 | −1.7 ± 18.9 | 45.0 ± 4.5 | 0.3757 ± 0.0002 | 0.263 ± 0.042 |
+| electronics | ratio | 100 | +49.1 ± 37.4 | 71.0 ± 29.8 | 0.3772 ± 0.0034 | 0.306 ± 0.013 |
+| electronics | **bounded32 + ratio** | 100 | +33.0 ± 23.3 | 59.4 ± 15.5 | 0.3762 ± 0.0007 | 0.302 ± 0.014 |
+| gift | bounded32 | 100 | −18.5 ± 15.3 | 31.4 ± 5.2 | 0.1066 ± 0.0001 | 0.331 ± 0.035 |
+| gift | ratio | 100 | −2.9 ± 16.4 | 32.4 ± 10.0 | 0.1066 ± 0.0007 | 0.392 ± 0.008 |
+| gift | **bounded32 + ratio** | 100 | +5.3 ± 18.8 | 35.3 ± 10.7 | 0.1068 ± 0.0020 | 0.385 ± 0.013 |
+| multichannel | bounded32 | 100 | +17.0 ± 20.0 | 53.2 ± 8.2 | 0.0569 ± 0.0000 | 0.096 ± 0.054 |
+| multichannel | ratio | 100 | +79.7 ± 47.8 | 98.0 ± 43.0 | 0.0571 ± 0.0015 | 0.175 ± 0.015 |
+| multichannel | **bounded32 + ratio** | 100 | +55.0 ± 25.3 | 73.8 ± 18.3 | 0.0569 ± 0.0002 | 0.176 ± 0.015 |
+
+Reading:
+
+- **The combination keeps the ratio's ranking and does not keep the flags' level.**
+  Spearman is within 0.015 of ratio alone on every panel (0.425, 0.302, 0.385, 0.176). Bias
+  lands between the two parents on the panels where the level is hard — +33.0 on
+  electronics (flags −1.7, ratio +49.1), +55.0 on multichannel (flags +17.0, ratio +79.7) —
+  so carrying the flags does not stop the over-forecasting the ratio channels bring; it
+  only halves it. The hope that the two sets would each do their own job is not borne out.
+- **The ratio channels rescue CDNOW from the 32-week flag.** Bounded32 alone ranks at
+  0.085 there; with the ratio triple added the same flags rank at 0.425. Whatever the
+  over-deep flag does to the fit, a channel that stays inside its calibration range
+  outweighs it for ordering customers.
+- **It is a compromise, not a winner.** On electronics and multichannel it is better than
+  ratio on level, MAPE and spread (bias SD 23–25 against 37–48) at the same ranking, and
+  worse than bounded32 on level. On CDNOW and gift it is slightly worse than ratio alone
+  on every metric. No panel has it as the best configuration.
+- **So the level and the ranking still come from different encodings** on electronics and
+  multichannel, and ratio alone remains the best single choice on CDNOW and gift.
 
 ## The run
 
