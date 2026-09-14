@@ -17,6 +17,9 @@ the customer's history from `ENCODINGS`. Every other panel column is discarded.
     ratio      recency_over_tenure, transaction_rate, saturating_tenure_<C>,
                has_transacted_before: the bounded Pareto/NBD triple; the first two
                cannot leave their calibration range (`.scratch/ar-encoding-support/`)
+    bounded32ratio  both sets together: the flags, which protected the level on the
+               panels where it is hard, and the ratio triple, which reached Pareto/NBD's
+               ranking on three of four (docs/benchmarks-real-panels.md)
 
 Definitions are those of `scripts/run_ar_encoding_ablation.py`, so a result here reads
 straight against that ablation. The saturation constant C is a quarter of the calibration
@@ -87,10 +90,15 @@ def ar_features(encoding: str, panel: str) -> tuple[str, ...]:
     if encoding == "ratio":
         return ("recency_over_tenure", "transaction_rate",
                 f"saturating_tenure_{SATURATION[panel]}_periods", "has_transacted_before")
+    if encoding == "bounded32ratio":
+        # The flags hold the level where it is hard; the ratio triple holds the ranking.
+        # `has_transacted_before` belongs to both sets and is carried once.
+        return ar_features("bounded32", panel) + tuple(
+            c for c in ar_features("ratio", panel) if c != "has_transacted_before")
     raise ValueError(f"unknown encoding {encoding!r}; choose from {ENCODINGS}")
 
 
-ENCODINGS = ("bounded32", "log", "ratio")
+ENCODINGS = ("bounded32", "log", "ratio", "bounded32ratio")
 
 # The LSTM space of the AR-encoding ablation and the real-panel arms. `embedding_dim` is
 # absent: the default `valendin` embedder has no common width to search.
