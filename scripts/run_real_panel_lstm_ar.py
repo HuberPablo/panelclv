@@ -32,6 +32,13 @@ above T_CAL, where it would be an exact copy of `has_transacted_before`.
 **Windows, cohort and scoring are the benchmark's**, imported from its runner rather than
 restated, so the runs cannot drift apart.
 
+**`--calibration 3y`** moves electronics, gift and multichannel to a three-year calibration:
+two years to fit the weights, the third as the validation window, then the year after as
+holdout (CDNOW's 77-week panel has no room for it and is left out). The encodings are
+unchanged — C stays 26 — so the calibration window is the only thing that differs from
+the `2y` runs, and the suites carry a `_cal3y` tag. Its holdout years differ from the
+benchmark's, so its report does not set the benchmark rows beside it.
+
 **Budget.** 100 replications per (encoding, panel), each a 100-trial Optuna search, the
 ADR-0008 refit and a 500-path Monte Carlo forecast. One suite per replication. The work
 list is encoding-major, then panel, then replication, so striding it `i::N` gives every
@@ -42,6 +49,7 @@ Usage:
     python scripts/run_real_panel_lstm_ar.py --encodings log,ratio --worker 3/20
     python scripts/run_real_panel_lstm_ar.py --encodings log,ratio --check-complete
     python scripts/run_real_panel_lstm_ar.py --encodings bounded32,log,ratio --report
+    python scripts/run_real_panel_lstm_ar.py --calibration 3y --encodings log --worker 1/20
 """
 
 from __future__ import annotations
@@ -65,7 +73,6 @@ from panelclv.studies import ModelSpec, StudySuiteConfig, run_study_suite
 import run_real_panel_benchmarks as benchmarks
 
 STUDIES_BASE = benchmarks.STUDIES_BASE
-PANELS = benchmarks.PANELS
 
 # --- budget ----------------------------------------------------------------------
 # Suite names do not carry these; `check_complete` reads them back off config.json (F23).
@@ -77,6 +84,39 @@ BASE_SEED = 42
 # Half-saturation constant of `saturating_tenure_<C>_periods`: about a quarter of the
 # calibration window, as in the AR-encoding ablation.
 SATURATION = {"cdnow": 10, "electronics": 26, "gift": 26, "multichannel": 26}
+
+# Three calibration years: fit on two, validate on the third, forecast the year after.
+# Every date is a week-bucket edge under `period_calendar.week_start` (ADR-0009).
+WINDOWS_3Y: dict[str, dict[str, object]] = {
+    "electronics": dict(
+        training_start="1999-01-01",
+        validation_start="2001-01-01",
+        training_end="2001-12-31",
+        holdout_start="2002-01-01",
+        holdout_end="2002-12-31",        # the panel's last year
+        clip_target_upper=6,
+    ),
+    "gift": dict(
+        training_start="2001-02-25",     # 2001 week 8, the panel's first week
+        validation_start="2003-02-25",   # 2003 week 8
+        training_end="2004-02-24",       # end of 2004 week 7 — 156 calibration weeks
+        holdout_start="2004-02-25",      # 2004 week 8
+        holdout_end="2005-02-24",        # end of 2005 week 7
+    ),
+    "multichannel": dict(
+        training_start="2005-01-01",
+        validation_start="2007-01-01",
+        training_end="2007-12-31",
+        holdout_start="2008-01-01",
+        holdout_end="2008-12-31",
+    ),
+}
+
+# `--calibration` -> the windows it reads and the panels it covers.
+CALIBRATIONS: dict[str, dict[str, dict[str, object]]] = {
+    "2y": benchmarks.WINDOWS,
+    "3y": WINDOWS_3Y,
+}
 
 
 def ar_features(encoding: str, panel: str) -> tuple[str, ...]:
@@ -113,8 +153,8 @@ SEARCH_SPACE: dict[str, object] = {
 TRAINING = {"n_epochs": 100, "patience": 7, "verbose": False, "loss_type": "cross_entropy"}
 
 
-def panel_config(encoding: str, panel: str) -> PanelConfig:
-    """Count, sin/cos week and one AR encoding, on the benchmark's windows."""
+def panel_config(encoding: str, panel: str, cal: str) -> PanelConfig:
+    """Count, sin/cos week and one AR encoding, on the windows of calibration `cal`."""
     return PanelConfig(
         id_col="Id",
         target_col="Transactions",
@@ -123,7 +163,7 @@ def panel_config(encoding: str, panel: str) -> PanelConfig:
         time_features={"add_week_sin_cos": True},
         ar_features=ar_features(encoding, panel),
         embedded_cols={"Transactions": "auto"},
-        **benchmarks.WINDOWS[panel],
+        **CALIBRATIONS[cal][panel],
     )
 
 
@@ -141,33 +181,35 @@ def check_arm_depth(data: dict) -> None:
         raise ValueError(f"{data.get('panel_name')}: {bad} cannot vary with T_CAL={t_cal}")
 
 
-def build_data(encoding: str, panel: str) -> dict:
+def build_data(encoding: str, panel: str, cal: str) -> dict:
     path = benchmarks.CLEAN / f"{panel}_customer_week_panel.csv"
     if not path.exists():
         raise FileNotFoundError(f"{path} not found — push the panels to this box (Rules.md §3)")
     data = panel_dataset.prepare_dataset(
-        pd.read_csv(path), panel_config(encoding, panel), verbose=False)
+        pd.read_csv(path), panel_config(encoding, panel, cal), verbose=False)
     data["panel_name"] = panel
     check_arm_depth(data)
     return data
 
 
-def suite_name(encoding: str, panel: str, replication: int) -> str:
-    """`real_panel_lstm_<encoding>__LSTM__<panel>__r<NNN>` — disjoint per work item.
+def suite_name(encoding: str, panel: str, replication: int, cal: str) -> str:
+    """`real_panel_lstm_<encoding>[_cal3y]__LSTM__<panel>__r<NNN>` — disjoint per item.
 
-    `bounded32` resolves to `real_panel_lstm_bounded32`, the name its first run was
-    stored under, so that run is read by this script unchanged.
+    The `2y` runs carry no tag, so `bounded32` resolves to `real_panel_lstm_bounded32`,
+    the name its first run was stored under, and the finished runs read unchanged.
     """
-    return f"real_panel_lstm_{encoding}__LSTM__{panel}__r{replication:03d}"
+    tag = "" if cal == "2y" else f"_cal{cal}"
+    return f"real_panel_lstm_{encoding}{tag}__LSTM__{panel}__r{replication:03d}"
 
 
-def work_list(encodings: tuple[str, ...]) -> list[tuple[str, str, int]]:
+def work_list(encodings: tuple[str, ...], cal: str) -> list[tuple[str, str, int]]:
     """Every (encoding, panel, replication), encoding-major then panel-major."""
-    return [(e, p, r) for e in encodings for p in PANELS for r in range(N_REPLICATIONS)]
+    return [(e, p, r) for e in encodings for p in CALIBRATIONS[cal]
+            for r in range(N_REPLICATIONS)]
 
 
-def forecast_path(encoding: str, panel: str, replication: int) -> Path:
-    return (STUDIES_BASE / suite_name(encoding, panel, replication)
+def forecast_path(encoding: str, panel: str, replication: int, cal: str) -> Path:
+    return (STUDIES_BASE / suite_name(encoding, panel, replication, cal)
             / "LSTM" / "Predictions" / "Prediction_1.csv")
 
 
@@ -176,20 +218,20 @@ def model_spec(n_trials: int, training: dict) -> ModelSpec:
                      search_space=dict(SEARCH_SPACE), training=dict(training))
 
 
-def run_worker(encodings: tuple[str, ...], index: int, total: int) -> int:
+def run_worker(encodings: tuple[str, ...], cal: str, index: int, total: int) -> int:
     """Train this worker's stride; a finished replication is skipped, a cut one redone."""
-    mine = work_list(encodings)[index - 1::total]
+    mine = work_list(encodings, cal)[index - 1::total]
     print(f"worker {index}/{total}: {len(mine)} suites", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     cache: dict[tuple[str, str], dict] = {}
     for n, (enc, panel, rep) in enumerate(mine, start=1):
-        name = suite_name(enc, panel, rep)
-        if forecast_path(enc, panel, rep).exists():
+        name = suite_name(enc, panel, rep, cal)
+        if forecast_path(enc, panel, rep, cal).exists():
             print(f"[{n}/{len(mine)}] {name}: done, skipping", flush=True)
             continue
         if (enc, panel) not in cache:
-            cache[(enc, panel)] = build_data(enc, panel)
+            cache[(enc, panel)] = build_data(enc, panel, cal)
         print(f"[{n}/{len(mine)}] {name}: training", flush=True)
         run_study_suite(StudySuiteConfig(
             studies_base_path=str(STUDIES_BASE),
@@ -206,17 +248,18 @@ def run_worker(encodings: tuple[str, ...], index: int, total: int) -> int:
     return 0
 
 
-def preflight(encodings: tuple[str, ...]) -> int:
+def preflight(encodings: tuple[str, ...], cal: str) -> int:
     """Build every (encoding, panel) and train each one tiny in a temporary directory."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     failures = []
     with tempfile.TemporaryDirectory() as tmp:
         for enc in encodings:
-            for panel in PANELS:
+            for panel in CALIBRATIONS[cal]:
                 try:
-                    data = build_data(enc, panel)
+                    data = build_data(enc, panel, cal)
                     print(f"{enc:9s} {panel:12s} N={len(data['ids']):5d} "
-                          f"T_CAL={int(data['T_CAL']):3d} seq_cols={data['seq_cols']}")
+                          f"T_CAL={int(data['T_CAL']):3d} T_HOLD={int(data['T_HOLD']):3d} "
+                          f"val_periods={data.get('n_val_periods')} seq_cols={data['seq_cols']}")
                     run_study_suite(StudySuiteConfig(
                         studies_base_path=tmp, suite_name=f"preflight__{enc}__{panel}",
                         n_studies_per_model=1, n_simulations=2, device=device, data=data,
@@ -234,22 +277,22 @@ def preflight(encodings: tuple[str, ...]) -> int:
     return 0
 
 
-def check_complete(encodings: tuple[str, ...]) -> int:
+def check_complete(encodings: tuple[str, ...], cal: str) -> int:
     """What the declaration owes against what is on disk, budget included (F23)."""
     missing, wrong = [], []
     for enc in encodings:
-        for panel in PANELS:
+        for panel in CALIBRATIONS[cal]:
             have = 0
             for rep in range(N_REPLICATIONS):
-                if not forecast_path(enc, panel, rep).exists():
-                    missing.append(suite_name(enc, panel, rep))
+                if not forecast_path(enc, panel, rep, cal).exists():
+                    missing.append(suite_name(enc, panel, rep, cal))
                     continue
                 have += 1
                 cfg = json.loads(
-                    (STUDIES_BASE / suite_name(enc, panel, rep) / "config.json").read_text())
+                    (STUDIES_BASE / suite_name(enc, panel, rep, cal) / "config.json").read_text())
                 budget = (cfg["n_simulations"], cfg["models"][0]["n_trials"])
                 if budget != (N_SIMULATIONS, N_TRIALS):
-                    wrong.append(f"{suite_name(enc, panel, rep)} {budget}")
+                    wrong.append(f"{suite_name(enc, panel, rep, cal)} {budget}")
             print(f"{enc:9s} {panel:12s} LSTM {have:3d}/{N_REPLICATIONS}")
     for name in missing[:20]:
         print(f"  MISSING      {name}")
@@ -263,11 +306,16 @@ def check_complete(encodings: tuple[str, ...]) -> int:
     return 0
 
 
-def report(encodings: tuple[str, ...]) -> None:
-    """One markdown table per panel: every encoding, the two benchmarks, the zero forecast."""
-    for panel in PANELS:
+def report(encodings: tuple[str, ...], cal: str) -> None:
+    """One markdown table per panel: every encoding, the benchmarks, the zero forecast.
+
+    The benchmark rows are scored on this run's actuals, so they are shown only where the
+    windows are the benchmark's own (`2y`); on any other calibration they forecast a
+    different holdout year.
+    """
+    for panel in CALIBRATIONS[cal]:
         # The cohort and holdout do not depend on the encoding, so any one rebuilds them.
-        data = build_data(encodings[0], panel)
+        data = build_data(encodings[0], panel, cal)
         actual = holdout_actuals(data)
         ref_ids = np.asarray(data["ids"])
 
@@ -275,18 +323,20 @@ def report(encodings: tuple[str, ...]) -> None:
             return pd.DataFrame([benchmarks.score(d, actual, ref_ids) for d in model_dirs])
 
         rows = [(f"LSTM + ar_{enc}, sin/cos",
-                 distribution([forecast_path(enc, panel, r).parents[1]
+                 distribution([forecast_path(enc, panel, r, cal).parents[1]
                                for r in range(N_REPLICATIONS)
-                               if forecast_path(enc, panel, r).exists()]))
+                               if forecast_path(enc, panel, r, cal).exists()]))
                 for enc in encodings]
-        rows.append(("ValendinLSTM (benchmark)",
-                     distribution([benchmarks.forecast_path(panel, r).parents[1]
-                                   for r in range(benchmarks.N_REPLICATIONS)
-                                   if benchmarks.forecast_path(panel, r).exists()])))
-        pareto_dir = benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel) / "ParetoNBD"
-        rows.append(("Pareto/NBD (benchmark)",
-                     distribution([pareto_dir]) if (pareto_dir / "Predictions").is_dir()
-                     else pd.DataFrame()))
+        if cal == "2y":
+            rows.append(("ValendinLSTM (benchmark)",
+                         distribution([benchmarks.forecast_path(panel, r).parents[1]
+                                       for r in range(benchmarks.N_REPLICATIONS)
+                                       if benchmarks.forecast_path(panel, r).exists()])))
+            pareto_dir = (benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel)
+                          / "ParetoNBD")
+            rows.append(("Pareto/NBD (benchmark)",
+                         distribution([pareto_dir]) if (pareto_dir / "Predictions").is_dir()
+                         else pd.DataFrame()))
         zero = compute_forecast_metrics(actual, np.zeros_like(actual, dtype=float))
 
         def cell(df: pd.DataFrame, m: str, digits: int) -> str:
@@ -314,6 +364,8 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--encodings", required=True,
                         help=f"comma-separated, from {', '.join(ENCODINGS)}")
+    parser.add_argument("--calibration", choices=sorted(CALIBRATIONS), default="2y",
+                        help="2y: the benchmark's windows; 3y: fit two years, validate one")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--worker", metavar="I/N", help="train this worker's stride")
     mode.add_argument("--preflight", action="store_true")
@@ -326,14 +378,15 @@ def main() -> None:
     if unknown or not encodings:
         parser.error(f"unknown encoding(s) {unknown}; choose from {ENCODINGS}")
 
+    cal = args.calibration
     if args.worker:
         index, total = (int(x) for x in args.worker.split("/"))
-        sys.exit(run_worker(encodings, index, total))
+        sys.exit(run_worker(encodings, cal, index, total))
     if args.preflight:
-        sys.exit(preflight(encodings))
+        sys.exit(preflight(encodings, cal))
     if args.check_complete:
-        sys.exit(check_complete(encodings))
-    report(encodings)
+        sys.exit(check_complete(encodings, cal))
+    report(encodings, cal)
 
 
 if __name__ == "__main__":
