@@ -8,7 +8,7 @@ Two other files sit behind it and neither repeats what is here:
 - **`Rules.md`** — the *contract*. Why the work is split the way it is, why each
   (model, arm) gets its own tree, how machines are chosen, what the money rules are.
   Read it once before your first run, and again before changing how a run is split.
-- **`known_failures.md`** — the *catalogue*, F1–F35. Every entry cost real billed hours.
+- **`known_failures.md`** — the *catalogue*, F1–F36. Every entry cost real billed hours.
   Read it before renting; you will hit some of them.
 
 ## The shape of a run

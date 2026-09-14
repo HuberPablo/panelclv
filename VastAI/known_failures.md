@@ -975,3 +975,24 @@ Recorded because both are easy to reintroduce.
   confirmation; the launcher then retired an already-destroyed box and the worker was
   queued for replacement twice. The reaper now leaves any box alone while a launcher holds
   `add_workers.lock` and has not marked that box `VastAI/state/started/<id>`.
+
+## F36 — A launcher killed right after renting leaves a box that no one owns
+
+**Symptom.** During the log/ratio LSTM run the orchestrating session's task manager killed
+`add_workers.sh` twice, each time seconds after `renting offer … for worker 8/20` (it
+reported low memory; 24 GB was free). Each kill left an instance loading on vast with no
+launcher waiting on it, no line in `assignments.txt`, and the launcher lock released.
+
+**Cause.** The launcher records `<instance> <worker>` only after `vast_launch.sh` returns,
+and `vast_launch.sh` itself waits for the box. A kill inside that window leaves a billing
+box with no worker attached. The reaper's idle backstop would still retire it after
+`IDLE_MINUTES`, but with worker `?` — so nothing says which slice to re-rent.
+
+**Check.** After any launcher dies unexpectedly: compare `vastai show instances` against
+`assignments.txt` and destroy what is unlisted.
+
+**Fix.** Both orphans were destroyed by hand within minutes and the replacements relaunched
+detached (`setsid nohup ./VastAI/launch/add_workers.sh … >> log &`), which the session's
+task manager does not kill; the supervisors already ran that way. To close the gap in the
+tooling, record the assignment as soon as the instance id exists — before any waiting —
+and launch long-lived launchers detached.

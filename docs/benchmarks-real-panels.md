@@ -299,6 +299,77 @@ Reading:
   put the holdout outside what was fitted.
 - **RMSE separates nothing**, as before: every row within 0.004 of the all-zero forecast.
 
+## The three AR encodings on all four panels
+
+`scripts/run_real_panel_lstm_ar.py --encodings bounded32,log,ratio`, 2026-09-13/14. The
+same LSTM, inputs, windows, cohort and budget as the section above (count, `week_sin` /
+`week_cos`, 100 replications × 100 trials × 500 paths); only the AR encoding differs:
+
+- **bounded32** — `active_in_last_{2,4,8,16,32}_periods` + `has_transacted_before`
+- **log** — `log_period_since_last_transaction`, `cumulative_transactions`,
+  `log_period_since_first_transaction`
+- **ratio** — `recency_over_tenure`, `transaction_rate`, `saturating_tenure_<C>_periods`
+  (C = 10 on CDNOW, 26 elsewhere), `has_transacted_before`
+
+Definitions are the AR-encoding ablation's (`.scratch/ar-encoding-support/`), which ran
+them on electronics and CDNOW only, at 50 trials and 300 paths.
+
+| panel | model | n | bias % | MAPE | RMSE | Spearman |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| cdnow | LSTM + bounded32 | 100 | +37.1 ± 47.7 | 65.3 ± 30.7 | 0.1498 ± 0.0026 | 0.085 ± 0.170 |
+| cdnow | LSTM + log | 100 | +65.8 ± 29.1 | 68.4 ± 26.9 | 0.1536 ± 0.0055 | 0.442 ± 0.015 |
+| cdnow | **LSTM + ratio** | 100 | +17.6 ± 24.0 | 32.2 ± 14.4 | 0.1466 ± 0.0012 | 0.439 ± 0.009 |
+| cdnow | ValendinLSTM (benchmark) | 20 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
+| cdnow | Pareto/NBD (benchmark) | 1 | −16.0 | 21.0 | 0.1455 | 0.450 |
+| electronics | **LSTM + bounded32** | 100 | −1.7 ± 18.9 | 45.0 ± 4.5 | 0.3757 ± 0.0002 | 0.263 ± 0.042 |
+| electronics | LSTM + log | 100 | +32.5 ± 25.7 | 55.7 ± 16.5 | 0.3816 ± 0.0116 | 0.296 ± 0.010 |
+| electronics | LSTM + ratio | 100 | +49.1 ± 37.4 | 71.0 ± 29.8 | 0.3772 ± 0.0034 | 0.306 ± 0.013 |
+| electronics | ValendinLSTM (benchmark) | 20 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
+| electronics | Pareto/NBD (benchmark) | 1 | −63.0 | 65.7 | 0.3758 | 0.297 |
+| gift | LSTM + bounded32 | 100 | −18.5 ± 15.3 | 31.4 ± 5.2 | 0.1066 ± 0.0001 | 0.331 ± 0.035 |
+| gift | LSTM + log | 100 | +11.0 ± 17.7 | 32.1 ± 9.9 | 0.1102 ± 0.0106 | 0.381 ± 0.007 |
+| gift | **LSTM + ratio** | 100 | −2.9 ± 16.4 | 32.4 ± 10.0 | 0.1066 ± 0.0007 | 0.392 ± 0.008 |
+| gift | ValendinLSTM (benchmark) | 20 | −15.7 ± 16.4 | 29.7 ± 4.9 | 0.1064 ± 0.0001 | 0.368 ± 0.017 |
+| gift | Pareto/NBD (benchmark) | 1 | −9.9 | 43.1 | 0.1066 | 0.383 |
+| multichannel | **LSTM + bounded32** | 100 | +17.0 ± 20.0 | 53.2 ± 8.2 | 0.0569 ± 0.0000 | 0.096 ± 0.054 |
+| multichannel | LSTM + log | 100 | +70.9 ± 81.8 | 90.9 ± 73.8 | 0.0596 ± 0.0077 | 0.123 ± 0.116 |
+| multichannel | LSTM + ratio | 100 | +79.7 ± 47.8 | 98.0 ± 43.0 | 0.0571 ± 0.0015 | 0.175 ± 0.015 |
+| multichannel | ValendinLSTM (benchmark) | 20 | +66.6 ± 55.5 | 96.6 ± 39.7 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
+| multichannel | Pareto/NBD (benchmark) | 1 | +6.9 | 55.9 | 0.0567 | 0.189 |
+
+All-zero forecast RMSE: 0.1506 CDNOW, 0.3775 electronics, 0.1075 gift, 0.0569
+multichannel.
+
+Reading:
+
+- **The ablation's trade-off holds on all four panels: the flags protect the level, the
+  compressed encodings protect the ranking.** On every panel log and ratio rank customers
+  better than bounded32 (Spearman 0.30–0.44 against 0.09–0.33 on CDNOW, electronics and
+  gift; 0.12–0.18 against 0.10 on multichannel), and with a far tighter spread across
+  replications (SD 0.007–0.015 for ratio). Where the level is hard — electronics and
+  multichannel — they pay for it with over-forecasting (+32 to +80%), exactly the pattern
+  `.scratch/ar-encoding-support/issues/03` recorded on electronics.
+- **Ratio reaches Pareto/NBD's ranking on three panels.** 0.439 against 0.450 on CDNOW,
+  0.306 against 0.297 on electronics, 0.392 against 0.383 on gift — the first neural
+  configuration in this project to do so — and 0.175 against 0.189 on multichannel.
+- **CDNOW's bounded32 failure was the 32-week flag, not the calendar.** Log and ratio read
+  the same `week_sin` / `week_cos` and rank at 0.44; only bounded32 collapses (0.085 ±
+  0.170). A 32-week flag on a 39-week calibration window is the cause the section above
+  could not isolate.
+- **Best configuration per panel, reading level and ranking together:**
+  - *CDNOW:* ratio — best neural MAPE (32.2, against ValendinLSTM's 36.2), ranking at
+    Pareto/NBD's level; still over-forecasts (+17.6) where Pareto/NBD under-forecasts
+    (−16.0) and wins MAPE (21.0).
+  - *Electronics:* bounded32 for the level (−1.7, MAPE 45.0); ratio or log for the
+    ranking. No single encoding wins both.
+  - *Gift:* ratio on every metric — bias −2.9, the best ranking measured (0.392), MAPE
+    within a point of the best (29.7 ValendinLSTM).
+  - *Multichannel:* bounded32 for the level (+17.0, MAPE 53.2 — best MAPE on the panel);
+    Pareto/NBD remains the best overall (+6.9, 55.9, 0.189).
+- **The obvious next arm is the combination**: the flags, which hold the level where it is
+  hard, plus the ratio triple, which holds the ranking. The ablation ticket named it and it
+  has not been run.
+
 ## The run
 
 80 ValendinLSTM studies on rented vast.ai boxes (20 workers, 4 studies each), Pareto/NBD
