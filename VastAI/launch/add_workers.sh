@@ -20,6 +20,12 @@ export PATH="$HOME/venvs/panelclv/bin:$HOME/thesis-agent/venv/bin:$PATH"
 #   RUNNER=scripts/run_real_panel_benchmarks.py TOTAL=20 ./VastAI/launch/add_workers.sh ...
 RUNNER="${RUNNER:-scripts/run_ar_encoding_ablation.py}"
 TOTAL="${TOTAL:-10}"
+# What start_shard pushes before the trainer starts, relative to the repo root. `{IDX}`
+# is replaced by each box's worker index, so a resumed slice can be sent only its own
+# finished forecasts alongside the panels and skip them instead of retraining:
+#   DATA_SRC='VastAI/state/seed_w{IDX}' DATA_DST=. ./VastAI/launch/add_workers.sh ...
+DATA_SRC="${DATA_SRC:-Datasets/Dataset_clean}"
+DATA_DST="${DATA_DST:-Datasets/Dataset_clean}"
 LOG=VastAI/state/add_workers.log
 REPLACE=VastAI/state/needs_replacement.txt
 mkdir -p VastAI/state/worker_logs VastAI/state/started
@@ -126,7 +132,7 @@ for pair in "$@"; do
     # retrying; the endpoint is re-read first, since vast can remap ports on a restart.
     for attempt in 1 2; do
       read -r HOST PORT STATUS < <(endpoint "$ID")
-      INSTANCE_ID="$ID" DATA_SRC=Datasets/Dataset_clean DATA_DST=Datasets/Dataset_clean \
+      INSTANCE_ID="$ID" DATA_SRC="${DATA_SRC//\{IDX\}/$IDX}" DATA_DST="$DATA_DST" \
       RUNNER_CMD="$RUNNER --worker $IDX/$TOTAL" \
         ./VastAI/launch/start_shard.sh "$HOST" "$PORT" "$(basename "$RUNNER" .py)" worker "$IDX/$TOTAL" \
         >> VastAI/state/worker_logs/start_${ID}_w${IDX}.log 2>&1
