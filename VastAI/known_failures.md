@@ -996,3 +996,32 @@ detached (`setsid nohup ./VastAI/launch/add_workers.sh … >> log &`), which the
 task manager does not kill; the supervisors already ran that way. To close the gap in the
 tooling, record the assignment as soon as the instance id exists — before any waiting —
 and launch long-lived launchers detached.
+
+## F37 — The account runs out of credit mid-run, and vast stops the boxes
+
+**Symptom.** Overnight, six of the 3-year run's slowest workers went from `running` to
+`exited` / `stopped` at about 23:15 and stayed there. The reaper logged, every cycle,
+
+    51036725 EXITED — cannot pull, NOT destroying. Inspect or destroy by hand.
+
+The fleet monitor said nothing: its pattern listed crashes, idle boxes and budget, not
+`EXITED`. The budget watchdog kept counting the stopped boxes' storage charge as spend.
+
+**Cause.** The vast.ai account balance reached zero. vast stops the instances rather than
+destroying them, so they keep billing for storage but cannot be reached, pulled from or
+restarted until the account is topped up. The run's own watchdog cap ($15) was nowhere
+near reached — the account ceiling is a separate, lower limit that nothing in the tooling
+checks.
+
+**Check.** `vastai show user` for the balance before a long run, against the watchdog cap;
+and `actual_status` of every instance. An `exited` box in a fleet that did not finish is
+this, F12, or a host failure.
+
+**Fix.** Top the account up, then treat the stopped boxes as lost — not restarted: a restart
+may re-pull the image (F14) or wait for a GPU someone else has taken (F12), and the slowest
+workers are the ones left. Destroy them, and resume their slices on fresh boxes seeded with
+what those slices already finished, so only the missing studies are trained:
+`add_workers.sh` takes `DATA_SRC='VastAI/state/seed_w{IDX}' DATA_DST=.`, each seed holding
+the panels plus that worker's finished `Prediction_1.csv` files. In this run the pull
+interval bounded the loss to one unpulled study per box; 72 missing studies were finished
+on six fast boxes in 55 minutes for $0.33. Watch patterns must include `EXITED`.

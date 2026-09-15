@@ -409,6 +409,67 @@ Reading:
 - **So the level and the ranking still come from different encodings** on electronics and
   multichannel, and ratio alone remains the best single choice on CDNOW and gift.
 
+## Three-year calibration
+
+`scripts/run_real_panel_lstm_ar.py --calibration 3y`, 2026-09-14/15: the same four LSTM
+arms on electronics, gift and multichannel, calibrating on three years instead of two —
+the first two to fit the weights, the third as the validation window — and forecasting the
+year after. Encodings (C stays 26), budget (100 × 100 trials × 500 paths) and cohort are
+unchanged. CDNOW's panel has no room for it.
+
+| panel | fit | validation | holdout | holdout transactions |
+| --- | --- | --- | --- | ---: |
+| electronics | 1999–2000 | 2001 | 2002 | 1,541 |
+| gift | 2001 w8 → 2003 w7 | 2003 w8 → 2004 w7 | 2004 w8 → 2005 w7 | 1,040 |
+| multichannel | 2005–2006 | 2007 | 2008 | 173 |
+
+**The holdout year moves with the window**, so each 3-year row forecasts a different year
+from its 2-year counterpart, on different actuals. The comparison below reads the two side
+by side and cannot, on its own, attribute a change to the extra calibration year rather
+than to an easier or harder holdout year. No benchmark was fitted on these windows.
+
+Each cell is bias % / MAPE / Spearman, mean over 100 replications (SDs in the report).
+
+| panel | encoding | 2-year calibration | **3-year calibration** |
+| --- | --- | --- | --- |
+| electronics | bounded32 | −1.7 / 45.0 / 0.263 | **−12.8 / 38.2 / 0.322** |
+| electronics | log | +32.5 / 55.7 / 0.296 | **+10.3 / 40.0 / 0.307** |
+| electronics | ratio | +49.1 / 71.0 / 0.306 | **+6.0 / 39.1 / 0.323** |
+| electronics | bounded32 + ratio | +33.0 / 59.4 / 0.302 | **+8.8 / 39.9 / 0.323** |
+| gift | bounded32 | −18.5 / 31.4 / 0.331 | **−5.4 / 27.9 / 0.423** |
+| gift | log | +11.0 / 32.1 / 0.381 | **+33.1 / 38.3 / 0.430** |
+| gift | ratio | −2.9 / 32.4 / 0.392 | **+15.1 / 31.3 / 0.441** |
+| gift | bounded32 + ratio | +5.3 / 35.3 / 0.385 | **+15.0 / 30.7 / 0.441** |
+| multichannel | bounded32 | +17.0 / 53.2 / 0.096 | **+33.3 / 63.8 / 0.236** |
+| multichannel | log | +70.9 / 90.9 / 0.123 | **+57.0 / 75.0 / 0.248** |
+| multichannel | ratio | +79.7 / 98.0 / 0.175 | **+46.2 / 68.1 / 0.241** |
+| multichannel | bounded32 + ratio | +55.0 / 73.8 / 0.176 | **+47.1 / 68.3 / 0.240** |
+
+All-zero RMSE on the 3-year holdouts: 0.4067 electronics, 0.1015 gift, 0.0490
+multichannel; every LSTM row is within 0.003 of it, as before.
+
+Reading:
+
+- **Ranking improves on every panel and every encoding.** Electronics 0.26–0.31 → 0.31–0.32,
+  gift 0.33–0.39 → 0.42–0.44, multichannel 0.10–0.18 → 0.24–0.25. Across-replication SD of
+  Spearman falls too (0.004–0.032). This is the most consistent effect in the table and the
+  one least likely to be an artefact of the holdout year, since it holds on three panels
+  with three different years.
+- **On electronics the encodings converge.** At two years the level ranged from −1.7 to
+  +49.1 and MAPE from 45 to 71 depending on the encoding; at three years every encoding sits
+  within −13 to +10 and MAPE 38–40, with bias SD 13–19 against 19–37. The flags-versus-ratio
+  trade-off that dominated the 2-year results largely disappears when the model sees a
+  longer history. Ratio is the best single row: +6.0 / 39.1 / 0.323.
+- **Gift keeps the trade-off.** Bounded32 has the best level and MAPE (−5.4 / 27.9, the best
+  MAPE recorded on gift), ratio and flags + ratio the best ranking (0.441). Log over-forecasts
+  (+33.1).
+- **Multichannel ranks far better but still over-forecasts.** Every encoding over-forecasts
+  by +33 to +57% on a holdout of only 173 transactions, so the level is fragile there;
+  bounded32 is still the least biased.
+- **What would make the attribution clean**: Pareto/NBD fitted on the same 3-year windows. It
+  is a single local MCMC fit per panel, so it would show whether 2002, 2004–05 and 2008 are
+  simply easier years to forecast.
+
 ## The run
 
 80 ValendinLSTM studies on rented vast.ai boxes (20 workers, 4 studies each), Pareto/NBD
