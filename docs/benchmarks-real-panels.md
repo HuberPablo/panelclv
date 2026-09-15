@@ -470,6 +470,75 @@ Reading:
   is a single local MCMC fit per panel, so it would show whether 2002, 2004–05 and 2008 are
   simply easier years to forecast.
 
+## A few bad runs, or bad throughout?
+
+The tables above report mean ± sd, and several SDs are large. So the question is whether a
+bad cell is bad throughout or has its mean dragged by a few extreme runs, and whether the
+runs say anything about the training process. All 2,880 stored forecasts behind the
+tables above (every LSTM cell on both calibrations, and the ValendinLSTM benchmark) were
+scored one at a time with the report's own `score`. Each was matched with its Optuna
+`study_01_best.json` and `study_01_trials.csv`. A run counts as **extreme** when it lies
+more than 3 scaled median absolute deviations from its cell's median. 2026-09-15.
+
+### Most bad cells are bad throughout
+
+| cell | bias mean | bias median | extreme runs (bias) | Spearman mean → without extremes |
+| --- | ---: | ---: | ---: | --- |
+| ValendinLSTM, electronics | +46.0 | +46.8 | 1 / 20 | 0.032 → 0.032 |
+| ValendinLSTM, multichannel | +66.6 | +60.6 | 0 / 20 | 0.005 → 0.012 |
+| LSTM + bounded32, cdnow | +37.1 | +50.2 | 0 / 100 | 0.085 → 0.085 |
+| LSTM + ratio, multichannel | +79.7 | +72.6 | 4 / 100 | 0.175 → 0.175 |
+| LSTM + bounded32 + ratio, multichannel | +55.0 | +55.1 | 0 / 100 | 0.176 → 0.176 |
+| **LSTM + log, multichannel** | **+70.9** | **+47.4** | **14 / 100** | **0.123 → 0.185** |
+| **LSTM + ratio, electronics** | **+49.1** | **+38.7** | **8 / 100** | 0.306 → 0.306 |
+
+- **ValendinLSTM's collapse on electronics and multichannel is systematic.** No
+  replication ranks customers: its best Spearman is 0.083 on electronics and 0.049 on
+  multichannel.
+- **The CDNOW bounded32 failure has no outliers, just a wide spread.** 38 of its 100
+  runs rank customers below zero, and the rest spread up to 0.5. The bad mean is the
+  cell's typical run, not a tail.
+- **Two cells are skewed by extreme runs.** Multichannel log: 14 runs, the worst ten at
+  +169% to +542% bias. Without them mean bias is +43.9 rather than +70.9. Electronics
+  ratio: 8 runs; +40.9 without them rather than +49.1. For these two cells, read the
+  median beside the mean.
+- In every other cell of both calibrations, mean and median bias lie within about 10
+  points of each other.
+
+### Optuna's validation loss cannot see which runs forecast badly
+
+- **The winning validation loss barely varies between runs.** Its coefficient of
+  variation across the replications of one cell is 0.08–3.1%, and the median run has
+  1–22 other trials within 0.5% of its best. Holdout bias across the same runs spans tens
+  of points.
+- **It does not predict the forecast.** Within a cell, the rank correlation between a
+  run's validation loss and its holdout |bias| is within ±0.25 in 31 of 32 cells, and
+  at most 0.36 in magnitude. Against holdout Spearman it is at most 0.49.
+- **Why:** the search ranks trials by one-step cross-entropy on the validation window,
+  but the forecast is a rollout of up to 52 weeks. Near-tied models get selected almost
+  at random and roll out very differently. This is the failure mode ADR-0003's
+  rollout-based selection guarded against before it was retired (see
+  `docs/insights-study.md` §4.2 and §5.4).
+- **Very early stopping is common on multichannel.** The best trial stopped at epoch 3
+  or earlier in 55% of ValendinLSTM runs, 41% of LSTM + ratio and 22% of LSTM + log runs
+  there, against 0–2% on every other panel. In multichannel log, the ten most biased
+  runs' best trials stopped at epochs 1–4 (cell median 11), and earlier stopping goes with
+  worse ranking (rank correlation 0.59 between best epoch and Spearman). A model
+  selected that early is barely trained; ADR-0008's refit fine-tunes it but starts from
+  those weights.
+- **No trial crashed.** The 40–75% of trials that did not complete were all `PRUNED` by
+  the `MedianPruner`, as designed.
+
+### What follows
+
+- **Mean ± sd remains the right summary for most cells**; multichannel log and
+  electronics ratio need the median next to it.
+- **Much of the replication spread is selection noise, not model capacity.** More
+  Optuna trials will not narrow it, since the objective they optimise is flat where it
+  matters. Two remedies are already written up in `docs/insights-study.md`: select on
+  rollout quality (§5.4), or score the ensemble of replications rather than their mean
+  (§9).
+
 ## The run
 
 80 ValendinLSTM studies on rented vast.ai boxes (20 workers, 4 studies each), Pareto/NBD
