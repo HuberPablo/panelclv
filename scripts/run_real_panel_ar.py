@@ -1,4 +1,4 @@
-"""The LSTM with an AR encoding on every real panel, at the benchmark's windows.
+"""The LSTM or Transformer with an AR encoding on every real panel, at the benchmark's windows.
 
 The developed model run on CDNOW, electronics, gift and multichannel under each of the
 AR encodings the AR-encoding ablation compared, so every encoding can be read against the
@@ -44,12 +44,19 @@ ADR-0008 refit and a 500-path Monte Carlo forecast. One suite per replication. T
 list is encoding-major, then panel, then replication, so striding it `i::N` gives every
 worker the same number of replications of every (encoding, panel) cell.
 
+**`--model transformer`** runs the Transformer instead, under the same encodings,
+windows, budget and scoring, with the Transformer space of the real-panel arms. Encoding
+`none` carries no AR channel at all: count and sin/cos week only. LSTM suite names are
+unchanged, so every finished LSTM run is read as before.
+
 Usage:
-    python scripts/run_real_panel_lstm_ar.py --encodings log,ratio --preflight
-    python scripts/run_real_panel_lstm_ar.py --encodings log,ratio --worker 3/20
-    python scripts/run_real_panel_lstm_ar.py --encodings log,ratio --check-complete
-    python scripts/run_real_panel_lstm_ar.py --encodings bounded32,log,ratio --report
-    python scripts/run_real_panel_lstm_ar.py --calibration 3y --encodings log --worker 1/20
+    python scripts/run_real_panel_ar.py --encodings log,ratio --preflight
+    python scripts/run_real_panel_ar.py --encodings log,ratio --worker 3/20
+    python scripts/run_real_panel_ar.py --encodings log,ratio --check-complete
+    python scripts/run_real_panel_ar.py --encodings bounded32,log,ratio --report
+    python scripts/run_real_panel_ar.py --calibration 3y --encodings log --worker 1/20
+    python scripts/run_real_panel_ar.py --model transformer --calibration 3y \
+        --encodings none,bounded32,ratio --worker 1/20
 """
 
 from __future__ import annotations
@@ -76,7 +83,10 @@ STUDIES_BASE = benchmarks.STUDIES_BASE
 
 # --- budget ----------------------------------------------------------------------
 # Suite names do not carry these; `check_complete` reads them back off config.json (F23).
-N_REPLICATIONS = 100
+# Replications per (encoding, panel), per model. The Transformer's rollout re-reads its
+# whole growing context at every step for every path, so a study costs many times the
+# LSTM's; it runs 20.
+REPLICATIONS = {"lstm": 100, "transformer": 20}
 N_TRIALS = 100
 N_SIMULATIONS = 500
 BASE_SEED = 42
@@ -121,6 +131,8 @@ CALIBRATIONS: dict[str, dict[str, dict[str, object]]] = {
 
 def ar_features(encoding: str, panel: str) -> tuple[str, ...]:
     """The AR channels one encoding carries on one panel."""
+    if encoding == "none":
+        return ()
     if encoding == "bounded32":
         return tuple(f"active_in_last_{k}_periods" for k in (2, 4, 8, 16, 32)) + (
             "has_transacted_before",)
@@ -138,18 +150,30 @@ def ar_features(encoding: str, panel: str) -> tuple[str, ...]:
     raise ValueError(f"unknown encoding {encoding!r}; choose from {ENCODINGS}")
 
 
-ENCODINGS = ("bounded32", "log", "ratio", "bounded32ratio")
+ENCODINGS = ("none", "bounded32", "log", "ratio", "bounded32ratio")
 
-# The LSTM space of the AR-encoding ablation and the real-panel arms. `embedding_dim` is
+# The spaces of the AR-encoding ablation and the real-panel arms. `embedding_dim` is
 # absent: the default `valendin` embedder has no common width to search.
-SEARCH_SPACE: dict[str, object] = {
-    "lstm_hidden_size": {32, 64, 128},
-    "dense_units":      {32, 64, 128},
-    "dropout":          {0.0, 0.2},
-    "learning_rate":    (1e-4, 1e-2, "log"),
-    "weight_decay":     (1e-6, 1e-2, "log"),
-    "batch_size":       {64, 128, 256},
+SEARCH_SPACES: dict[str, dict[str, object]] = {
+    "lstm": {
+        "lstm_hidden_size": {32, 64, 128},
+        "dense_units":      {32, 64, 128},
+        "dropout":          {0.0, 0.2},
+        "learning_rate":    (1e-4, 1e-2, "log"),
+        "weight_decay":     (1e-6, 1e-2, "log"),
+        "batch_size":       {64, 128, 256},
+    },
+    "transformer": {
+        "d_model":            {32, 64, 128},
+        "nhead":              {2, 4, 8},
+        "num_encoder_layers": (1, 3, "int"),
+        "dropout":            {0.0, 0.1, 0.2, 0.3},
+        "learning_rate":      (1e-4, 3e-3, "log"),
+        "weight_decay":       (1e-6, 1e-2, "log"),
+        "batch_size":         {64, 128, 256},
+    },
 }
+MODEL_NAMES = {"lstm": "LSTM", "transformer": "Transformer"}
 TRAINING = {"n_epochs": 100, "patience": 7, "verbose": False, "loss_type": "cross_entropy"}
 
 
@@ -192,42 +216,44 @@ def build_data(encoding: str, panel: str, cal: str) -> dict:
     return data
 
 
-def suite_name(encoding: str, panel: str, replication: int, cal: str) -> str:
-    """`real_panel_lstm_<encoding>[_cal3y]__LSTM__<panel>__r<NNN>` — disjoint per item.
+def suite_name(model: str, encoding: str, panel: str, replication: int, cal: str) -> str:
+    """`real_panel_<model>_<encoding>[_cal3y]__<Model>__<panel>__r<NNN>` — one per item.
 
-    The `2y` runs carry no tag, so `bounded32` resolves to `real_panel_lstm_bounded32`,
-    the name its first run was stored under, and the finished runs read unchanged.
+    The `2y` runs carry no tag, so the LSTM's `bounded32` resolves to
+    `real_panel_lstm_bounded32`, the name its first run was stored under, and the finished
+    runs read unchanged.
     """
     tag = "" if cal == "2y" else f"_cal{cal}"
-    return f"real_panel_lstm_{encoding}{tag}__LSTM__{panel}__r{replication:03d}"
+    return (f"real_panel_{model}_{encoding}{tag}__{MODEL_NAMES[model]}__{panel}"
+            f"__r{replication:03d}")
 
 
-def work_list(encodings: tuple[str, ...], cal: str) -> list[tuple[str, str, int]]:
+def work_list(model: str, encodings: tuple[str, ...], cal: str) -> list[tuple[str, str, int]]:
     """Every (encoding, panel, replication), encoding-major then panel-major."""
     return [(e, p, r) for e in encodings for p in CALIBRATIONS[cal]
-            for r in range(N_REPLICATIONS)]
+            for r in range(REPLICATIONS[model])]
 
 
-def forecast_path(encoding: str, panel: str, replication: int, cal: str) -> Path:
-    return (STUDIES_BASE / suite_name(encoding, panel, replication, cal)
-            / "LSTM" / "Predictions" / "Prediction_1.csv")
+def forecast_path(model: str, encoding: str, panel: str, replication: int, cal: str) -> Path:
+    return (STUDIES_BASE / suite_name(model, encoding, panel, replication, cal)
+            / MODEL_NAMES[model] / "Predictions" / "Prediction_1.csv")
 
 
-def model_spec(n_trials: int, training: dict) -> ModelSpec:
-    return ModelSpec(name="LSTM", model_type="lstm", n_trials=n_trials,
-                     search_space=dict(SEARCH_SPACE), training=dict(training))
+def model_spec(model: str, n_trials: int, training: dict) -> ModelSpec:
+    return ModelSpec(name=MODEL_NAMES[model], model_type=model, n_trials=n_trials,
+                     search_space=dict(SEARCH_SPACES[model]), training=dict(training))
 
 
-def run_worker(encodings: tuple[str, ...], cal: str, index: int, total: int) -> int:
+def run_worker(model: str, encodings: tuple[str, ...], cal: str, index: int, total: int) -> int:
     """Train this worker's stride; a finished replication is skipped, a cut one redone."""
-    mine = work_list(encodings, cal)[index - 1::total]
+    mine = work_list(model, encodings, cal)[index - 1::total]
     print(f"worker {index}/{total}: {len(mine)} suites", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     cache: dict[tuple[str, str], dict] = {}
     for n, (enc, panel, rep) in enumerate(mine, start=1):
-        name = suite_name(enc, panel, rep, cal)
-        if forecast_path(enc, panel, rep, cal).exists():
+        name = suite_name(model, enc, panel, rep, cal)
+        if forecast_path(model, enc, panel, rep, cal).exists():
             print(f"[{n}/{len(mine)}] {name}: done, skipping", flush=True)
             continue
         if (enc, panel) not in cache:
@@ -240,7 +266,7 @@ def run_worker(encodings: tuple[str, ...], cal: str, index: int, total: int) -> 
             n_simulations=N_SIMULATIONS,
             device=device,
             data=cache[(enc, panel)],
-            models=[model_spec(N_TRIALS, TRAINING)],
+            models=[model_spec(model, N_TRIALS, TRAINING)],
             base_seed=BASE_SEED + rep,
             overwrite=(STUDIES_BASE / name).exists(),
             keep_only_best_checkpoint=True,
@@ -248,7 +274,7 @@ def run_worker(encodings: tuple[str, ...], cal: str, index: int, total: int) -> 
     return 0
 
 
-def preflight(encodings: tuple[str, ...], cal: str) -> int:
+def preflight(model: str, encodings: tuple[str, ...], cal: str) -> int:
     """Build every (encoding, panel) and train each one tiny in a temporary directory."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     failures = []
@@ -263,7 +289,7 @@ def preflight(encodings: tuple[str, ...], cal: str) -> int:
                     run_study_suite(StudySuiteConfig(
                         studies_base_path=tmp, suite_name=f"preflight__{enc}__{panel}",
                         n_studies_per_model=1, n_simulations=2, device=device, data=data,
-                        models=[model_spec(1, {**TRAINING, "n_epochs": 3, "patience": 2})],
+                        models=[model_spec(model, 1, {**TRAINING, "n_epochs": 3, "patience": 2})],
                         base_seed=BASE_SEED, keep_only_best_checkpoint=True,
                     ))
                     print("  ok")
@@ -277,23 +303,23 @@ def preflight(encodings: tuple[str, ...], cal: str) -> int:
     return 0
 
 
-def check_complete(encodings: tuple[str, ...], cal: str) -> int:
+def check_complete(model: str, encodings: tuple[str, ...], cal: str) -> int:
     """What the declaration owes against what is on disk, budget included (F23)."""
     missing, wrong = [], []
     for enc in encodings:
         for panel in CALIBRATIONS[cal]:
             have = 0
-            for rep in range(N_REPLICATIONS):
-                if not forecast_path(enc, panel, rep, cal).exists():
-                    missing.append(suite_name(enc, panel, rep, cal))
+            for rep in range(REPLICATIONS[model]):
+                if not forecast_path(model, enc, panel, rep, cal).exists():
+                    missing.append(suite_name(model, enc, panel, rep, cal))
                     continue
                 have += 1
                 cfg = json.loads(
-                    (STUDIES_BASE / suite_name(enc, panel, rep, cal) / "config.json").read_text())
+                    (STUDIES_BASE / suite_name(model, enc, panel, rep, cal) / "config.json").read_text())
                 budget = (cfg["n_simulations"], cfg["models"][0]["n_trials"])
                 if budget != (N_SIMULATIONS, N_TRIALS):
-                    wrong.append(f"{suite_name(enc, panel, rep, cal)} {budget}")
-            print(f"{enc:9s} {panel:12s} LSTM {have:3d}/{N_REPLICATIONS}")
+                    wrong.append(f"{suite_name(model, enc, panel, rep, cal)} {budget}")
+            print(f"{enc:9s} {panel:12s} {MODEL_NAMES[model]} {have:3d}/{REPLICATIONS[model]}")
     for name in missing[:20]:
         print(f"  MISSING      {name}")
     if len(missing) > 20:
@@ -306,7 +332,7 @@ def check_complete(encodings: tuple[str, ...], cal: str) -> int:
     return 0
 
 
-def report(encodings: tuple[str, ...], cal: str) -> None:
+def report(model: str, encodings: tuple[str, ...], cal: str) -> None:
     """One markdown table per panel: every encoding, the benchmarks, the zero forecast.
 
     The benchmark rows are scored on this run's actuals, so they are shown only where the
@@ -322,10 +348,10 @@ def report(encodings: tuple[str, ...], cal: str) -> None:
         def distribution(model_dirs: list[Path]) -> pd.DataFrame:
             return pd.DataFrame([benchmarks.score(d, actual, ref_ids) for d in model_dirs])
 
-        rows = [(f"LSTM + ar_{enc}, sin/cos",
-                 distribution([forecast_path(enc, panel, r, cal).parents[1]
-                               for r in range(N_REPLICATIONS)
-                               if forecast_path(enc, panel, r, cal).exists()]))
+        rows = [(f"{MODEL_NAMES[model]} + ar_{enc}, sin/cos",
+                 distribution([forecast_path(model, enc, panel, r, cal).parents[1]
+                               for r in range(REPLICATIONS[model])
+                               if forecast_path(model, enc, panel, r, cal).exists()]))
                 for enc in encodings]
         if cal == "2y":
             rows.append(("ValendinLSTM (benchmark)",
@@ -364,6 +390,7 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--encodings", required=True,
                         help=f"comma-separated, from {', '.join(ENCODINGS)}")
+    parser.add_argument("--model", choices=sorted(MODEL_NAMES), default="lstm")
     parser.add_argument("--calibration", choices=sorted(CALIBRATIONS), default="2y",
                         help="2y: the benchmark's windows; 3y: fit two years, validate one")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -381,12 +408,12 @@ def main() -> None:
     cal = args.calibration
     if args.worker:
         index, total = (int(x) for x in args.worker.split("/"))
-        sys.exit(run_worker(encodings, cal, index, total))
+        sys.exit(run_worker(args.model, encodings, cal, index, total))
     if args.preflight:
-        sys.exit(preflight(encodings, cal))
+        sys.exit(preflight(args.model, encodings, cal))
     if args.check_complete:
-        sys.exit(check_complete(encodings, cal))
-    report(encodings, cal)
+        sys.exit(check_complete(args.model, encodings, cal))
+    report(args.model, encodings, cal)
 
 
 if __name__ == "__main__":

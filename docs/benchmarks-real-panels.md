@@ -249,7 +249,7 @@ Reading:
 
 ## LSTM with bounded flags on all four panels
 
-`scripts/run_real_panel_lstm_ar.py --encodings bounded32`, 2026-09-13: the LSTM with the
+`scripts/run_real_panel_ar.py --encodings bounded32`, 2026-09-13: the LSTM with the
 transaction count, `week_sin` / `week_cos` and `ar_bounded_32`
 (`active_in_last_{2,4,8,16,32}_periods` + `has_transacted_before`), on the benchmark's
 windows and cohort. 100 replications per panel, each a 100-trial Optuna search and a
@@ -301,7 +301,7 @@ Reading:
 
 ## The three AR encodings on all four panels
 
-`scripts/run_real_panel_lstm_ar.py --encodings bounded32,log,ratio`, 2026-09-13/14. The
+`scripts/run_real_panel_ar.py --encodings bounded32,log,ratio`, 2026-09-13/14. The
 same LSTM, inputs, windows, cohort and budget as the section above (count, `week_sin` /
 `week_cos`, 100 replications × 100 trials × 500 paths); only the AR encoding differs:
 
@@ -411,7 +411,7 @@ Reading:
 
 ## Three-year calibration
 
-`scripts/run_real_panel_lstm_ar.py --calibration 3y`, 2026-09-14/15: the same four LSTM
+`scripts/run_real_panel_ar.py --calibration 3y`, 2026-09-14/15: the same four LSTM
 arms on electronics, gift and multichannel, calibrating on three years instead of two —
 the first two to fit the weights, the third as the validation window — and forecasting the
 year after. Encodings (C stays 26), budget (100 × 100 trials × 500 paths) and cohort are
