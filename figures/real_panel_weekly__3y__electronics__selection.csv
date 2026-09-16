@@ -1,0 +1,5 @@
+arm,studies,best,bias_percent,mape_aggregate,rmse,spearman
+LSTM + ar_bounded32,100,real_panel_lstm_bounded32_cal3y__LSTM__electronics__r070,-3.6607393863026476,32.965606791698555,0.4038456463845179,0.30606841005309915
+LSTM + ar_log,100,real_panel_lstm_log_cal3y__LSTM__electronics__r036,-8.967942553439501,33.9737832751264,0.4039770585724842,0.315548567952339
+LSTM + ar_ratio,100,real_panel_lstm_ratio_cal3y__LSTM__electronics__r049,-1.5480852728477474,33.8663205979144,0.4043151653183366,0.32809240344937507
+LSTM + ar_bounded32ratio,100,real_panel_lstm_bounded32ratio_cal3y__LSTM__electronics__r036,5.237508473263803,34.514341404568434,0.40381898560614077,0.3281138221602734
