@@ -1,4 +1,5 @@
 arm,studies,best,bias_percent,mape_aggregate,rmse,spearman
+Pareto/NBD,1,real_panel_benchmarks_cal3y__ParetoNBD__multichannel,22.11177893157059,60.27151183597846,0.04882848501406052,0.23601699451497948
 LSTM + ar_bounded32,100,real_panel_lstm_bounded32_cal3y__LSTM__multichannel__r020,10.575726146222559,50.5549138901765,0.048933255705042,0.18524742381029488
 LSTM + ar_log,100,real_panel_lstm_log_cal3y__LSTM__multichannel__r027,11.656650026312366,52.680924991576376,0.0488598711387257,0.24178026025763383
 LSTM + ar_ratio,100,real_panel_lstm_ratio_cal3y__LSTM__multichannel__r068,3.290176622816818,53.116763161624505,0.048897135708973,0.2512849936656936

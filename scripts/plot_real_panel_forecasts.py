@@ -12,11 +12,13 @@ lowest `mape_aggregate`, so every arm is shown at its best rather than at a draw
 weight-init lottery. The legend carries that MAPE, and the printed table carries which
 replication it was, so a curve is always traceable back to a suite on disk.
 
-**Two campaigns, never on one axes.** The `2y` run uses the benchmark's windows, so
-Pareto/NBD and ValendinLSTM are scored on the same holdout year and belong beside the
-LSTM encodings. The `_cal3y` run moves electronics, gift and multichannel to a
-three-year calibration and therefore forecasts a *different* holdout year; the frozen
-benchmarks were never run on it, so those figures carry the four encodings alone.
+**Two campaigns, never on one axes.** The `2y` run uses the published windows; the
+`_cal3y` run moves electronics, gift and multichannel to a three-year calibration and
+forecasts the year after, so a curve from one says nothing about the other. Each figure is
+drawn from one calibration's suites only, benchmarks included: a benchmark is read from
+the suite it ran under *that* calibration (`run_real_panel_benchmarks.py --calibration`),
+and an arm with nothing on disk for it is named on stdout and left off the axes rather
+than borrowed from the other campaign.
 
 Curves are rebuilt from what the suites stored, not re-simulated: each
 ``Predictions/Prediction_1.csv`` is a wide per-customer x holdout-week table of mean
@@ -99,15 +101,16 @@ def arms(panel: str, cal: str) -> list[tuple[str, list[Path]]]:
     a partial tree draws from fewer studies rather than failing.
     """
     out: list[tuple[str, list[Path]]] = []
-    if cal == "2y":
-        # The benchmarks are scored on their own windows only; on any other calibration
-        # they forecast a different holdout year and must not be drawn beside these.
-        pareto = benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel) / "ParetoNBD"
-        out.append(("Pareto/NBD", [pareto] if (pareto / "Predictions").is_dir() else []))
-        out.append(("ValendinLSTM",
-                    [benchmarks.forecast_path(panel, r).parents[1]
-                     for r in range(benchmarks.N_REPLICATIONS)
-                     if benchmarks.forecast_path(panel, r).exists()]))
+    # The benchmarks are read from the suites they ran under this calibration. A
+    # calibration they were never run on simply yields no directories, and the arm is
+    # dropped — never silently filled from the windows they *were* run on.
+    pareto = (benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel, cal)
+              / "ParetoNBD")
+    out.append(("Pareto/NBD", [pareto] if (pareto / "Predictions").is_dir() else []))
+    out.append(("ValendinLSTM",
+                [benchmarks.forecast_path(panel, r, cal).parents[1]
+                 for r in range(benchmarks.N_REPLICATIONS)
+                 if benchmarks.forecast_path(panel, r, cal).exists()]))
     for enc in ENCODINGS:
         out.append((f"LSTM + ar_{enc}",
                     [ar.forecast_path("lstm", enc, panel, r, cal).parents[1]

@@ -34,6 +34,15 @@ the 20 are genuine replications and the report gives their distribution.
 of every panel: at 20 workers, worker i trains replication i on all four. A lost worker
 then thins every panel by one replication instead of emptying one panel.
 
+**`--calibration 3y`** moves electronics, gift and multichannel to a three-year
+calibration -- two years to fit the weights, the third as the validation window, then the
+year after as holdout -- so the frozen benchmarks can be read beside the developed model's
+`_cal3y` runs, which forecast that later year. CDNOW's 77-week panel has no room for it
+and is left out. The model, its inputs, the week grid and the budget are unchanged: the
+windows are the only thing that differs, and the suites carry a `_cal3y` tag so the `2y`
+runs read back untouched. `WINDOWS_3Y` lives here and `run_real_panel_ar.py` reads it from
+here, so the benchmark and the developed model cannot drift onto different windows.
+
 Usage:
     # gate the launch — builds every panel, trains each tiny, costs nothing
     python scripts/run_real_panel_benchmarks.py --preflight
@@ -47,6 +56,10 @@ Usage:
     # after the run
     python scripts/run_real_panel_benchmarks.py --check-complete
     python scripts/run_real_panel_benchmarks.py --report
+
+    # the same, on the three-year calibration
+    python scripts/run_real_panel_benchmarks.py --calibration 3y --pareto
+    python scripts/run_real_panel_benchmarks.py --calibration 3y --worker 3/20
 """
 
 from __future__ import annotations
@@ -127,10 +140,52 @@ WINDOWS: dict[str, dict[str, object]] = {
         holdout_end="2007-12-31",
     ),
 }
-PANELS = tuple(WINDOWS)
+
+# Three calibration years: fit on two, validate on the third, forecast the year after.
+# Every date is a week-bucket edge under `period_calendar.week_start` (ADR-0009), and the
+# holdout is the year *after* the one the `2y` windows forecast. CDNOW is absent: its
+# 77-week panel cannot hold three calibration years.
+WINDOWS_3Y: dict[str, dict[str, object]] = {
+    "electronics": dict(
+        training_start="1999-01-01",
+        validation_start="2001-01-01",
+        training_end="2001-12-31",
+        holdout_start="2002-01-01",
+        holdout_end="2002-12-31",        # the panel's last year
+        clip_target_upper=6,
+    ),
+    "gift": dict(
+        training_start="2001-02-25",     # 2001 week 8, the panel's first week
+        validation_start="2003-02-25",   # 2003 week 8
+        training_end="2004-02-24",       # end of 2004 week 7 — 156 calibration weeks
+        holdout_start="2004-02-25",      # 2004 week 8
+        holdout_end="2005-02-24",        # end of 2005 week 7
+    ),
+    "multichannel": dict(
+        training_start="2005-01-01",
+        validation_start="2007-01-01",
+        training_end="2007-12-31",
+        holdout_start="2008-01-01",
+        holdout_end="2008-12-31",
+    ),
+}
+
+# `--calibration` -> the windows it reads and the panels it covers. `run_real_panel_ar.py`
+# reads this same table, so a benchmark and a developed model on the same calibration are
+# scored on the same weeks by construction.
+CALIBRATIONS: dict[str, dict[str, dict[str, object]]] = {"2y": WINDOWS, "3y": WINDOWS_3Y}
 
 
-def panel_config(panel: str) -> PanelConfig:
+def calibration_tag(cal: str) -> str:
+    """The suffix a calibration puts on an experiment name.
+
+    `2y` carries none, so every suite written before there was a choice reads back under
+    the name it was stored with.
+    """
+    return "" if cal == "2y" else f"_cal{cal}"
+
+
+def panel_config(panel: str, cal: str) -> PanelConfig:
     """Count and embedded week only; every other column of the panel is left unread."""
     return PanelConfig(
         id_col="Id",
@@ -139,19 +194,20 @@ def panel_config(panel: str) -> PanelConfig:
         time_cols=("year", "week"),
         time=("week",),
         embedded_cols={"Transactions": "auto", "week": "auto"},
-        **WINDOWS[panel],
+        **CALIBRATIONS[cal][panel],
     )
 
 
-def build_data(panel: str) -> dict:
-    """`prepare_dataset` for one panel."""
+def build_data(panel: str, cal: str) -> dict:
+    """`prepare_dataset` for one panel, on the windows of calibration `cal`."""
     path = CLEAN / f"{panel}_customer_week_panel.csv"
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. Datasets/ is not in git, so a rented worker needs the "
             f"panel pushed to it (VastAI/Rules.md §3)."
         )
-    data = panel_dataset.prepare_dataset(pd.read_csv(path), panel_config(panel), verbose=False)
+    data = panel_dataset.prepare_dataset(pd.read_csv(path), panel_config(panel, cal),
+                                         verbose=False)
     data["panel_name"] = panel
     return data
 
@@ -174,22 +230,22 @@ def refuses(data: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def suite_name(panel: str, replication: int) -> str:
-    """`real_panel_benchmarks__ValendinLSTM__<panel>__r<NN>` — disjoint per work item."""
-    return f"{EXPERIMENT}__ValendinLSTM__{panel}__r{replication:02d}"
+def suite_name(panel: str, replication: int, cal: str) -> str:
+    """`real_panel_benchmarks[_cal3y]__ValendinLSTM__<panel>__r<NN>` — one per work item."""
+    return f"{EXPERIMENT}{calibration_tag(cal)}__ValendinLSTM__{panel}__r{replication:02d}"
 
 
-def pareto_suite_name(panel: str) -> str:
-    return f"{EXPERIMENT}__ParetoNBD__{panel}"
+def pareto_suite_name(panel: str, cal: str) -> str:
+    return f"{EXPERIMENT}{calibration_tag(cal)}__ParetoNBD__{panel}"
 
 
-def work_list() -> list[tuple[str, int]]:
+def work_list(cal: str) -> list[tuple[str, int]]:
     """Every (panel, replication), PANEL-major — see the module docstring for why."""
-    return [(p, r) for p in PANELS for r in range(N_REPLICATIONS)]
+    return [(p, r) for p in CALIBRATIONS[cal] for r in range(N_REPLICATIONS)]
 
 
-def forecast_path(panel: str, replication: int) -> Path:
-    return (STUDIES_BASE / suite_name(panel, replication) / "ValendinLSTM"
+def forecast_path(panel: str, replication: int, cal: str) -> Path:
+    return (STUDIES_BASE / suite_name(panel, replication, cal) / "ValendinLSTM"
             / "Predictions" / "Prediction_1.csv")
 
 
@@ -203,25 +259,25 @@ def model_spec(n_trials: int, training: dict) -> ModelSpec:
 # ---------------------------------------------------------------------------
 
 
-def run_worker(index: int, total: int) -> int:
+def run_worker(index: int, total: int, cal: str) -> int:
     """Train this worker's stride of the work list. Finished items are skipped.
 
     An item counts as finished when its forecast exists. A folder without one is a
     replication cut short, and a suite cannot be resumed, so it is overwritten.
     """
-    mine = work_list()[index - 1::total]
+    mine = work_list(cal)[index - 1::total]
     print(f"worker {index}/{total}: {len(mine)} suites", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     cache: dict[str, dict] = {}
 
     for n, (panel, rep) in enumerate(mine, start=1):
-        name = suite_name(panel, rep)
-        if forecast_path(panel, rep).exists():
+        name = suite_name(panel, rep, cal)
+        if forecast_path(panel, rep, cal).exists():
             print(f"[{n}/{len(mine)}] {name}: done, skipping", flush=True)
             continue
         if panel not in cache:
-            cache[panel] = build_data(panel)
+            cache[panel] = build_data(panel, cal)
             reason = refuses(cache[panel])
             if reason:
                 raise RuntimeError(f"ValendinLSTM refuses {panel}: {reason}")
@@ -241,11 +297,11 @@ def run_worker(index: int, total: int) -> int:
     return 0
 
 
-def run_pareto() -> int:
+def run_pareto(cal: str) -> int:
     """One Pareto/NBD fit per panel, skipping panels already fitted."""
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
-    for panel in PANELS:
-        name = pareto_suite_name(panel)
+    for panel in CALIBRATIONS[cal]:
+        name = pareto_suite_name(panel, cal)
         if (STUDIES_BASE / name / "ParetoNBD" / "Predictions").is_dir():
             print(f"{name}: done, skipping")
             continue
@@ -255,7 +311,7 @@ def run_pareto() -> int:
             n_studies_per_model=1,
             n_simulations=N_SIMULATIONS,
             device="cpu",
-            data=build_data(panel),
+            data=build_data(panel, cal),
             models=[ModelSpec(name="ParetoNBD", model_type="pareto_nbd")],
             base_seed=BASE_SEED,
             overwrite=(STUDIES_BASE / name).exists(),
@@ -264,13 +320,13 @@ def run_pareto() -> int:
     return 0
 
 
-def preflight() -> int:
+def preflight(cal: str) -> int:
     """Build every panel, check eligibility, and train each one tiny in a temp dir."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     failures = []
     with tempfile.TemporaryDirectory() as tmp:
-        for panel in PANELS:
-            data = build_data(panel)
+        for panel in CALIBRATIONS[cal]:
+            data = build_data(panel, cal)
             print(f"{panel:12s} N={len(data['ids']):5d} T_CAL={int(data['T_CAL']):3d} "
                   f"T_HOLD={int(data['T_HOLD']):3d} seq_cols={data['seq_cols']}")
             reason = refuses(data)
@@ -280,7 +336,7 @@ def preflight() -> int:
                 continue
             try:
                 run_study_suite(StudySuiteConfig(
-                    studies_base_path=tmp, suite_name=f"preflight__{panel}",
+                    studies_base_path=tmp, suite_name=f"preflight__{cal}__{panel}",
                     n_studies_per_model=1, n_simulations=2, device=device, data=data,
                     models=[model_spec(1, {**TRAINING, "n_epochs": 3, "patience": 2})],
                     base_seed=BASE_SEED, keep_only_best_checkpoint=True,
@@ -301,7 +357,7 @@ def preflight() -> int:
 # ---------------------------------------------------------------------------
 
 
-def check_complete() -> int:
+def check_complete(cal: str) -> int:
     """What the declaration owes against what is on disk. Non-zero on any shortfall.
 
     Also reads every suite's recorded budget: a suite name does not carry the trial or
@@ -309,22 +365,24 @@ def check_complete() -> int:
     """
     missing: list[str] = []
     wrong_budget: list[str] = []
-    for panel in PANELS:
+    for panel in CALIBRATIONS[cal]:
         have = 0
         for rep in range(N_REPLICATIONS):
-            if not forecast_path(panel, rep).exists():
-                missing.append(suite_name(panel, rep))
+            if not forecast_path(panel, rep, cal).exists():
+                missing.append(suite_name(panel, rep, cal))
                 continue
             have += 1
-            cfg = json.loads((STUDIES_BASE / suite_name(panel, rep) / "config.json").read_text())
+            cfg = json.loads(
+                (STUDIES_BASE / suite_name(panel, rep, cal) / "config.json").read_text())
             budget = (cfg["n_simulations"], cfg["models"][0]["n_trials"])
             if budget != (N_SIMULATIONS, N_TRIALS):
                 wrong_budget.append(f"{suite_name(panel, rep)} {budget}")
-        pareto = (STUDIES_BASE / pareto_suite_name(panel) / "ParetoNBD" / "Predictions").is_dir()
+        pareto = (STUDIES_BASE / pareto_suite_name(panel, cal) / "ParetoNBD"
+                  / "Predictions").is_dir()
         print(f"{panel:12s} ValendinLSTM {have:2d}/{N_REPLICATIONS}   "
               f"ParetoNBD {'1/1' if pareto else '0/1'}")
         if not pareto:
-            missing.append(pareto_suite_name(panel))
+            missing.append(pareto_suite_name(panel, cal))
     for name in missing:
         print(f"  MISSING      {name}")
     for line in wrong_budget:
@@ -356,18 +414,19 @@ def score(model_dir: Path, actual: np.ndarray, ref_ids: np.ndarray) -> dict[str,
 METRICS = ("bias_percent", "mape_aggregate", "rmse", "spearman")
 
 
-def report() -> None:
+def report(cal: str) -> None:
     """Print one markdown table per panel: ValendinLSTM's distribution, Pareto/NBD, zero."""
-    for panel in PANELS:
-        data = build_data(panel)
+    for panel in CALIBRATIONS[cal]:
+        data = build_data(panel, cal)
         actual = holdout_actuals(data)                          # (N, T_HOLD)
         ref_ids = np.asarray(data["ids"])
 
         rows = [
-            {"replication": rep, **score(forecast_path(panel, rep).parents[1], actual, ref_ids)}
-            for rep in range(N_REPLICATIONS) if forecast_path(panel, rep).exists()
+            {"replication": rep,
+             **score(forecast_path(panel, rep, cal).parents[1], actual, ref_ids)}
+            for rep in range(N_REPLICATIONS) if forecast_path(panel, rep, cal).exists()
         ]
-        pareto_dir = STUDIES_BASE / pareto_suite_name(panel) / "ParetoNBD"
+        pareto_dir = STUDIES_BASE / pareto_suite_name(panel, cal) / "ParetoNBD"
         pareto = score(pareto_dir, actual, ref_ids) if (pareto_dir / "Predictions").is_dir() else None
         # The all-zero forecast: the panels are mostly zeros, so RMSE is only readable
         # beside it, and it is what bias and Spearman exclude (-100% bias, no ranking).
@@ -393,6 +452,8 @@ def report() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--calibration", choices=sorted(CALIBRATIONS), default="2y",
+                        help="2y: the published windows; 3y: fit two years, validate one")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--worker", metavar="I/N", help="train this worker's stride")
     mode.add_argument("--pareto", action="store_true", help="fit Pareto/NBD on every panel")
@@ -401,16 +462,17 @@ def main() -> None:
     mode.add_argument("--report", action="store_true")
     args = parser.parse_args()
 
+    cal = args.calibration
     if args.worker:
         index, total = (int(x) for x in args.worker.split("/"))
-        sys.exit(run_worker(index, total))
+        sys.exit(run_worker(index, total, cal))
     if args.pareto:
-        sys.exit(run_pareto())
+        sys.exit(run_pareto(cal))
     if args.preflight:
-        sys.exit(preflight())
+        sys.exit(preflight(cal))
     if args.check_complete:
-        sys.exit(check_complete())
-    report()
+        sys.exit(check_complete(cal))
+    report(cal)
 
 
 if __name__ == "__main__":

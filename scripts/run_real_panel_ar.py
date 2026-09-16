@@ -36,8 +36,10 @@ restated, so the runs cannot drift apart.
 two years to fit the weights, the third as the validation window, then the year after as
 holdout (CDNOW's 77-week panel has no room for it and is left out). The encodings are
 unchanged — C stays 26 — so the calibration window is the only thing that differs from
-the `2y` runs, and the suites carry a `_cal3y` tag. Its holdout years differ from the
-benchmark's, so its report does not set the benchmark rows beside it.
+the `2y` runs, and the suites carry a `_cal3y` tag. The windows themselves are
+`run_real_panel_benchmarks.WINDOWS_3Y`, read from there rather than restated, because the
+frozen benchmarks run on them too (`--calibration 3y` there); a benchmark row appears in
+this report once that run exists for the calibration being reported.
 
 **Budget.** 100 replications per (encoding, panel), each a 100-trial Optuna search, the
 ADR-0008 refit and a 500-path Monte Carlo forecast. One suite per replication. The work
@@ -95,38 +97,10 @@ BASE_SEED = 42
 # calibration window, as in the AR-encoding ablation.
 SATURATION = {"cdnow": 10, "electronics": 26, "gift": 26, "multichannel": 26}
 
-# Three calibration years: fit on two, validate on the third, forecast the year after.
-# Every date is a week-bucket edge under `period_calendar.week_start` (ADR-0009).
-WINDOWS_3Y: dict[str, dict[str, object]] = {
-    "electronics": dict(
-        training_start="1999-01-01",
-        validation_start="2001-01-01",
-        training_end="2001-12-31",
-        holdout_start="2002-01-01",
-        holdout_end="2002-12-31",        # the panel's last year
-        clip_target_upper=6,
-    ),
-    "gift": dict(
-        training_start="2001-02-25",     # 2001 week 8, the panel's first week
-        validation_start="2003-02-25",   # 2003 week 8
-        training_end="2004-02-24",       # end of 2004 week 7 — 156 calibration weeks
-        holdout_start="2004-02-25",      # 2004 week 8
-        holdout_end="2005-02-24",        # end of 2005 week 7
-    ),
-    "multichannel": dict(
-        training_start="2005-01-01",
-        validation_start="2007-01-01",
-        training_end="2007-12-31",
-        holdout_start="2008-01-01",
-        holdout_end="2008-12-31",
-    ),
-}
-
-# `--calibration` -> the windows it reads and the panels it covers.
-CALIBRATIONS: dict[str, dict[str, dict[str, object]]] = {
-    "2y": benchmarks.WINDOWS,
-    "3y": WINDOWS_3Y,
-}
+# Both calibrations' windows live in the benchmark runner and are read from there, so a
+# benchmark and a developed model on the same calibration cannot drift onto different
+# weeks. `--calibration` picks the table; its keys are the panels that calibration covers.
+CALIBRATIONS = benchmarks.CALIBRATIONS
 
 
 def ar_features(encoding: str, panel: str) -> tuple[str, ...]:
@@ -223,7 +197,7 @@ def suite_name(model: str, encoding: str, panel: str, replication: int, cal: str
     `real_panel_lstm_bounded32`, the name its first run was stored under, and the finished
     runs read unchanged.
     """
-    tag = "" if cal == "2y" else f"_cal{cal}"
+    tag = benchmarks.calibration_tag(cal)
     return (f"real_panel_{model}_{encoding}{tag}__{MODEL_NAMES[model]}__{panel}"
             f"__r{replication:03d}")
 
@@ -335,8 +309,8 @@ def check_complete(model: str, encodings: tuple[str, ...], cal: str) -> int:
 def report(model: str, encodings: tuple[str, ...], cal: str) -> None:
     """One markdown table per panel: every encoding, the benchmarks, the zero forecast.
 
-    The benchmark rows are scored on this run's actuals, so they are shown only where the
-    windows are the benchmark's own (`2y`); on any other calibration they forecast a
+    A benchmark row is scored on this run's actuals and is shown only where that
+    benchmark has been run on this calibration's own windows; on any other it forecasts a
     different holdout year.
     """
     for panel in CALIBRATIONS[cal]:
@@ -353,16 +327,18 @@ def report(model: str, encodings: tuple[str, ...], cal: str) -> None:
                                for r in range(REPLICATIONS[model])
                                if forecast_path(model, enc, panel, r, cal).exists()]))
                 for enc in encodings]
-        if cal == "2y":
-            rows.append(("ValendinLSTM (benchmark)",
-                         distribution([benchmarks.forecast_path(panel, r).parents[1]
-                                       for r in range(benchmarks.N_REPLICATIONS)
-                                       if benchmarks.forecast_path(panel, r).exists()])))
-            pareto_dir = (benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel)
-                          / "ParetoNBD")
-            rows.append(("Pareto/NBD (benchmark)",
-                         distribution([pareto_dir]) if (pareto_dir / "Predictions").is_dir()
-                         else pd.DataFrame()))
+        # A benchmark row is shown only where that benchmark was run on *this*
+        # calibration's windows: on any other it forecasts a different holdout year, and
+        # setting it beside these rows would compare two different questions.
+        valendin = [benchmarks.forecast_path(panel, r, cal).parents[1]
+                    for r in range(benchmarks.N_REPLICATIONS)
+                    if benchmarks.forecast_path(panel, r, cal).exists()]
+        if valendin:
+            rows.append(("ValendinLSTM (benchmark)", distribution(valendin)))
+        pareto_dir = (benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel, cal)
+                      / "ParetoNBD")
+        if (pareto_dir / "Predictions").is_dir():
+            rows.append(("Pareto/NBD (benchmark)", distribution([pareto_dir])))
         zero = compute_forecast_metrics(actual, np.zeros_like(actual, dtype=float))
 
         def cell(df: pd.DataFrame, m: str, digits: int) -> str:
