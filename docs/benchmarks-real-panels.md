@@ -15,23 +15,58 @@ the decimal shown. The one addition on that date is Pareto/NBD on the three-year
 | | |
 | --- | --- |
 | ValendinLSTM inputs | transaction count and calendar week, both embedded — the published model's two inputs. Every other panel column is discarded. Week is embedded rather than sin/cos because the frozen benchmark refuses non-embedded channels (ADR-0004). |
+| ValendinLSTM embedder | **frozen** — ADR-0004 keeps the published raw sqrt(cardinality)+1 embeddings, so the embedder is not a searched parameter and `param_embedder` is empty in its `results.csv`. |
 | Week grid | Valendin's `dayofyear // 7`, capped at 51, on every panel (ADR-0009) |
-| ValendinLSTM budget | 20 replications per panel; each is a 100-trial Optuna search over learning rate, weight decay and batch size, the ADR-0008 refit, and a 500-path Monte Carlo forecast. Seeds 43–62. |
-| Pareto/NBD | one hierarchical-Bayes MCMC fit per panel (deterministic, so not replicated) |
-| Metrics | `compute_forecast_metrics` (`bias_percent`, `mape_aggregate`, `rmse`) plus Spearman of per-customer holdout totals |
+| ValendinLSTM budget | **20 replications × 100 Optuna trials × 500 Monte Carlo paths** per panel. Each replication is its own study: a 100-trial search over learning rate, weight decay and batch size, the ADR-0008 refit, and a 500-path forecast. Seeds 43–62. |
+| Pareto/NBD | one hierarchical-Bayes MCMC fit per panel — deterministic, so **n = 1** and no spread. No embedder, no trials. |
+| Metrics | `compute_forecast_metrics` (`bias_percent`, `mape_aggregate`, `rmse`) plus Spearman of per-customer holdout totals, the last recomputed from the stored `Predictions/` because it needs the panel actuals. Regenerate all four with `python scripts/run_real_panel_benchmarks.py --report`. |
+| Archive | family N of `docs/studies-run.md` — 84 suites, 13 September 2026. |
 
 Windows — two calibration years and one holdout year, the second calibration year used
-for validation (ADR-0001). CDNOW's panel spans 77 weeks, so it keeps the published split.
+for validation (ADR-0001). CDNOW's panel spans 77 weeks, so it keeps the published split
+with the last eight calibration weeks as validation. **Every table in this document that
+is not marked `3y` is on these windows**, and every runner since 13 September imports them
+from `run_real_panel_benchmarks.WINDOWS` rather than restating them, so the families
+cannot drift apart.
 
-| panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells |
-| --- | ---: | --- | --- | --- | ---: | ---: | ---: |
-| cdnow | 2,357 | 1997-01-01 → 1997-09-29 | 1997-08-05 | 1997-09-30 → 1998-06-30 | 39 / 39 | 1,895 | 98.0% |
-| electronics | 829 | 1999–2000 | 2000-01-01 | 2001 | 104 / 52 | 1,467 | 98.6% |
-| gift | 2,062 | 2001-02-25 → 2003-02-24 | 2002-02-25 | 2003-02-25 → 2004-02-24 | 104 / 52 | 1,146 | 99.0% |
-| multichannel | 1,402 | 2005–2006 | 2006-01-01 | 2007 | 104 / 52 | 228 | 99.7% |
+| panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells | classes |
+| --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: |
+| cdnow | 2,357 | 1997-01-01 → 1997-09-29 | 1997-08-05 | 1997-09-30 → 1998-06-30 | 39 / 39 | 1,895 | 98.0% | 5 |
+| electronics | 829 | 1999-01-01 → 2000-12-31 | 2000-01-01 | 2001-01-01 → 2001-12-31 | 104 / 52 | 1,467 | 98.6% | 7 |
+| gift | 2,062 | 2001-02-25 → 2003-02-24 | 2002-02-25 | 2003-02-25 → 2004-02-24 | 104 / 52 | 1,146 | 99.0% | 5 |
+| multichannel | 1,402 | 2005-01-01 → 2006-12-31 | 2006-01-01 | 2007-01-01 → 2007-12-31 | 104 / 52 | 228 | 99.7% | 5 |
+
+"Classes" is the softmax head size: `clip_target_upper` + 1 where the panel config sets it
+(4 on CDNOW, 6 on electronics), and sized from the data on gift and multichannel, which
+never exceed 4 transactions in a week.
 
 A transaction is a purchase on CDNOW and gift, a line item on electronics, and a distinct
 order on multichannel (`docs/dataset-preparation.md`).
+
+### Every Pareto/NBD row in this document is shifted one period early
+
+`benchmarks/pareto_nbd._build_cbs` measures each customer's calibration age `T_cal` to the
+**start** of the last calibration period rather than its end, because `period_start` is a
+period's first day. The forecaster then puts holdout period `t` on customer time
+`[T_cal + t - 1, T_cal + t]`, so forecast column 0 covers the last *calibration* period
+while being scored against holdout period 0. Verified on all four panels and both
+calibrations — exactly one period, everywhere
+(`.scratch/pnbd-cdnow-replication/check_window_alignment.py`, 2026-09-17).
+
+Measured cost, paired on three seeds, against the archived fits
+(`.scratch/pnbd-cdnow-replication/measure_window_shift.py`): correcting the age moves
+CDNOW's aggregate bias from −14.2% to −21.2% and electronics' from −63.1% to −64.4%. The
+effect is one period's worth of customer age, so it scales inversely with the calibration
+window — about 7 points on CDNOW's 39 weeks, about 1 on a 104-week panel. **Spearman is
+untouched** (CDNOW 0.449 → 0.441, electronics 0.304 → 0.312), so every ranking comparison
+in this document stands as written; only the level rows move, and they move *against* the
+benchmark, which already under-predicts.
+
+Gift and multichannel were not measured; both are 104-week panels, so ~1 point is the
+expectation rather than a result. The code is unchanged pending a decision —
+`.scratch/pnbd-cdnow-replication/issues/01-pareto-calibration-age-off-by-one.md` has the
+mechanism, the blast radius (every Pareto/NBD number in the repo came through this one
+path), the one-line fix and why `scripts/validate_pareto_benchmark.py` cannot see it.
 
 ## Results
 
@@ -143,27 +178,119 @@ almost nothing and is not a basis for a ranking.
 
 ## The forecast collapse on long sparse panels
 
-Measured over all 2,638 stored forecasts on the real panels in `Studies/` — the tree as it
-stood on 2026-09-13, so the three-year campaign below is not in that count; the per-row
-populations it does cover are unchanged since. CV is the coefficient of variation of
-per-customer holdout totals (std / mean); a model that gives every customer the same
-number scores 0. Pareto/NBD's electronics CV is 1.11.
+**The measure.** For one stored forecast, the coefficient of variation of per-customer
+holdout totals — `std / mean` over customers. A model that hands every customer the same
+number scores 0 whatever that number is, so CV separates a forecast that distinguishes
+customers from one that does not, which aggregate error cannot. Spearman of the same
+totals against the true ones sits beside it: CV says the forecast varies, Spearman says it
+varies in the right order.
 
-**Every neural model collapses on electronics when the count is its only per-customer
-input**, and has since the earliest suites:
+**The population.** Every stored electronics forecast on the benchmark's two-year windows:
+829 customers, 52 holdout weeks from 2001-01-01, **1,643 distinct forecasts (1,657 stored) over 488 suites**,
+spanning every experiment this project has run on that panel. Membership is decided by
+execution, not by name: a suite qualifies when its config names this holdout (2001, 829
+customers) and its stored predictions carry exactly the rebuilt cohort, in the rebuilt
+order, over 52 weeks. The four suites written before `panel_config` existed are matched on
+their `data_summary` instead — `T_CAL` 104, `T_HOLD` 52, `validation_start` 2000-01-01,
+the same window. The three-year suites fail the rule, because they forecast 2002.
+Regenerated by `PYTHONPATH=src python scripts/measure_forecast_collapse.py`.
 
-| model | inputs (experiment) | forecasts | median CV | mean Spearman |
-| --- | --- | ---: | ---: | ---: |
-| ValendinLSTM | count + week (this run) | 20 | 0.05 | 0.03 |
-| ValendinLSTM | count only (`real_panel_arms`) | 20 | 0.08 | 0.03 |
-| LSTM | count only (`ar_encoding` no_ar) | 100 | 0.07 | 0.04 |
-| LSTM | count + sin/cos (oldest `cross_entropy_cfg_2y…NoCov` suites) | 23 | 0.09–0.20 | 0.04 |
-| Transformer | count + calendar (no_ar arms, old NoCov suites) | 53 | 0.08–0.28 | 0.01–0.15 |
-| LSTM | + bounded activity flags | 200 | 0.30–0.32 | 0.20–0.26 |
-| LSTM | + saturating / ratio / log AR encodings | 300 | 0.43–1.47 | 0.29–0.30 |
-| LSTM / Transformer / ValendinLSTM | + k-means cluster | 200 | 0.9–1.5 | 0.26–0.31 |
+**A row is what the model read, not what the run was called.** Each row is one
+`(model, per-customer channels, calendar channels)` signature, taken from every suite's own
+`data_summary.seq_cols`. `week`, `week_sin`, `week_cos` and `year_idx` take the same value
+for every customer in a period, so they are listed apart: a model reading only those and
+its own past count has **no per-customer input but the count**, which is the condition this
+section is about. Reading the folder name instead would get this wrong in both directions —
+`ar_encoding`'s `no_ar` arm carries `week_sin` / `week_cos` and is not a count-only run,
+while `real_panel_arms`' `-no_tf` arms read the count and nothing else. Every suite behind
+every row is named under the table.
 
-**The trigger is the panel, not the architecture.** The same count-only configuration
+| per-customer input beside the count | model | calendar | forecasts | median CV | mean Spearman |
+| --- | --- | --- | ---: | ---: | ---: |
+| count only | ValendinLSTM | week | 20 | 0.05 | 0.03 |
+| count only | LSTM | week_sin, week_cos | 184 | 0.07 | 0.04 |
+| count only | ValendinLSTM | none | 20 | 0.08 | 0.03 |
+| count only | LSTM | none | 20 | 0.09 | 0.05 |
+| count only | Transformer | week_sin, week_cos | 34 | 0.16 | 0.09 |
+| count only | Transformer | none | 20 | 0.19 | 0.15 |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before | Transformer | week_sin, week_cos | 20 | 0.21 | 0.20 |
+| active_in_last_{2,4,8,16,32,52}_periods, has_transacted_before | LSTM | week_sin, week_cos | 100 | 0.30 | 0.20 |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before | LSTM | week_sin, week_cos | 220 | 0.34 | 0.26 |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, recency_over_tenure, transaction_rate, saturating_tenure_26_periods | LSTM | week_sin, week_cos | 100 | 0.36 | 0.30 |
+| recency_over_tenure, transaction_rate, saturating_tenure_26_periods, has_transacted_before | LSTM | week_sin, week_cos | 200 | 0.43 | 0.30 |
+| saturating_recency_26_periods, transaction_rate, saturating_tenure_26_periods | LSTM | week_sin, week_cos | 100 | 0.49 | 0.30 |
+| kmeans_16 | LSTM | week_sin, week_cos | 40 | 0.75 | 0.26 |
+| kmeans_8 | LSTM | week_sin, week_cos | 60 | 0.93 | 0.27 |
+| recency, frequency, tenure (HB MCMC) | ParetoNBD | — | 2 | 1.12 | 0.30 |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8 | Transformer | week_sin, week_cos | 20 | 1.16 | 0.31 |
+| kmeans_4 | LSTM | week_sin, week_cos | 40 | 1.24 | 0.26 |
+| kmeans_8 | Transformer | week_sin, week_cos | 20 | 1.26 | 0.30 |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8 | LSTM | week_sin, week_cos | 20 | 1.32 | 0.29 |
+| kmeans_8 | Transformer | none | 20 | 1.37 | 0.31 |
+| log_period_since_last_transaction, cumulative_transactions, log_period_since_first_transaction | LSTM | week_sin, week_cos | 200 | 1.42 | 0.29 |
+| kmeans_8 | ValendinLSTM | none | 20 | 1.42 | 0.29 |
+| kmeans_8 | LSTM | none | 20 | 1.50 | 0.30 |
+| period_since_last_transaction, cumulative_transactions, period_since_first_transaction, kmeans_8 | LSTM | week_sin, week_cos | 40 | 1.69 | 0.28 |
+| period_since_last_transaction, cumulative_transactions, period_since_first_transaction | LSTM | week_sin, week_cos | 100 | 1.71 | 0.23 |
+| recency, frequency, tenure (MLE) | ParetoNBD_MLE | — | 3 | 2.26 | 0.28 |
+
+Suites behind each row:
+
+- **ValendinLSTM, count only** (week): real_panel_benchmarks__ValendinLSTM__electronics__r*
+- **LSTM, count only** (week_sin, week_cos): ar_encoding__electronics__no_ar__{a,b,c,d,e}, cluster__electronics__no_cluster__{a,b}, cross_entropy_cfg_2yTrain_1yPred_NoCov_Comparaison, cross_entropy_cfg_2yTrain_1yPred_NoCov_TestDimanche, cross_entropy_cfg_2y_Train_1yPred_NoCov_V12, cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_10Studies_100_simulations, cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_Pareto, real_panel_arms__LSTM__electronics__no_ar-no_cluster-valendin__a
+- **ValendinLSTM, count only** (none): real_panel_arms__ValendinLSTM__electronics__no_ar-no_cluster-valendin-no_tf__a
+- **LSTM, count only** (none): real_panel_arms__LSTM__electronics__no_ar-no_cluster-valendin-no_tf__a
+- **Transformer, count only** (week_sin, week_cos): cross_entropy_cfg_2yTrain_1yPred_NoCov_TestDimanche, cross_entropy_cfg_2y_Train_1yPred_NoCov_V12, cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_10Studies_100_simulations, cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_Pareto, real_panel_arms__Transformer__electronics__no_ar-no_cluster-valendin__a
+- **Transformer, count only** (none): real_panel_arms__Transformer__electronics__no_ar-no_cluster-valendin-no_tf__a
+- **Transformer, active_in_last_{2,4,8,16,32}_periods, has_transacted_before** (week_sin, week_cos): real_panel_arms__Transformer__electronics__ar_bounded-no_cluster-valendin__a
+- **LSTM, active_in_last_{2,4,8,16,32,52}_periods, has_transacted_before** (week_sin, week_cos): ar_encoding__electronics__ar_bounded_52__{a,b,c,d,e}
+- **LSTM, active_in_last_{2,4,8,16,32}_periods, has_transacted_before** (week_sin, week_cos): ar_encoding__electronics__ar_bounded_32__{a,b,c,d,e}, real_panel_arms__LSTM__electronics__ar_bounded-no_cluster-valendin__a, real_panel_lstm_bounded32__LSTM__electronics__r*
+- **LSTM, active_in_last_{2,4,8,16,32}_periods, has_transacted_before, recency_over_tenure, transaction_rate, saturating_tenure_26_periods** (week_sin, week_cos): real_panel_lstm_bounded32ratio__LSTM__electronics__r*
+- **LSTM, recency_over_tenure, transaction_rate, saturating_tenure_26_periods, has_transacted_before** (week_sin, week_cos): ar_encoding__electronics__ar_ratio__{a,b,c,d,e}, real_panel_lstm_ratio__LSTM__electronics__r*
+- **LSTM, saturating_recency_26_periods, transaction_rate, saturating_tenure_26_periods** (week_sin, week_cos): ar_encoding__electronics__ar_saturating__{a,b,c,d,e}
+- **LSTM, kmeans_16** (week_sin, week_cos): cluster__electronics__cluster_16__{a,b}
+- **LSTM, kmeans_8** (week_sin, week_cos): cluster__electronics__cluster_8__{a,b}, real_panel_arms__LSTM__electronics__no_ar-kmeans_8-valendin__a
+- **ParetoNBD, recency, frequency, tenure (HB MCMC)** (—): cross_entropy_cfg_2yTrain_1yPred_NoCov_Comparaison, cross_entropy_config_pareto_Comparaison, cross_entropy_config_pareto_Comparaison_pareto, cross_entropy_config_pareto_Comparaison_pareto2, real_panel_arms__ParetoNBD__electronics, real_panel_benchmarks__ParetoNBD__electronics
+- **Transformer, active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8** (week_sin, week_cos): real_panel_arms__Transformer__electronics__ar_bounded-kmeans_8-valendin__a
+- **LSTM, kmeans_4** (week_sin, week_cos): cluster__electronics__cluster_4__{a,b}
+- **Transformer, kmeans_8** (week_sin, week_cos): real_panel_arms__Transformer__electronics__no_ar-kmeans_8-valendin__a
+- **LSTM, active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8** (week_sin, week_cos): real_panel_arms__LSTM__electronics__ar_bounded-kmeans_8-valendin__a
+- **Transformer, kmeans_8** (none): real_panel_arms__Transformer__electronics__no_ar-kmeans_8-valendin-no_tf__a
+- **LSTM, log_period_since_last_transaction, cumulative_transactions, log_period_since_first_transaction** (week_sin, week_cos): ar_encoding__electronics__ar_log__{a,b,c,d,e}, real_panel_lstm_log__LSTM__electronics__r*
+- **ValendinLSTM, kmeans_8** (none): real_panel_arms__ValendinLSTM__electronics__no_ar-kmeans_8-valendin-no_tf__a
+- **LSTM, kmeans_8** (none): real_panel_arms__LSTM__electronics__no_ar-kmeans_8-valendin-no_tf__a
+- **LSTM, period_since_last_transaction, cumulative_transactions, period_since_first_transaction, kmeans_8** (week_sin, week_cos): cluster__electronics__ar_plus_cluster_8__{a,b}
+- **LSTM, period_since_last_transaction, cumulative_transactions, period_since_first_transaction** (week_sin, week_cos): ar_encoding__electronics__ar_unbounded__{a,b}, cluster__electronics__ar_unbounded__{a,b}, cross_entropy_config_pareto_Comparaison, cross_entropy_config_pareto_Comparaison_pareto, cross_entropy_config_pareto_Comparaison_pareto2
+- **ParetoNBD_MLE, recency, frequency, tenure (MLE)** (—): cross_entropy_cfg_2yTrain_1yPred_NoCov_TestDimanche, cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_10Studies_100_simulations, cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_Pareto
+
+Reading:
+
+- **Every neural model collapses when the count is its only per-customer input, whatever
+  else it reads and however it is trained.** The six count-only rows span three
+  architectures, four experiments and three calendar treatments — embedded `week`,
+  `week_sin` / `week_cos`, and no calendar at all — and every one of them lands at CV
+  0.05–0.19 with Spearman 0.03–0.15, against Pareto/NBD's 1.12 and 0.30 on the same
+  customers. Adding or removing the calendar moves nothing: it is the same value for every
+  customer, so it cannot separate them.
+- **One persistent per-customer channel is enough to undo it, and which one barely
+  matters.** Every row carrying any customer-level channel sits at CV 0.21 or above and
+  Spearman 0.20 or above: the activity flags (0.30–0.36), the bounded ratio triple (0.43),
+  a k-means cluster id alone (0.75–1.50). The jump from 0.07 to 0.30 costs six binary flags.
+- **More spread is not better ranking.** The unbounded counters produce the widest
+  forecasts and rank the worst of the AR encodings — `period_since_last_transaction`,
+  `cumulative_transactions`, `period_since_first_transaction` reach CV 1.71 at Spearman
+  0.23, against the bounded ratio triple's CV 0.43 at 0.30. CV says whether a model
+  distinguishes customers at all; past that threshold it says nothing about whether it is
+  right, and the unbounded channels' extra spread is the extrapolation
+  `docs/feature_engineering.md` §4 measures.
+- **The Transformer collapses less completely than the LSTM.** Its count-only rows sit at
+  CV 0.16–0.19 and Spearman 0.09–0.15 against the LSTM's 0.07–0.09 and 0.04–0.05, and 22 of
+  its 54 count-only forecasts escape (CV > 0.2) against 10 of the LSTM's 204. Attention
+  reads the whole calibration window at every step rather than carrying it in a state, so
+  it has less to forget — but it does not reach a usable ranking either.
+
+**The trigger is the panel, not the architecture.** Measured on 2026-09-13 across all four
+panels, which the electronics-only table above does not cover. The same count-only configuration
 does not collapse on CDNOW (39 calibration weeks: CV 1.10–1.45, Spearman 0.35–0.43 against
 Pareto/NBD's 0.45), collapses partly on gift (CV 0.65, Spearman 0.37), and fully on
 multichannel (CV 0.09, Spearman 0.005). Electronics, gift and multichannel all have 104
@@ -181,11 +308,12 @@ Measured facts:
   holds 3.5× throughout. The per-week spread in the collapsed models is sampling noise that
   averages out of the totals.
 - **A persistent customer-level channel restores the spread.** Bounded flags lift the
-  week-1 active/inactive ratio to 4.15 and the total CV to 0.37; clusters to 0.9–1.5.
-- **Hyperparameters barely matter.** 5 of 140 count-only LSTM replications on electronics
-  escape (CV > 0.2), leaning to batch size 64 and higher learning rates; no single
-  parameter correlates with CV beyond |ρ| = 0.46. No ValendinLSTM replication on
-  electronics or multichannel escapes.
+  week-1 active/inactive ratio to 4.15, and the total CV from 0.07 to 0.30–0.36; a cluster
+  id alone lifts it to 0.75–1.50 (table above).
+- **Hyperparameters barely matter.** 10 of the 204 count-only LSTM forecasts escape
+  (CV > 0.2), and 1 of the 40 ValendinLSTM ones. On the 140 scanned in the first pass the
+  escapes leaned to batch size 64 and higher learning rates, with no single parameter
+  correlating with CV beyond |ρ| = 0.46.
 
 **Hypothesis, not tested.** With only the count as input the network has to carry a
 customer's identity in its state through about 104 mostly-zero weeks. The fitted model
@@ -203,11 +331,21 @@ electronics and CDNOW, and only for those two models: ValendinLSTM cannot read a
 channel (ADR-0004). Each experiment's own `no_ar` arm is shown beside its bounded arm,
 because that pair — same experiment, same budget — is the clean comparison.
 
+**Provenance for every row below.** Embedder `valendin` on all neural rows except
+ValendinLSTM, whose embedder is frozen (ADR-0004); loss `cross_entropy` throughout;
+`n` is replications, each its own Optuna study, refit and forecast. Windows are the
+benchmark's (§ Setup) for the ValendinLSTM and Pareto/NBD rows and for nothing else:
+**`ar_encoding` and `real_panel_arms` predate ADR-0009 on CDNOW** and use a 38-week
+holdout from 1997-10-01 against the benchmark's 39 weeks from 09-30. Electronics windows
+are identical across all three families. Archive: families E, H and N of
+`docs/studies-run.md`.
+
 Metrics are each suite's own `results.csv`, mean ± sd over replications. Spearman is
-recomputed from the stored forecasts where the cohort rebuilds exactly: electronics, and
-this run's CDNOW. The archived CDNOW suites predate ADR-0009 and use a 38-week holdout
-starting 1997-10-01 against this run's 39 weeks from 09-30, so they are close to, not
-identical with, the benchmark's window, and their Spearman is not recomputed.
+recomputed from the stored forecasts, which needs the panel actuals — so it exists for
+electronics and for the benchmark's CDNOW, and **not for the archived CDNOW suites**:
+`run_ar_encoding_ablation.py --panel cdnow --report` rebuilds the panel on today's week
+rule, gets 39 holdout weeks against the stored 38, and raises rather than scoring. Those
+cells read `n/a`, not "small".
 
 | panel | model and features | n | trials / paths | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
@@ -216,20 +354,31 @@ identical with, the benchmark's window, and their Spearman is not recomputed.
 | electronics | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | +22.4 ± 16.4 | 56.3 ± 7.5 | 0.3767 ± 0.0003 | 0.041 ± 0.065 |
 | electronics | LSTM ar_bounded_32 (`ar_encoding`) | 100 | 50 / 300 | +1.2 ± 23.6 | 46.3 ± 8.4 | 0.3760 ± 0.0003 | 0.257 ± 0.044 |
 | electronics | LSTM ar_bounded_52 (`ar_encoding`) | 100 | 50 / 300 | −8.2 ± 16.4 | 45.4 ± 5.0 | 0.3760 ± 0.0004 | 0.202 ± 0.121 |
+| electronics | **LSTM ar_saturating (`ar_encoding`)** | 100 | 50 / 300 | **−11.6 ± 18.0** | **43.3 ± 3.6** | 0.3757 ± 0.0002 | **0.299 ± 0.019** |
+| electronics | LSTM ar_log (`ar_encoding`) | 100 | 50 / 300 | +41.5 ± 34.5 | 63.0 ± 24.3 | 0.3855 ± 0.0167 | 0.292 ± 0.015 |
+| electronics | LSTM ar_ratio (`ar_encoding`) | 100 | 50 / 300 | +47.1 ± 27.7 | 70.4 ± 19.1 | 0.3772 ± 0.0015 | 0.304 ± 0.013 |
+| electronics | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +235.5 ± 230.4 | 240.7 ± 226.3 | 0.4325 ± 0.0632 | 0.227 ± 0.065 |
 | electronics | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | +23.8 ± 12.8 | 56.3 ± 6.6 | 0.3769 ± 0.0004 | 0.036 ± 0.073 |
 | electronics | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.0 ± 31.1 | 48.4 ± 11.2 | 0.3762 ± 0.0005 | 0.249 ± 0.038 |
 | electronics | Transformer no_ar (`real_panel_arms`) | 20 | 50 / 200 | +15.9 ± 19.2 | 53.0 ± 6.3 | 0.3792 ± 0.0006 | 0.113 ± 0.107 |
 | electronics | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.5 ± 19.9 | 49.5 ± 4.6 | 0.3763 ± 0.0003 | 0.201 ± 0.135 |
 | cdnow | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
 | cdnow | **Benchmark: Pareto/NBD** | 1 | — | −16.0 | 21.0 | 0.1455 | 0.450 |
-| cdnow | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | −0.7 ± 16.2 | 22.4 ± 8.2 | 0.1475 ± 0.0003 | — |
-| cdnow | LSTM ar_bounded_16 (`ar_encoding`) | 100 | 50 / 300 | −8.5 ± 15.2 | 22.6 ± 5.7 | 0.1473 ± 0.0002 | — |
-| cdnow | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | −0.5 ± 23.2 | 26.7 ± 12.4 | 0.1479 ± 0.0007 | — |
-| cdnow | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −11.8 ± 9.9 | 21.0 ± 3.3 | 0.1475 ± 0.0002 | — |
-| cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 ± 17.3 | 25.6 ± 6.9 | 0.1479 ± 0.0006 | — |
+| cdnow | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | −0.7 ± 16.2 | 22.4 ± 8.2 | 0.1475 ± 0.0003 | n/a |
+| cdnow | LSTM ar_bounded_16 (`ar_encoding`) | 100 | 50 / 300 | −8.5 ± 15.2 | 22.6 ± 5.7 | 0.1473 ± 0.0002 | n/a |
+| cdnow | LSTM ar_bounded_32 (`ar_encoding`) | 40 | 50 / 300 | +42.9 ± 43.7 | 55.4 ± 37.2 | 0.1498 ± 0.0030 | n/a |
+| cdnow | LSTM ar_saturating (`ar_encoding`) | 100 | 50 / 300 | +12.9 ± 14.6 | 27.4 ± 8.7 | 0.1479 ± 0.0013 | n/a |
+| cdnow | LSTM ar_log (`ar_encoding`) | 100 | 50 / 300 | +20.5 ± 15.8 | 33.3 ± 11.7 | 0.1488 ± 0.0011 | n/a |
+| cdnow | LSTM ar_ratio (`ar_encoding`) | **80** | 50 / 300 | +24.3 ± 15.4 | 34.6 ± 11.2 | 0.1492 ± 0.0031 | n/a |
+| cdnow | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +334.1 ± 525.2 | 345.7 ± 522.3 | 0.2652 ± 0.1899 | n/a |
+| cdnow | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | −0.5 ± 23.2 | 26.7 ± 12.4 | 0.1479 ± 0.0007 | n/a |
+| cdnow | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −11.8 ± 9.9 | 21.0 ± 3.3 | 0.1475 ± 0.0002 | n/a |
+| cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 ± 17.3 | 25.6 ± 6.9 | 0.1479 ± 0.0006 | n/a |
 
 The CDNOW Transformer no_ar suite is a partial run (19 forecasts, no `results.csv`) and is
-left out.
+left out. **The `ar_encoding` arms are not budget-matched to each other**: eleven ran five
+seed shards (100 replications), CDNOW `ar_ratio` four (80), and `ar_unbounded` and CDNOW
+`ar_bounded_32` two (40). `docs/studies-run.md` §4.1 has the shard map.
 
 Reading:
 
@@ -241,6 +390,15 @@ Reading:
 - **On electronics the flags fix ranking relative to the count-only models, but do not
   reach Pareto/NBD.** Spearman rises from 0.03–0.11 without AR to 0.20–0.26 with flags;
   Pareto/NBD has 0.297. This is the collapse above being lifted by a persistent channel.
+- **`ar_saturating` is the best electronics arm in the ablation on every metric at once,
+  and it had never been reported.** Bias −11.6 ± 18.0, MAPE 43.3 ± 3.6 — the lowest in the
+  family, and the tightest — with Spearman 0.299, level with Pareto/NBD's 0.297. Its
+  columns are `saturating_recency_26_periods`, `transaction_rate`,
+  `saturating_tenure_26_periods`: the same two clocks as `ratio`, saturated at C rather
+  than divided by tenure. It is the only encoding here that holds the level *and* the
+  ranking, which is what the flags-plus-ratio arm was built to do and did not achieve.
+  **It was never carried onto gift or multichannel**, so the four-panel sections below do
+  not contain it (`docs/studies-run.md` §6, gap 4).
 - **On CDNOW the flags move almost nothing, and the count-only LSTM already beats the
   ValendinLSTM benchmark on level and MAPE.** CDNOW does not collapse, so there is little
   for the flags to add: bias shifts by 8–11 points towards under-forecasting, MAPE stays
@@ -256,13 +414,19 @@ Reading:
 
 ## LSTM with bounded flags on all four panels
 
-`scripts/run_real_panel_ar.py --encodings bounded32`, 2026-09-13: the LSTM with the
-transaction count, `week_sin` / `week_cos` and `ar_bounded_32`
-(`active_in_last_{2,4,8,16,32}_periods` + `has_transacted_before`), on the benchmark's
-windows and cohort. 100 replications per panel, each a 100-trial Optuna search and a
-500-path forecast — the benchmark's trial and path budget, so unlike the table above this
-comparison is budget-matched. Depth 32 on CDNOW too, by decision. Scored by the same code
-as the benchmark rows, on the same customers.
+`scripts/run_real_panel_ar.py --encodings bounded32`, 2026-09-13 (family O of
+`docs/studies-run.md`): the LSTM with the transaction count (embedded), `week_sin` /
+`week_cos` and `ar_bounded_32` (`active_in_last_{2,4,8,16,32}_periods` +
+`has_transacted_before`), on the benchmark's windows and cohort. Depth 32 on CDNOW too, by
+decision. Scored by the same code as the benchmark rows, on the same customers.
+
+| | |
+| --- | --- |
+| budget | **100 replications × 100 Optuna trials × 500 Monte Carlo paths** per panel — the benchmark's trial and path budget, so unlike the table above this comparison **is** budget-matched. Seeds 43–142, one suite per replication. |
+| embedder | `valendin` (verified from `param_embedder` in every `results.csv`) |
+| loss | `cross_entropy` |
+| windows | the 2-year benchmark windows of § Setup, imported from `run_real_panel_benchmarks.WINDOWS` |
+| metrics | bias, MAPE, RMSE from `results.csv`; Spearman recomputed from `Predictions/`. Regenerate with `--encodings bounded32 --report`. |
 
 | panel | model | n | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -308,9 +472,10 @@ Reading:
 
 ## The three AR encodings on all four panels
 
-`scripts/run_real_panel_ar.py --encodings bounded32,log,ratio`, 2026-09-13/14. The
-same LSTM, inputs, windows, cohort and budget as the section above (count, `week_sin` /
-`week_cos`, 100 replications × 100 trials × 500 paths); only the AR encoding differs:
+`scripts/run_real_panel_ar.py --encodings bounded32,log,ratio`, 2026-09-13/14 (family O).
+The same LSTM, inputs, windows, cohort, embedder (`valendin`), loss (`cross_entropy`) and
+budget as the section above — **100 replications × 100 trials × 500 paths per (encoding,
+panel)**, on the 2-year benchmark windows; only the AR encoding differs:
 
 - **bounded32** — `active_in_last_{2,4,8,16,32}_periods` + `has_transacted_before`
 - **log** — `log_period_since_last_transaction`, `cumulative_transactions`,
@@ -418,17 +583,18 @@ Reading:
 
 ## Three-year calibration
 
-`scripts/run_real_panel_ar.py --calibration 3y`, 2026-09-14/15: the same four LSTM
-arms on electronics, gift and multichannel, calibrating on three years instead of two —
-the first two to fit the weights, the third as the validation window — and forecasting the
-year after. Encodings (C stays 26), budget (100 × 100 trials × 500 paths) and cohort are
-unchanged. CDNOW's panel has no room for it.
+`scripts/run_real_panel_ar.py --calibration 3y`, 2026-09-14/15 (family P of
+`docs/studies-run.md`): the same four LSTM arms on electronics, gift and multichannel,
+calibrating on three years instead of two — the first two to fit the weights, the third as
+the validation window — and forecasting the year after. Encodings (C stays 26), embedder
+(`valendin`), loss (`cross_entropy`), cohort and budget (**100 replications × 100 trials ×
+500 paths**, seeds 43–142) are unchanged. CDNOW's panel has no room for it.
 
-| panel | fit | validation | holdout | holdout transactions |
-| --- | --- | --- | --- | ---: |
-| electronics | 1999–2000 | 2001 | 2002 | 1,541 |
-| gift | 2001 w8 → 2003 w7 | 2003 w8 → 2004 w7 | 2004 w8 → 2005 w7 | 1,040 |
-| multichannel | 2005–2006 | 2007 | 2008 | 173 |
+| panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells |
+| --- | ---: | --- | --- | --- | ---: | ---: | ---: |
+| electronics | 829 | 1999-01-01 → 2001-12-31 | 2001-01-01 | 2002-01-01 → 2002-12-31 | 156 / 52 | 1,541 | 98.7% |
+| gift | 2,062 | 2001-02-25 → 2004-02-24 | 2003-02-25 | 2004-02-25 → 2005-02-24 | 156 / 52 | 1,040 | 99.1% |
+| multichannel | 1,402 | 2005-01-01 → 2007-12-31 | 2007-01-01 | 2008-01-01 → 2008-12-31 | 156 / 52 | 173 | 99.8% |
 
 **The holdout year moves with the window**, so each 3-year row forecasts a different year
 from its 2-year counterpart, on different actuals. The comparison below reads the two side
