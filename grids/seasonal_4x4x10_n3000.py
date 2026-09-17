@@ -82,9 +82,17 @@ AR_BOUNDED = tuple(
     f"active_in_last_{k}_periods" for k in (2, 4, 8, 16, 32)
 ) + ("has_transacted_before",)
 
-AR_AXIS = {"no_ar": (), "ar_unbounded": AR_UNBOUNDED, "ar_bounded": AR_BOUNDED}
-CLUSTER_AXIS = {"no_cluster": (), "kmeans_8": ("kmeans_8",)}
-# One entry, so the cross below is 3 x 2 x 1 = 6 arms. The registry default, and what
+# NARROWED against `seasonal_4x4x10`, by decision, on what the 1000-customer run
+# already settled. `ar_unbounded` is not re-run: its two unbounded counters keep
+# counting through the holdout and that failure is measured, not open. The `kmeans_8`
+# crossing is not re-run either, and panel size is the reason it *cannot* be read here
+# — eight clusters fitted over 3000 customers is not the same covariate as eight over
+# 1000, so a difference between the grids would be size and a changed feature at once.
+# What is left is the comparison this grid exists for: the level baseline against the
+# bounded encoding, at three times the customers.
+AR_AXIS = {"no_ar": (), "ar_bounded": AR_BOUNDED}
+CLUSTER_AXIS = {"no_cluster": ()}
+# One entry, so the cross below is 2 x 1 x 1 = 2 arms. The registry default, and what
 # the archived seasonal_4x4x10 run used — which is what makes the baseline arm a
 # reproduction check rather than a new measurement.
 EMBEDDER_AXIS = ("valendin",)
@@ -229,17 +237,16 @@ GRID = GridSpec(
     # How many vast.ai workers each model's (arm x dataset) work is split across.
     # 0 = run on the orchestrator instead of renting (VastAI/Rules.md §5).
     #
-    # Weighted by MEASURED cost, not by model count. One suite at 20 trials / 200
-    # simulations on the orchestrator's CPU (i5-9600KF, 4 cores) took 131 s for the LSTM
-    # and over 40 minutes for the Transformer — a ratio of at least 18x, driven by the
-    # attention rollout, which re-reads the whole sequence at every one of 52 steps for
-    # every simulated path. An even split would leave the LSTM workers idle for most of
-    # the run while the Transformer ones are still going.
+    # Sized from MEASURED wall-clock for THIS run, which trains the LSTM and the
+    # Pareto/NBD only; the transformer is declared but deliberately not rented for, so
+    # reconcile_grid.py keeps reporting it as owed rather than forgetting it exists.
     #
-    # PROVISIONAL. That ratio is CPU-only, and Transformer training parallelises on a GPU
-    # far better than a sequential rollout does, so the real ratio on rented hardware is
-    # smaller and unmeasured — VastAI/Rules.md §7's survey is LSTM-only. 8:2 hedges
-    # against a ratio anywhere from 4x to 18x; re-derive it from a probe before trusting
-    # it (`run_pnbd_grid.py --max-suites 1 --suite-suffix probe`).
-    workers={"transformer": 8, "lstm": 2, "valendin_lstm": 0, "pareto_nbd": 0},
+    # The LSTM is 320 suites (2 arms x 160 panels). At the archived rented median of
+    # 76.9 s/suite on 1000-customer panels, times the 1.64x panel-size factor measured
+    # on 2026-09-17 (94 s -> 154 s, same cell, same reduced budget, 3000 vs 1000
+    # customers), that is ~11 GPU-hours, or ~20 after the 1.48x penalty for the Xeon
+    # E5 v3/v4 boxes that are most of the market under the price ceiling. Ten boxes
+    # therefore work ~2 hours each, and every box past that buys another image pull
+    # (F14, a worker's largest transfer) rather than speed.
+    workers={"transformer": 0, "lstm": 10, "valendin_lstm": 0, "pareto_nbd": 0},
 )
