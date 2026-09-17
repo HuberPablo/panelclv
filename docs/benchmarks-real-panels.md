@@ -507,6 +507,11 @@ more than 3 scaled median absolute deviations from its cell's median. 2026-09-15
 
 ### Optuna's validation loss cannot see which runs forecast badly
 
+Everything here compares *winning* trials across replications, which is a question about
+near-ties. "Does the search select the best trial?" below asks the same question over a
+study's whole trial range and answers it differently for RMSE and ranking on gift and
+CDNOW — read the two together.
+
 - **The winning validation loss barely varies between runs.** Its coefficient of
   variation across the replications of one cell is 0.08–3.1%, and the median run has
   1–22 other trials within 0.5% of its best. Holdout bias across the same runs spans tens
@@ -538,6 +543,121 @@ more than 3 scaled median absolute deviations from its cell's median. 2026-09-15
   matters. Two remedies are already written up in `docs/insights-study.md`: select on
   rollout quality (§5.4), or score the ensemble of replications rather than their mean
   (§9).
+
+## Does the search select the best trial?
+
+The section above shows that the *winning* validation loss says nothing about the
+forecast, measured across the replications of a cell. That is a question about near-ties:
+every run compared there is the argmin of its own study, and those argmins span only a
+sliver of the loss their study's trials cover. Across the 20 ValendinLSTM replications of
+a panel, the winners span 4.6% (CDNOW, gift), 14.3% (electronics) and 38.7%
+(multichannel) of the range a typical study's own completed trials cover; across the LSTM
+cells above it is 2–65%, median 12%. Whether the search does anything useful over the
+*whole* range it searches is a different question, and the archive cannot
+answer it, because a suite forecasts its winner and nothing else.
+
+The checkpoints can. `keep_only_best_checkpoint` deletes the losers' weights when a study
+finishes, and on part of the ValendinLSTM benchmark that cleanup did not run: 30 of the 80
+studies still hold 10–51 non-winning trial checkpoints, and every one of those sets spans
+100% of its study's completed-trial loss range and contains the winner. So
+`scripts/run_rescore_trials.py` took each of them through exactly what the runner does for
+a winner — the full-calibration refit (ADR-0008) and the registry's rollout, at the
+study's own forecast seed — and scored it with `compute_forecast_metrics`. **698 refits
+across all 80 studies, 2026-09-17.** Only the refit's training RNG differs from the
+archived run; the panel, windows, feature set, hyperparameters and simulation seed are the
+study's own. Six rented boxes and the workstation, about three and a half hours from
+first rental to an empty fleet, and $1.02 of rental.
+
+### It selects well on two panels and not at all on the other two
+
+Per study, the rank correlation between a trial's validation loss and its holdout error,
+signed so **positive means the validation loss agrees with the holdout**, and where the
+trial Optuna actually picked lands among the scored trials of its own study (0 = the best
+forecast in the study, 1 = the worst, 0.5 = a coin toss). Studies with at least 5 scored
+trials; 653 trials in 36 studies.
+
+| panel | studies | rho RMSE | rho Spearman | rho \|bias\| | winner's place, RMSE | winner's place, Spearman | winner's place, \|bias\| |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| gift | 14 | **+0.83** (14/14) | +0.56 (13/14) | +0.09 | **0.11** | **0.12** | 0.49 |
+| CDNOW | 13 | **+0.61** (13/13) | **+0.67** (13/13) | +0.38 | 0.26 | 0.38 | 0.46 |
+| electronics | 2 | −0.31 (0/2) | +0.44 (2/2) | −0.25 | 0.84 | 0.13 | 1.00 |
+| multichannel | 7 | −0.29 (0/7) | +0.01 (3/7) | −0.21 | 0.52 | 0.65 | 0.55 |
+| all | 36 | +0.47 (27/36) | +0.49 (31/36) | +0.12 | 0.28 | 0.32 | 0.52 |
+
+- **On gift and CDNOW the objective is a real proxy for the rollout.** Every single study
+  agrees in sign on RMSE, and the selected trial lands in the best tenth (gift) or best
+  quarter (CDNOW) of its own study. This contradicts the flat reading the near-tie
+  measurement gives, and both are true: the loss orders trials that differ, and cannot
+  separate trials that do not.
+- **On multichannel it is worse than useless.** All seven studies correlate *negatively*
+  on RMSE, MAPE and |bias|, and the selected trial sits at the 52nd percentile for RMSE
+  and the 65th for ranking — behind a coin toss. Electronics points the same way on two
+  studies, which is too few to carry alone but agrees with multichannel.
+- **Aggregate bias is a coin toss everywhere.** Pooled rho is +0.12 and the winner's
+  place is 0.52. Even on gift and CDNOW, where RMSE selection works, bias lands at 0.49
+  and 0.46. The metric the arm tables lead with is the one selection does not control.
+
+### What selection is worth, against the oracle and the median trial
+
+Means over the same studies. "Oracle" is the best trial of that study on that metric,
+"median" the median trial — what picking at random would give.
+
+| panel | \|bias %\| selected / oracle / median | Spearman selected / oracle / median | RMSE selected / oracle / median |
+| --- | --- | --- | --- |
+| gift | 16.9 / 4.3 / 19.2 | **0.374 / 0.379 / 0.019** | 0.1064 / 0.1062 / 0.1070 |
+| CDNOW | 34.6 / 7.7 / 40.4 | 0.386 / 0.431 / 0.327 | 0.1472 / 0.1464 / 0.1487 |
+| electronics | 64.7 / 12.2 / 37.8 | 0.043 / 0.045 / 0.007 | 0.3770 / 0.3758 / 0.3773 |
+| multichannel | 48.9 / 1.6 / 42.7 | −0.009 / 0.024 / −0.002 | 0.0570 / 0.0568 / 0.0570 |
+
+- **On gift the search earns its cost, and it is the ranking it earns.** The median trial
+  of a gift study ranks customers at 0.019 — nothing — and the selected one at 0.374,
+  within 0.005 of the study's best. Picking at random there would throw the model's whole
+  ranking ability away.
+- **The RMSE it optimises so well is worth almost nothing in absolute terms.** Selected
+  and median differ in the fourth decimal, because these panels are mostly zeros and RMSE
+  is dominated by them. A rho of +0.83 on a quantity that moves by 0.0006 is a reliable
+  ranking of a prize that is not there.
+- **Every study contains a trial with near-zero bias, and selection never finds it.** The
+  oracle's |bias| is 1.6–12.2 against a selected 16.9–64.7, and the median trial is no
+  worse than the selected one on three panels of four. What is on the table for bias is
+  large; the objective simply does not point at it.
+
+### The refit noise floor, and the stopping epoch
+
+Each study's winner is refit here a second time, and its first refit is in the archive, so
+the pair measures what an unseeded refit moves on its own (80 studies, one pair each).
+
+| panel | bias difference, sd | largest | one refit's own sd | bias sd across a study's trials |
+| --- | ---: | ---: | ---: | ---: |
+| CDNOW | 17.7 | 38.2 | 12.5 | 59.1 |
+| electronics | 8.9 | 30.5 | 6.3 | 22.2 |
+| gift | 20.3 | 41.0 | 14.4 | 19.4 |
+| multichannel | 17.6 | 50.7 | 12.5 | 45.6 |
+
+- **Refitting one checkpoint twice moves aggregate bias by 6–14 points of sd, up to 51
+  points at worst**, with the panel, windows, weights, feature set and simulation seed all
+  held fixed. RMSE moves by less than 0.001. That is the floor any two trials must clear
+  to be distinguishable, and on gift the spread across a study's trials (19.4) barely
+  clears one trial's spread against itself (14.4).
+- **The stopping epoch carries what the loss does not.** Within a study, its rank
+  correlation with holdout Spearman averages +0.48 on both CDNOW and gift, and with
+  |bias| −0.30 on CDNOW and −0.26 on multichannel: trials that trained longer rank better
+  and are less biased. The epoch is recorded already (`user_attrs_best_epoch`) and is not
+  part of the objective.
+
+### What follows
+
+- **The claim "validation loss cannot pick a good forecaster" holds for bias and for the
+  two panels where the model collapses, and is false for RMSE and ranking on gift and
+  CDNOW.** Rollout-based selection (`docs/insights-study.md` §5.4) is therefore not a
+  replacement for the current objective but an addition aimed at bias, which is the part
+  it does not reach.
+- **Where the model cannot forecast, no selection rule helps.** On multichannel the
+  oracle's Spearman is 0.024. Selecting better inside a study whose best trial cannot rank
+  customers buys nothing, which is the ordering `docs/insights-study.md` §5.2 already
+  argues for: give the model an absorbing state first, select on the rollout second.
+- **A bias number from one refit is not reproducible to better than ~±12 points.** Runs
+  are compared in tens of points throughout this document; that is the resolution.
 
 ## The run
 
