@@ -313,37 +313,54 @@ whose last `period_start` is the last calibration period's start — so the benc
 forecast column 0 lines up against holdout period 0 while covering the calendar week
 before it.
 
-**Isolated on 2026-09-17. It is a real off-by-one, and the ~2 points above were two
-larger effects cancelling.** Three arms on the benchmark's own windows and cohort, paired
-on seeds 42–44, scored by `compute_forecast_metrics`
+**Isolated on 2026-09-17, and it is not an off-by-one.** The paragraph above reasons
+from an unstated assumption — that a week's transactions sit at the *start* of their
+bucket. Nothing in `_build_cbs` says so, and both `t_x` and `T_cal` are differences of
+two week labels, so the anchor cancels out of both. Under the end-of-week reading the
+arithmetic is exact: customer time 0 is the end of the customer's first active week,
+`T_cal` lands on the end of calibration, and forecast column 0 covers the first holdout
+week. A four-week toy panel run through the real function shows both readings side by
+side in the ticket below. **There is no misalignment and nothing to fix.**
+
+What is left is a discretisation choice rather than a defect. End-of-week is the
+*shortest* admissible observation window — it places each first purchase at the latest
+instant its bucket allows — and `T_cal` is the denominator of the purchase rate and the
+clock the death process runs on, so this convention maximises the forecast among the
+admissible ones. BTYDplus never faces the choice: it reads a daily event log, where the
+first purchase carries its real timestamp. Against that reference, bucketing to week-ends
+shortens each customer's life by however far into its week the first purchase fell —
+**half a week in expectation**.
+
+That is measurable and it measures as nothing. On CDNOW, adding 0.5 periods to `T_cal`
+(the daily-resolution equivalent), paired on seeds 42–44
 (`.scratch/pnbd-cdnow-replication/measure_window_shift.py`; the baseline arm reproduces
 the archived `results.csv` to every digit):
 
-| arm | CDNOW bias % | CDNOW MAPE | CDNOW Spearman | electronics bias % |
-| --- | ---: | ---: | ---: | ---: |
-| baseline (as archived) | −14.18 | 20.44 | 0.449 | −63.07 |
-| `T_cal + 1` — age to the period's end | **−21.23** | 24.06 | 0.441 | **−64.36** |
-| `x` counts transactions, no collapse | **−8.44** | 18.84 | 0.436 | diverges (NaN) |
+| seed | baseline bias % | `T_cal + 0.5` | Δ |
+| ---: | ---: | ---: | ---: |
+| 42 | −15.97 | −18.62 | −2.65 |
+| 43 | −15.08 | −11.93 | +3.15 |
+| 44 | −11.50 | −10.91 | +0.59 |
+| **mean** | **−14.18** | **−13.82** | **+0.36** |
 
-Three things follow. **The misalignment is universal**: one period on all four panels and
-both calibrations, verified by
-`.scratch/pnbd-cdnow-replication/check_window_alignment.py`, not a CDNOW artefact.
-**The two choices push opposite ways** — the collapse lifts the CDNOW level by 5.7 points,
-the shift drops it by 7.1 — so the small net in the table above is cancellation, and
-correcting either one alone moves the reported level more than correcting both.
-**Correcting the shift makes the benchmark look worse**: an older customer has a lower
-fitted rate and a lower `P(alive)`, and Pareto/NBD already under-predicts. Ranking is
-untouched in every arm, so nothing that compares Spearman is affected.
+The correction is worth a third of a point and does not hold its sign across seeds.
+Spearman is untouched (0.449 → 0.446). Even the whole-week version — the wrong convention
+applied deliberately, as a sensitivity bound — moves the mean only to −21.23, which is
+1.6× the seed spread the baseline already has.
 
-The magnitude scales inversely with the calibration window — 7.1 points on CDNOW's 39
-weeks against 1.3 on electronics' 104 — so the 104-week panels should expect about a
-point. Gift and multichannel were not measured.
+**Which is the finding that survives**: the baseline alone spans 4.5 points over three
+seeds (−11.50 to −15.97), so §7's warning generalises — a single Pareto/NBD fit on CDNOW
+is not a reportable number, and every CDNOW Pareto/NBD row in the docs is `n = 1` at seed
+42, the most pessimistic of the three. That is a reporting problem, not a `_build_cbs`
+problem.
 
-The code is unchanged pending a decision about refitting the archive;
-`.scratch/pnbd-cdnow-replication/issues/01-pareto-calibration-age-off-by-one.md` carries
-the one-line fix, why `scripts/validate_pareto_benchmark.py` cannot see the defect (it
-hands R the same short `T.cal`, so both sides shift together), and why ADR-0004 does not
-bar the change.
+The occasion collapse — the *first* of the two choices above — is separate and was measured
+in the same run: counting transactions rather than active periods lifts the CDNOW level by
+5.7 points (−14.18 → −8.44) and diverges on electronics exactly as the docstring warns. It
+remains a documented modelling choice.
+
+`.scratch/pnbd-cdnow-replication/issues/01-pareto-weekly-discretisation-convention.md`
+carries the toy panel, the full arm table, and a note on why the first reading was wrong.
 
 ---
 
@@ -400,7 +417,7 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 | `.scratch/pnbd-cdnow-replication/replicate.py` | All five configurations and both metrics |
 | `.scratch/pnbd-cdnow-replication/results.json` | Per-seed raw numbers behind §5–§7 |
 | `.scratch/pnbd-cdnow-replication/check_window_alignment.py` | §9(b) — which calendar week each forecast column covers, per panel |
-| `.scratch/pnbd-cdnow-replication/measure_window_shift.py` | §9(b) — the three paired arms; writes `window_shift_results.csv` |
+| `.scratch/pnbd-cdnow-replication/measure_window_shift.py` | §9(b) — the paired `T_cal` arms; writes `window_shift_results.csv` |
 
 ---
 
@@ -421,16 +438,23 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 
 ## 13. Open, in priority order
 
-1. ~~**Isolate §9(b).**~~ **Done, 2026-09-17** — see §9(b). Both fits were run, on two
-   panels and three seeds. The `cal_end` shift is real and universal, it is worth 7.1
-   points of bias on CDNOW and 1.3 on electronics, and it is partly masked by the occasion
-   collapse pulling the other way. Every archived Pareto/NBD number in the repo is on the
-   shifted windows. The decision of whether to fix and refit is open:
-   `.scratch/pnbd-cdnow-replication/issues/01-pareto-calibration-age-off-by-one.md`.
-2. **Run the neural models on JFH's split.** The Pareto/NBD side of a CDNOW comparison
+1. ~~**Isolate §9(b).**~~ **Done, 2026-09-17, and it came back negative** — see §9(b).
+   The `cal_end` reading was not an off-by-one: `t_x` and `T_cal` are both differences of
+   week labels, so the anchor cancels and the arithmetic is exact under the end-of-week
+   convention. What remains is a discretisation choice worth +0.36 points of bias on
+   CDNOW, which does not hold its sign across three seeds. Closed `wontfix`:
+   `.scratch/pnbd-cdnow-replication/issues/01-pareto-weekly-discretisation-convention.md`.
+
+2. **Report CDNOW Pareto/NBD as a seed distribution, not one fit.** Raised by the above
+   rather than resolved by it. Three seeds span 4.5 points of bias (−11.50 to −15.97) and
+   every CDNOW Pareto/NBD row in the docs is `n = 1` at seed 42, the most pessimistic of
+   the three. The benchmark tables call the fit "deterministic, so n = 1 and no spread",
+   which holds on electronics (±0.35) and not here. A fit is ~16 s, so twenty seeds is
+   five minutes.
+3. **Run the neural models on JFH's split.** The Pareto/NBD side of a CDNOW comparison
    now has a number; the LSTM side does not, on this cohort. `docs/insights-study.md`
    §4.3's CDNOW arms use the repo panel and the package's own metric, which is the right
    metric but the wrong 38-week window.
-3. **Longer chains.** §7's ±1.92 over five seeds at the default `mcmc=2500` is wide
+4. **Longer chains.** §7's ±1.92 over five seeds at the default `mcmc=2500` is wide
    enough that a single archived Pareto/NBD fit on CDNOW should not be quoted. Whether
    that is fixable by sampling more or is genuine posterior width is untested.
