@@ -311,11 +311,39 @@ is unknown in a weekly panel. The second is not a choice anyone wrote down, and 
 applies to the production path too — `pareto_from_data` passes `data["train_panel"]`,
 whose last `period_start` is the last calibration period's start — so the benchmark's
 forecast column 0 lines up against holdout period 0 while covering the calendar week
-before it. That reads as an off-by-one, but it was not isolated here: the ~2 points
-above are the two effects together, and the arithmetic could plausibly be defended as
-"age measured to the start of the last complete period". **Isolating them is a two-fit
-experiment and it has not been run.** Until it is, treat this as a flagged suspicion,
-not a confirmed defect.
+before it.
+
+**Isolated on 2026-09-17. It is a real off-by-one, and the ~2 points above were two
+larger effects cancelling.** Three arms on the benchmark's own windows and cohort, paired
+on seeds 42–44, scored by `compute_forecast_metrics`
+(`.scratch/pnbd-cdnow-replication/measure_window_shift.py`; the baseline arm reproduces
+the archived `results.csv` to every digit):
+
+| arm | CDNOW bias % | CDNOW MAPE | CDNOW Spearman | electronics bias % |
+| --- | ---: | ---: | ---: | ---: |
+| baseline (as archived) | −14.18 | 20.44 | 0.449 | −63.07 |
+| `T_cal + 1` — age to the period's end | **−21.23** | 24.06 | 0.441 | **−64.36** |
+| `x` counts transactions, no collapse | **−8.44** | 18.84 | 0.436 | diverges (NaN) |
+
+Three things follow. **The misalignment is universal**: one period on all four panels and
+both calibrations, verified by
+`.scratch/pnbd-cdnow-replication/check_window_alignment.py`, not a CDNOW artefact.
+**The two choices push opposite ways** — the collapse lifts the CDNOW level by 5.7 points,
+the shift drops it by 7.1 — so the small net in the table above is cancellation, and
+correcting either one alone moves the reported level more than correcting both.
+**Correcting the shift makes the benchmark look worse**: an older customer has a lower
+fitted rate and a lower `P(alive)`, and Pareto/NBD already under-predicts. Ranking is
+untouched in every arm, so nothing that compares Spearman is affected.
+
+The magnitude scales inversely with the calibration window — 7.1 points on CDNOW's 39
+weeks against 1.3 on electronics' 104 — so the 104-week panels should expect about a
+point. Gift and multichannel were not measured.
+
+The code is unchanged pending a decision about refitting the archive;
+`.scratch/pnbd-cdnow-replication/issues/01-pareto-calibration-age-off-by-one.md` carries
+the one-line fix, why `scripts/validate_pareto_benchmark.py` cannot see the defect (it
+hands R the same short `T.cal`, so both sides shift together), and why ADR-0004 does not
+bar the change.
 
 ---
 
@@ -371,6 +399,8 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 |---|---|
 | `.scratch/pnbd-cdnow-replication/replicate.py` | All five configurations and both metrics |
 | `.scratch/pnbd-cdnow-replication/results.json` | Per-seed raw numbers behind §5–§7 |
+| `.scratch/pnbd-cdnow-replication/check_window_alignment.py` | §9(b) — which calendar week each forecast column covers, per panel |
+| `.scratch/pnbd-cdnow-replication/measure_window_shift.py` | §9(b) — the three paired arms; writes `window_shift_results.csv` |
 
 ---
 
@@ -391,10 +421,12 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 
 ## 13. Open, in priority order
 
-1. **Isolate §9(b).** Two fits: `compute_pareto_predictions` with the occasion collapse
-   removed, and with `cal_end` advanced by one period. If the second carries most of the
-   2 points, every archived Pareto/NBD number in the repo is shifted by one period and
-   the electronics figures move too.
+1. ~~**Isolate §9(b).**~~ **Done, 2026-09-17** — see §9(b). Both fits were run, on two
+   panels and three seeds. The `cal_end` shift is real and universal, it is worth 7.1
+   points of bias on CDNOW and 1.3 on electronics, and it is partly masked by the occasion
+   collapse pulling the other way. Every archived Pareto/NBD number in the repo is on the
+   shifted windows. The decision of whether to fix and refit is open:
+   `.scratch/pnbd-cdnow-replication/issues/01-pareto-calibration-age-off-by-one.md`.
 2. **Run the neural models on JFH's split.** The Pareto/NBD side of a CDNOW comparison
    now has a number; the LSTM side does not, on this cohort. `docs/insights-study.md`
    §4.3's CDNOW arms use the repo panel and the package's own metric, which is the right
