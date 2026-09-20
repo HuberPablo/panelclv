@@ -65,7 +65,8 @@ class ModelSpec:
         Ignored for ``pareto_nbd``.
     training
         The controls that are not searched: ``n_epochs``, ``patience``,
-        ``loss_type``, ``class_weights``, ``focal_gamma``, ``emd_weight``, ``grad_clip``,
+        ``min_epochs`` (a floor under early stopping — see
+        ``docs/training-budget.md``), ``loss_type``, ``class_weights``, ``focal_gamma``, ``emd_weight``, ``grad_clip``,
         ``verbose``, ``log_wandb``. Ignored for ``pareto_nbd``. The runner adds
         ``seed`` and ``checkpoint_dir`` per study; do not set them here.
     n_trials

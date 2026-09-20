@@ -203,6 +203,7 @@ def fit_model(
     num_target_classes: int,
     n_epochs: int = 50,
     patience: int = 5,
+    min_epochs: int = 0,
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-3,
     grad_clip: float | None = 1.0,
@@ -242,6 +243,15 @@ def fit_model(
     the strictly proper losses ("cross_entropy", "emd", "ce_emd") raises rather than
     being ignored, because weighting them distorts the distribution the rollout
     samples from — see `models.losses._PROPER_LOSS_TYPES`.
+
+    `min_epochs` is a floor under early stopping: no run breaks before it, however long
+    the plateau. It exists because the validation curve on these panels is flat for long
+    stretches and then drops — `docs/training-budget.md` §2 measures plateaus of 29–131
+    non-improving epochs *before* a run's own optimum, which no small `patience` survives.
+    The floor changes how long the loop keeps looking, never what it selects: the weights
+    returned are still the best-by-validation ones. 0 (default) is the historical
+    behaviour. A caller that sets it should widen the Optuna pruner's warm-up to match,
+    or trials are pruned before the floor can pay (`tuning.run_optuna_study` does this).
 
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.
@@ -347,7 +357,10 @@ def fit_model(
             if trial.should_prune():
                 raise optuna.TrialPruned()
 
-        if patience_counter >= patience:
+        # The floor gates the BREAK only, never the selection above: a run with
+        # `min_epochs=50` still keeps whichever epoch had the lowest validation loss,
+        # even if that was epoch 3. It buys looking time, not a different winner.
+        if epoch + 1 >= min_epochs and patience_counter >= patience:
             if verbose:
                 print(f"Early stopping at epoch {epoch + 1}.")
             break

@@ -79,7 +79,7 @@ from panelclv.training.loop import fit_model
 # curve. The search-space half of the same question belongs to the registry entry,
 # which declares what each model searches.
 TRAINING_CONTROLS: frozenset[str] = frozenset({
-    "n_epochs", "patience",          # training control (scalar, or a search spec)
+    "n_epochs", "patience", "min_epochs",   # training control (scalar, or a search spec)
     "checkpoint_dir", "verbose",     # bookkeeping
     "loss_type", "class_weights", "focal_gamma", "emd_weight",  # loss configuration
     "grad_clip", "log_wandb", "seed",   # optimiser / logging / Optuna sampler seed
@@ -341,11 +341,12 @@ def objective(
         train_loader=train_loader,
         val_loader=val_loader,
         num_target_classes=model.num_target_classes,
-        # n_epochs / patience are training control, but the caller may still hand
-        # them a search spec (e.g. patience over {5,7,9}); resolve through the same
-        # mini-language so a scalar stays fixed and a set/tuple is searched.
+        # n_epochs / patience / min_epochs are training control, but the caller may
+        # still hand them a search spec (e.g. patience over {5,7,9}); resolve through
+        # the same mini-language so a scalar stays fixed and a set/tuple is searched.
         n_epochs=suggest_param(trial, "n_epochs", training.get("n_epochs", 50)),
         patience=suggest_param(trial, "patience", training.get("patience", 5)),
+        min_epochs=suggest_param(trial, "min_epochs", training.get("min_epochs", 0)),
         learning_rate=params["learning_rate"],
         weight_decay=params["weight_decay"],
         grad_clip=training.get("grad_clip", 1.0),
@@ -407,12 +408,14 @@ def run_optuna_study(
     the `registry.suggest_param` mini-language (a `{...}` set is a categorical, a
     `(lo, hi, "log"|"int")` tuple a range, a scalar is pinned); anything left out
     keeps the entry's own range, and a key the model does not have raises. `training`
-    carries what is not searched — `n_epochs`, `patience`, `checkpoint_dir`,
-    `verbose`, `loss_type`, `class_weights`, `focal_gamma`, `emd_weight`, `grad_clip`,
-    `log_wandb`,
-    `seed`. `n_epochs` / `patience` sit there because they are training control, but
+    carries what is not searched — `n_epochs`, `patience`, `min_epochs`,
+    `checkpoint_dir`, `verbose`, `loss_type`, `class_weights`, `focal_gamma`,
+    `emd_weight`, `grad_clip`, `log_wandb`,
+    `seed`. The first three sit there because they are training control, but
     they may still be handed a search spec (e.g. patience over `{5, 7, 9}`) and are
-    resolved through the same mini-language.
+    resolved through the same mini-language. Setting `min_epochs` also widens the
+    default pruner's warm-up to match, so a floored trial is not pruned before its
+    floor can pay (`docs/training-budget.md` §2).
 
     When `append_timestamp` is True (default) the effective run name is
     `f"{study_name}_{YYYYMMDD_HHMM}"`; that name is used for the Optuna study,
@@ -486,7 +489,16 @@ def run_optuna_study(
     # reports); `False` disables pruning entirely (NopPruner). A concrete
     # BasePruner instance is honoured as-is.
     if pruner is True or pruner is None:
-        pruner = optuna.pruners.MedianPruner(n_warmup_steps=3)
+        # The pruner's warm-up has to clear `fit_model`'s own floor. With the default
+        # 3 steps, a study running `min_epochs=50` would prune its trials at epoch 4 —
+        # before the floor they were given could pay for itself — so a floored study
+        # gets a pruner that waits exactly as long as its training loop does.
+        # `min_epochs` may itself be a search spec, so take the largest floor any
+        # trial could draw.
+        spec = training.get("min_epochs", 0)
+        floors = spec if isinstance(spec, (set, frozenset, tuple, list)) else [spec]
+        warmup = max([3] + [int(f) for f in floors if isinstance(f, (int, float))])
+        pruner = optuna.pruners.MedianPruner(n_warmup_steps=warmup)
     elif pruner is False:
         pruner = optuna.pruners.NopPruner()
     if sampler is None:

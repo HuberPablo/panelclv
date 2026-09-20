@@ -42,7 +42,7 @@ def _loader(target_class: int) -> DataLoader:
     return DataLoader(TensorDataset(samples, targets), batch_size=4, shuffle=False)
 
 
-def _fit_past_the_best_epoch(tmp_path):
+def _fit_past_the_best_epoch(tmp_path, min_epochs: int = 0):
     """Train on one class while validating on another, so validation only worsens.
 
     Every gradient step makes the model more certain of the training class, which is
@@ -69,6 +69,7 @@ def _fit_past_the_best_epoch(tmp_path):
         num_target_classes=N_CLASSES,
         n_epochs=12,
         patience=2,
+        min_epochs=min_epochs,
         learning_rate=0.1,     # large enough that one epoch moves the weights visibly
         device="cpu",
         checkpoint_dir=str(tmp_path),
@@ -122,3 +123,29 @@ def test_the_rollout_model_forecasts_with_the_selected_weights(tmp_path):
         # The rollout wrapper nests the shared backbone under the same prefix the
         # trained model does, so the key names line up without translation.
         assert torch.equal(rollout.state_dict()[name].cpu(), saved)
+
+
+def test_min_epochs_keeps_training_through_a_plateau(tmp_path):
+    """A floor of 10 trains 10 epochs where patience 2 alone would stop after 3.
+
+    The fixture's validation loss never improves after epoch 0, so this is the
+    worst case for early stopping and the one the floor exists for: on the real
+    panels the curve sits flat for 29-131 epochs and then drops
+    (`docs/training-budget.md` §2), and a run that stopped at 3 never sees it.
+    """
+    _, unfloored = _fit_past_the_best_epoch(tmp_path)
+    _, floored = _fit_past_the_best_epoch(tmp_path, min_epochs=10)
+
+    assert len(unfloored.history) == 3      # best epoch 0, then `patience` more
+    assert len(floored.history) == 10
+
+
+def test_min_epochs_does_not_change_which_epoch_is_selected(tmp_path):
+    """The floor buys looking time, not a different winner.
+
+    Training longer must not move the selection: the weights returned are still the
+    best-by-validation ones, which here is epoch 0 in both runs.
+    """
+    _, floored = _fit_past_the_best_epoch(tmp_path, min_epochs=10)
+
+    assert floored.best_epoch == 0
