@@ -17,6 +17,12 @@ the paper's own 90 epochs takes MAPE from 69.1 to 46.8 and per-customer Spearman
 0.027 to 0.177 (p ≈ 2×10⁻⁶ on both). Copying the paper's *settings* without the epochs
 changes nothing. The published electronics collapse is substantially a training artefact.
 
+**And §10 finds why, which is not what §4 assumed.** The paper's stopping rule works fine
+under the paper's own customer-wise split on this same panel (28-56 epochs). It quits at
+epoch 1 under the temporal split this package substitutes for it (ADR-0001). The defect is
+in the combination — our split with their stopping rule — not in either alone, and §11
+states what that does and does not let the thesis claim.
+
 Everything below was measured on 2026-09-20: the archive numbers by reading `Studies/`,
 the rest by re-running the frozen benchmark with the project venv on the ROCm
 workstation. The scripts are in `.scratch/training-budget/` and are named at each step.
@@ -32,7 +38,9 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 7. [An unrelated finding: the forecast seeds the next replication's training](#7-an-unrelated-finding-the-forecast-seeds-the-next-replications-training)
 8. [What this does not establish](#8-what-this-does-not-establish)
 9. [The experiment, and what it showed](#9-the-experiment-and-what-it-showed)
-10. [What this changes](#10-what-this-changes)
+10. [Why the paper's rule stops at epoch 1 here: the split, not the panel](#10-why-the-papers-rule-stops-at-epoch-1-here-the-split-not-the-panel)
+11. [What this is, relative to Valendin et al.](#11-what-this-is-relative-to-valendin-et-al)
+12. [What this changes](#12-what-this-changes)
 
 ---
 
@@ -305,11 +313,10 @@ Each arm against `archive`, Mann-Whitney, 20 vs 20:
 
 **The settings were never the point; the epochs were.** `paper` — the notebook's optimizer,
 batch size and patience, pinned exactly — is indistinguishable from `archive` on every
-metric (p = 0.15 to 0.76). It stops at epoch 1 on this panel, because copying the recipe
-copies its stopping rule, and patience 5 at batch 32 fires on a flat curve even sooner
-than patience 7 at batch 256 does. Add the floor and the same recipe cuts MAPE by 22
-points and multiplies the ranking correlation by seven. **Batch 32 is not the fix; 90
-epochs is.**
+metric (p = 0.15 to 0.76), because it stops at epoch 1: copying the recipe copies its
+stopping rule, and that rule quits immediately here (§10 shows why). Add the floor and
+the same recipe cuts MAPE by 22 points and multiplies the ranking correlation by seven.
+**Batch 32 is not the fix; 90 epochs is.**
 
 **The forecast collapse on electronics is substantially a training artefact.** The frozen
 benchmark's published row (MAPE 70.8, Spearman 0.032) reproduces as `archive`; trained to
@@ -336,11 +343,79 @@ Bias moves a lot and means less: `paper90`'s −5.7 ± 27.0 is a better centre t
 `archive`'s +39.8 ± 20.4, but the across-replication spread grows and the refit noise floor
 on this panel is 8.9 points of sd (§3). Read MAPE and Spearman.
 
-## 10. What this changes
+## 10. Why the paper's rule stops at epoch 1 here: the split, not the panel
+
+`paper` stopping at epoch 1 has two possible causes, and they point in opposite
+directions. Either the panel's validation curve is flat from the start — in which case the
+published protocol does not transfer to sparse retail data — or **our** validation split
+makes it flat, in which case the fault is ours.
+
+It is ours. Running the notebook's recipe under the notebook's **own** split on electronics
+— a random 10% of customers held out, every period scored, nothing else changed:
+
+| replication | epochs run | best epoch | best val CE |
+| --- | ---: | ---: | ---: |
+| 0 | 62 | 56 | 0.1423 |
+| 1 | 39 | 33 | 0.1421 |
+| 2 | 34 | 28 | 0.1460 |
+
+Under its own split the paper's rule trains **28-56 epochs** on this panel, in the same
+range as the ~90 it reports on its banking data. Under our temporal split (ADR-0001) the
+identical recipe quits at epoch 1.
+
+(The two validation losses are not comparable — 0.142 customer-wise against 0.089 temporal
+— because they score different quantities on different rows. Only the epoch counts are.)
+
+So the mechanism is an **interaction**, not a defect in the published method: a temporal
+validation window over all customers gives a much flatter early curve than a held-out
+slice of customers does, and `min_delta=0` patience reads that flatness as convergence.
+This package departs from the paper's split deliberately and documents why — a customer-wise
+split leaks time, and the thing being forecast is the future — but nothing checked what
+that departure did to the stopping rule bolted on beside it. It quietly cost most of the
+training.
+
+*(`.scratch/training-budget/paper_split_check.py`)*
+
+## 11. What this is, relative to Valendin et al.
+
+Worth stating exactly, because the temptation is to claim too much and the honest version
+is still worth having.
+
+**Not a correction of the paper.** Their protocol, run as published — their model, their
+optimizer, their batch size, their patience, their customer-wise split — trains for a
+sensible number of epochs on our panels too (§10). Nothing here says their reported
+results are wrong, and every archived number in this repository stands: `archive`
+reproduces the published electronics row to within its spread (§9).
+
+**A correction of this package's reproduction of it.** ADR-0001 replaces the paper's
+customer-wise validation split with a temporal one, which is the right call for a
+forecasting evaluation and is the one deliberate departure the benchmark documents. What
+went unnoticed is that the paper's early-stopping rule does not survive that swap: on a
+temporal window over a 98.6%-zero panel the curve is flat from epoch 1 and patience fires
+immediately. Every neural result in this repository was trained under that combination.
+
+**And a contribution, stated narrowly.** Combining this architecture with a temporally
+honest validation split requires a training floor — or a different stopping criterion —
+or the model never leaves its initialisation. On electronics that floor is worth 22 MAPE
+points and a sevenfold increase in per-customer rank correlation, at 20 replications per
+arm, on a benchmark whose architecture, inputs and windows are otherwise untouched. That
+is a result about *applying* Valendin et al.'s model under a stricter evaluation protocol,
+not about their model.
+
+The thesis claim this supports is therefore: **the published LSTM's weak per-customer
+discrimination on sparse retail panels is substantially an artefact of how it was trained
+here, and the training protocol has to be re-derived when the validation split changes.**
+It is one panel; §12 says what is still owed.
+
+## 12. What this changes
 
 1. **`min_epochs` should become the default, not an opt-in** — a floor of 50 with the
    existing search is a strict improvement on both models here, and every model in the
-   package except the benchmark has no published recipe to fall back on.
+   package except the benchmark has no published recipe to fall back on. The floor is a
+   patch, though: §10 says the real problem is that a patience rule with `min_delta=0`
+   reads a flat temporal-validation curve as convergence. A stopping criterion that suits
+   that curve — a relative `min_delta`, or selection on the rollout
+   (`docs/insights-study.md` §5.4) — would be the principled fix, and is untested.
 2. **The published electronics rows are undertrained**, and by more than a footnote: MAPE
    70.8 against 46.8 on the same architecture and inputs. Whether family N is re-run under
    a floor is an ADR-level decision, taken in

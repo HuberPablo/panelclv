@@ -70,3 +70,24 @@ indistinguishable from `archive`. `paper90` — the same pinned recipe with a 90
 
 Inputs still dominate ranking: a cluster label reaches 0.27 and Pareto/NBD 0.297, against
 0.177 here. `docs/insights-cluster-ablation.md` §5.1 stands.
+
+## The cause, measured after the run
+
+`paper` stopping at epoch 1 is **our split, not the panel**. Running the notebook's recipe
+under the notebook's own customer-wise 10% split on electronics trains 34-62 epochs (best
+epoch 28-56), in the same range as the ~90 it reports on its banking data
+(`paper_split_check.py`, `results/paper_split_check.csv`).
+
+So the finding is not that Valendin et al.'s protocol is wrong. It is that **this
+package's temporal validation split (ADR-0001) and the paper's patience rule do not work
+together**: a temporal window over a 98.6%-zero panel is flat from epoch 1, and
+`min_delta=0` patience reads flat as converged. Every neural result in the repository was
+trained under that combination.
+
+That makes a fifth decision, and it outranks decision 1:
+
+5. **A floor is a patch for a stopping criterion that no longer fits.** The principled fix
+   is a criterion suited to a flat temporal curve — a relative `min_delta`, a longer
+   patience scaled to the curve, or rollout-based selection
+   (`docs/insights-study.md` §5.4). Untested. Whoever takes decision 1 should decide
+   whether the floor is the answer or the stopgap.

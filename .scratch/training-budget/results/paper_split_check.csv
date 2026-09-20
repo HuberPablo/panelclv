@@ -1,0 +1,4 @@
+rep,train_customers,valid_customers,best_epoch,epochs_run,best_val_loss
+0,746,83,56,62,0.14225431780020395
+1,746,83,33,39,0.14207659661769867
+2,746,83,28,34,0.1459942509730657

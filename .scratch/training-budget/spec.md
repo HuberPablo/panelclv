@@ -73,6 +73,8 @@ Measured 2026-09-20, scripts beside this file, outputs in `results/`:
 | `spearman_vs_epoch.py` | per-customer Spearman recomputed from archived forecasts |
 | `hparams.py` | training volume against selected hyperparameters and arms |
 | `seed_coupling.py` | whether the replication RNG coupling reaches the archive (it does not — `issues/05`) |
+| `paper_split_check.py` | the paper's recipe under the paper's OWN customer-wise split: 28-56 epochs, against epoch 1 under ours |
+| `family_t_stats.py` | each arm against the control, Mann-Whitney over 20 replications |
 
 Run them with the project venv and `PYTHONPATH=src` from the repo root.
 
