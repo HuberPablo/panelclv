@@ -70,6 +70,15 @@ OUT_NAME = "selection_rescore.csv"
 # The unit of analysis is the STUDY — one within-study rank correlation each — so power
 # comes from studies, not from trials. 40 per model against family T's 20.
 N_STUDIES = 40
+# Trials scored per study, sampled at RANDOM from the study's completed trials. Scoring
+# one costs a validation rollout, a refit and a holdout rollout — 33 s measured on a
+# Ryzen 9 5950X — so all 100 would be 55 minutes a study and 76 machine-hours for the
+# declaration. 40 is the budget.
+#
+# Random, not "the best 40 by validation loss": selecting the subset on one of the two
+# criteria being compared restricts its range and deflates its correlation, which would
+# bias the result toward the candidates. A random subset costs precision, not fairness.
+TRIALS_PER_STUDY = 40
 ARM = "archive"                 # the status quo: the arm whose selection is in question
 # Fewer paths than a reported forecast (200): this ranks trials against each other, and
 # both rollouts carry the same sampling noise, so the ranking is what has to be stable.
@@ -164,6 +173,11 @@ def run_item(model: str, replication: int, device: str,
     trials = trials[(trials.state == "COMPLETE") & trials.number.isin(kept)].sort_values("value")
     if limit:
         trials = trials.head(limit)
+    elif len(trials) > TRIALS_PER_STUDY:
+        # Seeded by the replication, so the same study always scores the same trials and
+        # a re-run of a lost slice reproduces its rows rather than a different sample.
+        trials = trials.sample(n=TRIALS_PER_STUDY,
+                               random_state=BASE_SEED + replication).sort_values("value")
 
     view = validation_view(data)
     seed = BASE_SEED + replication
