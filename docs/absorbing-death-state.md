@@ -13,24 +13,31 @@ capped by the calibration window and drifts out of range during the holdout. An
 absorbing state is the first proposal in this package that answers both at once, and
 the one place where "add a class to the softmax" is *not* vacuous.
 
-**The verdict, up front.** The idea is sound but the obvious implementation cannot
-train, and the motivation usually given for it — that simulated paths *resurrect* dead
-customers — is not what the measurements show. §4 retracts it. What the measurements do
-show is worse and more interesting: on the archived electronics study the neural
-forecasts carry **no per-customer information at all** (Spearman ρ = 0.004 for the LSTM
-against actual holdout totals), while the single number "weeks since last purchase"
-carries ρ = 0.296 on its own — and on per-customer holdout totals the LSTM scores
-*worse* than assigning every customer the same average path. An absorbing state is worth
-building not because it stops resurrection but because it is the smallest architectural change that forces a
-per-customer survival variable into a model that currently has none, and because it
-extrapolates past the calibration window's recency cap **by construction**.
+**The verdict, up front.** The idea is sound, the obvious implementation cannot train,
+and the motivation usually given for it — that simulated paths *resurrect* dead
+customers and inflate the forecast — is measurably false. What §4 measures instead is
+sharper. The fitted conditional ranks customers at Spearman ρ = 0.816 against their true
+holdout totals; Pareto/NBD manages 0.310 and an oracle recency lookup tops out at 0.321.
+**The model is not short of information about who is alive.** Roll it out 52 steps on
+its own samples and 0.816 becomes 0.240, and **86–93% of that loss runs through one
+channel: the recency encoding, corrupted by purchases the model sampled and the customer
+never made.** Bias, MAPE and cell-RMSE are untouched throughout — the level error and the
+ranking error are independent problems.
+
+That reframes the proposal twice over. An absorbing state is not worth building to teach
+the model who is gone; it already knows. It is worth building, if at all, to stop a
+52-step rollout from forgetting. A crude deterministic latch recovers 19% of the gap with
+no training at all (§4.5), which makes the mechanism real — but it recovers only a fifth,
+because a death state protects the recency of customers it declares *dead* and can do
+nothing for the corruption among those who stay alive. §5 sets out what that leaves on
+the table, and names the cheaper competitor it has to beat.
 
 ## Contents
 
 1. [The proposal, and why the obvious version cannot train](#1-the-proposal-and-why-the-obvious-version-cannot-train)
 2. [The formulation that can train](#2-the-formulation-that-can-train)
 3. [What the panels say](#3-what-the-panels-say)
-4. [The resurrection argument, retracted](#4-the-resurrection-argument-retracted)
+4. [The rollout experiment: what the feedback loop actually costs](#4-the-rollout-experiment-what-the-feedback-loop-actually-costs)
 5. [What an absorbing state can and cannot buy here](#5-what-an-absorbing-state-can-and-cannot-buy-here)
 6. [What these measurements do not prove](#6-what-these-measurements-do-not-prove)
 7. [What it costs to build in this package](#7-what-it-costs-to-build-in-this-package)
@@ -147,8 +154,19 @@ emission at `t` depends on which latent path was taken, the forward recursion st
 factorising, and the exact loss is gone. The latch belongs in the rollout, not in the
 training-time recurrence.
 
-### 2.5 Two design notes worth taking
+### 2.5 Four design notes worth taking
 
+- **The latch must act through the AR state, not the emitted count.** §4.3 measures that
+  86–93% of what the rollout loses runs through the recency encoding, so this is where
+  the whole benefit lives. Forcing a dead path's count to zero makes `ARFeatureState`
+  keep incrementing silence, which is exactly what preserves the customer's identity to
+  the end of the horizon. An implementation that masks the *output* while letting the AR
+  state see a sampled count gets none of the benefit and will look like a null result.
+- **The hazard head has to read the time features.** Both panels are single-cohort (§6),
+  so silence and calendar time are nearly collinear and a calendar-blind hazard will
+  absorb the cohort trend into the per-customer rate. The electronics holdout also does
+  not decay in aggregate at all — year-end seasonality dominates (§5) — so a survival
+  envelope with no calendar will fight the seasonal rise.
 - **Link function.** With a complementary log-log hazard,
   `h_t = 1 − exp(−exp(η_t))`, a *constant* `η` per customer reproduces exponential
   dropout exactly. The neural model then **nests** the Pareto/NBD's death process, and
@@ -279,47 +297,178 @@ history alone does not carry recency through a warm-up of this length, and
 `feature_engineering.md` independently measures that bounded AR flags lift electronics ρ
 from 0.027 to 0.267 — most of the way to Pareto/NBD, and still with a floor past `K`.
 
-## 4. The resurrection argument, retracted
+## 4. The rollout experiment: what the feedback loop actually costs
 
-The usual motivation for an absorbing state, and the one this investigation started
-from, is that an autoregressive rollout can **resurrect** a customer: at every holdout
-step the sampler draws from a softmax with non-zero mass above class 0, so over a 52-week
-horizon those small probabilities compound into purchases the customer never made.
+The first version of this document asserted that the feedback loop was a second-order
+effect, on the strength of one figure borrowed from `feature_engineering.md` (a
+teacher-forced pass reproducing +169% of a +235% bias) that was measured on the
+*unbounded* arm. That inference does not survive a direct measurement. This section
+replaces it.
 
-That story does not survive the measurements, for two independent reasons.
+### 4.1 The method
 
-**It is not what the forecast is scored on.** `compute_forecast_metrics` scores
-`prediction_mean = simulations.mean(axis=0)`, a per-customer per-period *mean*. The
-metrics are functionals of the marginal mean `E[y_{i,t}]`, not of path structure. A
-model whose individual paths resurrect but whose marginal mean is right scores
-perfectly. Resurrection is visible in a path and invisible to the metric except through
-the mean it produces.
+One trained model, read two ways, differing in exactly one thing — what history
+conditions it at each holdout step:
 
-**The defect it is supposed to explain is present without any rollout.**
-`feature_engineering.md` already measured this for the unbounded-AR blow-up: a
-teacher-forced pass on electronics — true counts *and* true AR values fed at every step,
-so no sampling and no feedback at all — reproduces +169% of the +235% bias. The fitted
-conditional is wrong before a single path is sampled. Feedback amplification is real and
-second-order; it is not the mechanism.
+- **`rollout`** — the package's own `forecast_recurrent` / `simulate_recurrent_path`.
+  The sampled count is fed back into the target channel and the AR features are
+  recomputed from the **sampled** history. This is the forecast that gets scored.
+- **`teacher`** — the **true** counts and the true AR trajectory are fed at every step,
+  and `E_q[y] = Σ_k k·q_k` is read off the softmax. Not a forecast: it reads the holdout
+  it is scored on. Its only job is to measure what the fitted conditional knows with the
+  compounding switched off.
 
-And §3.3 shows the thing actually wrong with the archived neural forecasts is not that
-they over-predict the long-silent group *because paths resurrect*. It is that they
-predict the same number for everybody. There is no survival signal to corrupt.
+Both are expectations of the same functional, so the gap between them is the
+autoregressive feedback term and nothing else. Two further readouts complete the 2×2
+over (target channel) × (AR columns), each either sampled or true, which is what makes
+the attribution independent of the order one walks it:
 
-**The corrected argument.** An absorbing state is worth building because it installs a
-per-customer latent variable whose sufficient statistic is the trailing zero-run — the
-statistic §3.3 shows is worth ρ ≈ 0.30 and is currently unused — and because its
-survival product decays without ever pushing an input out of its fitted range. Both of
-those are properties of the fitted conditional. Neither requires anything to be said
-about sampled paths. The rollout latch then follows for free, and is a consistency
-requirement rather than a benefit: having trained a model in which death is absorbing,
-it would be incoherent to simulate one in which it is not.
+- **`ar_true`** — sampled count in the target channel, AR from the true history.
+- **`tgt_true`** — true count in the target channel, AR from the sampled history.
+
+**A trap worth naming, because it invalidated the first attempt at this.**
+`prepare_dataset` leaves `data["holdout"]`'s AR columns as raw **zero placeholders** —
+documented at `docs/feature_engineering.md` §"Instead:" (3), *"The holdout's AR columns
+are left at zero and never read"* — because the rollout always overwrites them and true
+values sitting there would be a standing leakage hazard. Reading them directly feeds a
+cohort that is 100% `has_transacted_before = 1` a value of 0, which is −4.11 after
+standardization; the LSTM leaves the region it was fitted on and ramps to a mean count
+of 1.96/cell by step 20. No shape check catches it. The true trajectory has to be
+**rebuilt** the way the rollout rebuilds the sampled one: `ARFeatureState` seeded on the
+calibration target history, advanced one step per period, re-standardized through
+`covariate_stats`.
+
+Three controls establish the readout is sound: the two readouts agree at holdout step 0
+(both condition on the same calibration window); feeding the holdout in one call and
+stepping it one period at a time with threaded state agree to 7e-7; and running the
+**second half of the calibration window** through the identical path is calibrated
+(predicted/actual = 0.96), so the machinery is not what breaks.
+
+Eight replications per arm. Training is unseeded (CLAUDE.md priority 3), so these are
+genuine replications and the spread is reported. Each uses a 10-trial Optuna search
+rather than the ablation's 50 — enough to fit a working model, not enough to claim these
+are the best models the search space holds.
+
+### 4.2 The result, on the arm the design keeps
+
+Electronics, `ar_bounded_32`, 8 replications. ρ is Spearman rank correlation between
+predicted and actual per-customer holdout totals — a diagnostic added here, **not** one
+of `compute_forecast_metrics`'s outputs.
+
+| readout | ρ | bias % | MAPE agg | RMSE cell | RMSE cust. total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `rollout` | **0.240** ± 0.041 | −13.7 | 44.90 | 0.3761 | **3.434** |
+| `tgt_true` | 0.322 ± 0.083 | −14.4 | 44.68 | 0.3759 | 3.395 |
+| `ar_true` | 0.775 ± 0.014 | −14.7 | 43.94 | 0.3754 | 2.949 |
+| `teacher` | **0.816** ± 0.013 | −14.0 | 43.51 | 0.3746 | **2.901** |
+
+**The fitted conditional ranks customers at ρ = 0.816.** Pareto/NBD manages 0.310 on the
+archived study (§3.3) and the oracle recency lookup tops out at 0.321. The model is not
+short of information about who is alive — it is markedly better than the benchmark. The
+rollout delivers 0.240, below Pareto/NBD.
+
+**The damage is confined to one axis.** Bias, MAPE and cell-RMSE are flat across all
+four cells — the level error and the ranking error are independent problems, now
+confirmed in a full factorial rather than inferred. Only `rmse_customer_total` tracks
+the ranking collapse, 3.43 → 2.90.
+
+### 4.3 It is the silence counter, not the counts
+
+As main effects over the 2×2:
+
+| | AR sampled | AR true |
+| --- | ---: | ---: |
+| **target sampled** | 0.240 (`rollout`) | 0.775 (`ar_true`) |
+| **target true** | 0.322 (`tgt_true`) | 0.816 (`teacher`) |
+
+Fixing the AR columns is worth **+0.535** (at sampled target) and **+0.494** (at true
+target). Fixing the target channel is worth +0.082 and +0.041. The rows agree, the
+interaction is ~0.09, and the AR columns carry **86–93% of the 0.576 gap whichever way
+the square is walked**.
+
+The sharpest cell is `tgt_true`: hand the model the true purchase counts at every step
+but let it rebuild recency from its own samples, and ranking moves only 0.240 → 0.322.
+**A customer's identity travels through the rollout in the recency encoding and almost
+nowhere else.** The variances say the same thing — the true-AR cells are stable across
+unseeded replications (sd 0.013–0.014) while the sampled-AR cells are not (0.041,
+0.083), which is a plausible account of why the archived suites show near-zero ρ with
+wide spread.
+
+The two other arms, for contrast:
+
+| arm | `rollout` ρ | `ar_true` ρ | `teacher` ρ | teacher bias % |
+| --- | ---: | ---: | ---: | ---: |
+| `ar_bounded_32` | 0.230 | 0.767 | 0.814 | −16.3 |
+| `ar_bounded_52` | 0.128 | 0.650 | 0.790 | −10.4 |
+| `ar_unbounded` | 0.173 | 0.072 | 0.142 | **+413** |
+
+The unbounded arm fails for an unrelated reason and is kept only as a warning: teacher
+forcing rescues nothing there, because that model is wrong **before** any rollout
+happens. Its bias is *worse* teacher-forced than rolled out, which has a mechanical
+explanation worth keeping — in the rollout, spurious sampled purchases keep resetting
+the recency counter and accidentally hold it inside the fitted range. **The rollout's
+own errors were partly shielding that model from its encoding defect.** "Exposure bias"
+is the right diagnosis for a bounded arm and the wrong one for that arm.
+
+### 4.4 What this retracts, and what it restores
+
+Splitting the original "resurrection" story into its separable claims:
+
+- *Simulated paths resurrect dead customers, inflating the forecast level.* **Still
+  false, now measured directly.** Bias is flat to ~1pp across every cell of the 2×2.
+- *A spurious sampled purchase resets the recency encoding inside the path, and that
+  compounds.* **True, and dominant** — it is 86–93% of the ranking loss. §4 of the first
+  version scored this as second-order, from the wrong arm's bias numbers.
+
+So the mechanism was right and the consequence was wrong. The feedback loop does not
+make the forecast bigger; it makes every customer look like every other customer.
+
+### 4.5 A crude latch, to see whether the mechanism is worth building on
+
+No training, no hazard head, no new loss: the package rollout with one rule added — a
+path silent for `L` consecutive periods emits zero for the remainder. The silence
+counter is **seeded from each customer's calibration-end recency**, so a customer who
+arrives already quiet for a year latches at once; this is a death model, not a horizon
+truncation. It is absorbing for free, since forced zeros keep the counter climbing.
+
+Electronics `ar_bounded_32`, 8 replications, same weights within each replication:
+
+| readout | ρ | paired gain vs `rollout` | bias % | MAPE agg | RMSE cust. total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `rollout` | 0.230 ± 0.026 | — | −16.4 | 43.54 | **3.429** |
+| `latch_52` | 0.325 ± 0.005 | +0.095 ± 0.028 (8/8) | −69.9 | 71.09 | 3.552 |
+| `latch_26` | **0.342** ± 0.004 | **+0.112 ± 0.029 (8/8)** | −83.4 | 83.61 | 3.672 |
+| `latch_8` | 0.298 ± 0.002 | +0.068 ± 0.027 (8/8) | −94.1 | 94.11 | 3.827 |
+| `teacher` | 0.812 ± 0.011 | — | −15.5 | 42.46 | 2.884 |
+
+Two readings, and both matter.
+
+**The mechanism is real.** The gain is reliable (8/8 replications at every `L`) and ρ is
+scale-invariant, so shrinking the forecast cannot produce it — the latch changes the
+*ordering*. And ρ is non-monotonic in `L`, peaking at an interior 26: a rule that merely
+suppressed volume would improve monotonically as `L` fell. It is picking up something
+about *when* customers stop.
+
+**And the crude version is a strictly worse forecast.** On every metric the package
+actually scores it loses: bias −16% → −83%, MAPE 43.5 → 83.6, `rmse_customer_total`
+3.429 → 3.672. Declaring death *with certainty* after `L` silent weeks kills a great
+many customers who were merely quiet. That is precisely the argument for a learned,
+probabilistic hazard — one that kills with probability `h` rather than certainty, so the
+level survives while the ordering gain is kept — and it is now an empirical argument
+rather than an assertion.
+
+**The number that tempers all of it.** The AR channel carries 86–93% of the lost
+ranking, but the best crude latch recovers **19% of the gap**. Those are consistent, and
+the distance between them is the finding: an absorbing state protects the recency state
+only of customers it declares *dead*. Corruption among customers who stay alive is
+untouched by construction, and on this panel that is the larger share. `ar_true` repairs
+recency for everyone by reading the truth; no death model can.
 
 ## 5. What an absorbing state can and cannot buy here
 
 Scored with the package's single scoring authority
 (`models.monte_carlo_forecasting.compute_forecast_metrics`), averaging the three
-archived replications per model:
+archived replications per model (§3.3's configuration, no AR features):
 
 | model | RMSE (cell) | RMSE (customer total) | bias % | MAPE aggregate |
 | --- | ---: | ---: | ---: | ---: |
@@ -329,38 +478,38 @@ archived replications per model:
 | constant path for every customer (fitted on the holdout) | 0.3754 | 3.5271 | 0.00 | 0.00 |
 | 5-bucket recency lookup (fitted on the holdout) | **0.3734** | **3.3413** | 0.00 | 0.00 |
 
-The last two rows are fitted on the very holdout they are scored on. They are not
-forecasts; they are upper bounds on what their information can buy.
+The last two rows are fitted on the very holdout they are scored on: upper bounds on
+what their information can buy, not forecasts.
 
-**Do not expect cell RMSE to move.** Every row lies within 0.9% of every other, and the
-oracle recency lookup beats the constant path by 0.5%. At 98.6% zeros the per-cell
-squared error is dominated by irreducible Bernoulli noise, and no amount of survival
-modelling touches it.
+**Do not expect cell RMSE to move.** Every row lies within 0.9% of every other, and §4's
+2×2 moves it only in the fourth decimal even when handed the truth at every step. At
+98.6% zeros the per-cell squared error is dominated by irreducible Bernoulli noise.
 
-`rmse_customer_total` — the same function's second RMSE, squaring the error in each
-customer's holdout *total* rather than in each cell — is the one that moves, and it
-carries the sharpest result in this document:
-
-> **The LSTM (3.5613) is worse on per-customer totals than assigning every customer the
-> same average path (3.5271).** Its per-customer variation is not merely uninformative,
-> as ρ ≈ 0 already said; it is noise that actively costs accuracy. Pareto/NBD (3.4886)
-> beats the constant baseline, and the oracle recency lookup (3.3413) shows the whole
-> span available to recency information is about 6%.
+`rmse_customer_total` is the RMSE that moves, and it carries the sharpest result in
+§3.3: the LSTM (3.5613) is worse on per-customer totals than assigning every customer
+the same average path (3.5271). Its per-customer variation is not merely uninformative,
+as ρ ≈ 0 already said; it is noise that actively costs accuracy.
 
 So an absorbing state that improves the forecast will show up in **`rmse_customer_total`,
 bias, MAPE aggregate, and per-customer rank correlation** — and a thesis chapter that
 promises cell-RMSE gains from it will be embarrassed.
 
-What it can plausibly buy, in descending order of confidence:
+What it can plausibly buy, in descending order of confidence, now that §4 has measured
+the channel it works through:
 
 1. **A per-customer `P(alive)`** directly comparable to the Pareto/NBD's, which
    `benchmarks/pareto_nbd.py:257` already computes. Even at unchanged metrics this is a
    thesis artifact: the same quantity, from a neural model, on the same customers.
-2. **Rank correlation**, the axis on which the archived neural models score zero.
+2. **Part of the ranking the rollout destroys.** §4 bounds the crude version at 19% of a
+   0.58 gap. A learned hazard should beat a fixed `L`, but the ceiling is set by how much
+   of the recency corruption is attributable to customers who are genuinely gone — which
+   §8's first experiment measures before anything is built.
 3. **Continued decay past the AR encoding's `K`**, where a bounded flag set is flat by
-   construction (§3.1).
-4. **Aggregate bias on the long-silent majority** — 520 of 829 electronics customers sit
-   in the 52+ group, where the LSTM predicts 2.29 against an actual 1.09.
+   construction (§3.1). This is also the mechanism that *causes* the phantom purchases:
+   a floored rate makes the sampler draw purchases from long-silent customers, which is
+   what resets their recency.
+4. **Level on the long-silent majority** — 520 of 829 electronics customers sit in the
+   52+ recency group, where the archived LSTM predicts 2.29 against an actual 1.09.
 
 And one thing it will *not* fix, worth stating because it looks like it should. The
 electronics holdout does not decay in aggregate at all: the actual mean count per week
@@ -369,6 +518,14 @@ runs 0.0417 → 0.0239 → 0.0281 → 0.0425 across the four quarters of the hor
 cross-sectional effect here, not a time-path effect.** A survival envelope multiplied
 into the forecast will fight the seasonal rise unless the hazard and the emission both
 see the calendar. Give the hazard head the time features.
+
+**The competitor this raises, which needs no new architecture.** If the damage runs
+through the recency encoding, and the floor past the deepest bin is what produces the
+phantom purchases that corrupt it, then a recency encoding that keeps decaying past `K`
+— the family specified in `.scratch/ar-encoding-support/spec.md` — attacks the same
+channel with an `ar_features` tuple change and no latent state, no new loss and no new
+training path. Nothing measured here discriminates between the two, and §8 orders the
+experiments so that the choice is made on a number.
 
 ## 6. What these measurements do not prove
 
@@ -427,26 +584,34 @@ it is the largest single reason to run §8 before writing any of it.
 
 ## 8. What to run before building it
 
-In order, cheapest first. The first two need no training at all.
+In order, cheapest first. Nothing before step 3 needs a line of the architecture in §2,
+and step 1 alone can close the question.
 
-1. **Re-run §3.3 against a bounded-AR study.** Every model number in this document comes
-   from a no-AR configuration. If an LSTM carrying bounded activity flags already reaches
-   ρ ≈ 0.27 and spreads properly across the recency groups, the absorbing state is
-   competing for a much smaller margin than §3.3 suggests, and the case narrows to the
-   floor-past-`K` argument of §3.1 alone.
-2. **Split the residual by silence length.** Take the best bounded-AR archived forecast
-   and plot per-customer residual against calibration-end recency. If the residual is
-   flat in recency, the survival information is already in the model and an explicit
-   state is redundant. If it grows with recency, the floor is real and measurable, and
-   its size is the ceiling on what §2 can buy.
+1. **The oracle latch — the ceiling on the whole idea.** Re-run §4.5's latch on the
+   models already trained, but latch exactly the customers whose true holdout is empty,
+   at their true last purchase: a perfect hazard with zero estimation error, the best any
+   death model could do. Minutes, no training. The crude fixed-`L` latch reached 19% of
+   the 0.58 ranking gap; if the oracle lands near it rather than near `ar_true`'s 0.775,
+   the ceiling is low, no amount of hazard modelling will raise it, and the recency
+   encoding of §3.1 is the better lead. **Run this before anything else in this list.**
+2. **Split the residual by silence length.** Take a bounded-AR forecast and plot the
+   per-customer residual against calibration-end recency. If it is flat in recency, the
+   survival information is already surviving the rollout and an explicit state is
+   redundant. If it grows with recency, the floor past the deepest bin is real and its
+   size bounds what §2 can buy.
 3. **Fit the hazard alone, without a network.** A two-state HMM whose hazard is a single
    population constant and whose emission is the empirical count distribution, fitted by
-   the §2.2 recursion on the calibration window. It takes minutes, it is a strict special
-   case of the proposal, and it separates "an absorbing state helps" from "a neural
-   hazard helps". If the constant-hazard version captures most of the gain, build that
-   and say so — it is a better thesis result than a network that cannot be interpreted.
-4. **Only then** the neural hazard head, with the soft-resurrection variant (§2.5) fitted
-   alongside as the null it has to beat.
+   the §2.2 recursion on the calibration window. Minutes, and a strict special case of
+   the proposal, so it separates "an absorbing state helps" from "a *neural* hazard
+   helps". If the constant-hazard version captures most of the gain, build that and say
+   so — it is a better thesis result than a network that cannot be interpreted.
+4. **Only then** the neural hazard head, with the soft-resurrection variant (§2.5)
+   fitted alongside as the null it has to beat, and the non-flooring recency encoding
+   (§5) fitted as the competitor it has to beat.
+
+Steps 1 and 2 are scored on `rmse_customer_total`, bias and MAPE as well as ρ. §4.5 is
+the cautionary case: a change can lift rank correlation reliably, 8 replications out of
+8, and still be worse on every metric `compute_forecast_metrics` returns.
 
 ## 9. Sources
 
@@ -464,6 +629,10 @@ Everything above is either measured here or cited from a document in this repo.
 | Bounded AR flags lift electronics ρ from 0.027 to 0.267 | `docs/feature_engineering.md`, same table |
 | Recency escapes its calibration range on 37.7% of electronics holdout cells | `docs/feature_engineering.md`, "Which ones to prefer" |
 | Per-model rollout functions are declared in the registry | `docs/adr/` ADR-0006 |
+| Holdout AR columns are zero placeholders, never read | `docs/feature_engineering.md`, "Instead:" (3); `src/panelclv/data_preparation/panel_dataset.py:700-708` |
+| The rollout rebuilds AR state from the sampled count via `ARFeatureState` | `src/panelclv/models/monte_carlo_forecasting.py:144-175` |
+| Bounded-flag arm definitions (`ar_bounded_32`, depths per panel) | `scripts/run_ar_encoding_ablation.py`, `bounded_flags` / `PANEL_DEPTHS` |
+| The non-flooring recency family proposed as the competitor | `.scratch/ar-encoding-support/spec.md` |
 
 The forward recursion of §2.2 is the standard HMM forward algorithm specialised to two
 states with one absorbing; the posterior-weighted cross-entropy of §2.3 is the Fisher
