@@ -12,6 +12,11 @@ paper we reproduce uses: the notebook trains at batch 32 with plain Adam for abo
 epochs, roughly 2,300 gradient updates, and our benchmark winners receive about 32. §4 is
 that comparison, and the rest of the document is the evidence that it matters.
 
+**Tested, §9.** On electronics, 20 replications per arm: training the frozen benchmark for
+the paper's own 90 epochs takes MAPE from 69.1 to 46.8 and per-customer Spearman from
+0.027 to 0.177 (p ≈ 2×10⁻⁶ on both). Copying the paper's *settings* without the epochs
+changes nothing. The published electronics collapse is substantially a training artefact.
+
 Everything below was measured on 2026-09-20: the archive numbers by reading `Studies/`,
 the rest by re-running the frozen benchmark with the project venv on the ROCm
 workstation. The scripts are in `.scratch/training-budget/` and are named at each step.
@@ -26,7 +31,8 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 6. [How much of the ranking collapse this explains](#6-how-much-of-the-ranking-collapse-this-explains)
 7. [An unrelated finding: the forecast seeds the next replication's training](#7-an-unrelated-finding-the-forecast-seeds-the-next-replications-training)
 8. [What this does not establish](#8-what-this-does-not-establish)
-9. [What to run next](#9-what-to-run-next)
+9. [The experiment, and what it showed](#9-the-experiment-and-what-it-showed)
+10. [What this changes](#10-what-this-changes)
 
 ---
 
@@ -252,28 +258,97 @@ order, and say which. Measurement:
   choices. Changing them moves the benchmark rows, so it is a decision to record rather
   than a quiet edit.
 
-## 9. What to run next
+## 9. The experiment, and what it showed
 
-Specified in `.scratch/training-budget/spec.md`, one ticket per step. Six suites on
-electronics, 20 replications each, two models — ValendinLSTM and the LSTM on
-`no_ar-no_cluster-valendin`, the arm whose ranking collapses:
+Family T, run on vast.ai on 20 September 2026: two models x four training recipes x 20
+replications on electronics, 100 trials for the searched arms, 200 Monte Carlo paths,
+160 suites, $0.44 of rented GPU. Declared in `.scratch/training-budget/spec.md`, run by
+`scripts/run_training_budget.py`.
 
-| arm | recipe | trials | what it tests |
-| --- | --- | ---: | --- |
-| `archive` | lr / weight decay / batch searched, `patience=7`, `n_epochs=100` | 100 | the control — reproduces family N, which also gave this panel 100 trials |
-| `paper` | pinned: `lr=1e-3`, `weight_decay=0.0`, `batch_size=32`, `patience=5`, `n_epochs=150` | 1 | §4's recipe read literally, with no hyperparameter selection at all |
-| `paper90` | the same, plus `min_epochs=90` | 1 | the paper's recipe trained for the paper's own ~90 epochs |
-| `floor50` | `archive`'s search plus `min_epochs=50`, `n_epochs=300` | 100 | whether a warm-up floor recovers the same ground while keeping the search |
+| arm | recipe | trials |
+| --- | --- | ---: |
+| `archive` | lr / weight decay / batch searched, `patience=7`, `n_epochs=100` | 100 |
+| `paper` | pinned: `lr=1e-3`, `weight_decay=0.0`, `batch_size=32`, `patience=5`, `n_epochs=150` | 1 |
+| `paper90` | the same, plus `min_epochs=90` — the notebook's own epoch count | 1 |
+| `floor50` | `archive`'s search plus `min_epochs=50`, `n_epochs=300` | 100 |
 
-**Why `paper90` exists.** Three `paper` studies were run before renting anything, and the
-recipe stops at **epoch 1** on electronics — 7 epochs trained, validation CE 0.0930 to
-0.0934 against `archive`'s 0.0886. Patience 5 at batch 32 fires on this panel's flat
-curve even sooner, in epochs, than patience 7 at batch 256 does. Copying the notebook's
-settings copies its stopping rule, and the stopping rule is what is under investigation;
-only a floor makes the arm train for the ~90 epochs the notebook reports.
+### ValendinLSTM (the frozen benchmark)
 
-The published ValendinLSTM rows are not touched: these runs sit beside them as a separate
-family (T in `docs/studies-run.md`). `archive`, `paper` and `paper90` are cheap — about
-2 machine-hours between them on vast.ai, sized from family N's measured 102 s per suite on
-this panel — and answer the question. `floor50` costs ten times that, because each of its
-100 trials runs at least 50 epochs, and matters only once the cheap arms have spoken.
+| arm | bias % | MAPE | Spearman | sd of predicted totals |
+| --- | ---: | ---: | ---: | ---: |
+| `archive` | +39.8 ± 20.4 | 69.1 | 0.027 ± 0.043 | 0.21 |
+| `paper` | +28.7 ± 11.1 | 68.5 | 0.016 ± 0.029 | 0.19 |
+| **`paper90`** | **−5.7 ± 27.0** | **46.8** | **0.177 ± 0.089** | **0.49** |
+| `floor50` | +4.7 ± 29.3 | 47.9 | 0.168 ± 0.084 | 0.44 |
+
+### LSTM, `no_ar-no_cluster-valendin`
+
+| arm | bias % | MAPE | Spearman | sd of predicted totals |
+| --- | ---: | ---: | ---: | ---: |
+| `archive` | +30.4 ± 16.7 | 59.3 | 0.030 ± 0.044 | 0.19 |
+| `paper` | +34.5 ± 15.7 | 63.5 | 0.020 ± 0.029 | 0.19 |
+| `paper90` | +31.1 ± 31.7 | 54.7 | 0.174 ± 0.075 | 0.56 |
+| **`floor50`** | **+0.3 ± 18.2** | **50.1** | 0.074 ± 0.049 | 0.19 |
+
+Each arm against `archive`, Mann-Whitney, 20 vs 20:
+
+| model | arm | MAPE | p | Spearman | p |
+| --- | --- | ---: | ---: | ---: | ---: |
+| ValendinLSTM | `paper` | 68.5 | 0.76 | 0.016 | 0.70 |
+| | `paper90` | 46.8 | **2×10⁻⁶** | 0.177 | **5×10⁻⁶** |
+| | `floor50` | 47.9 | **1×10⁻⁶** | 0.168 | **1×10⁻⁵** |
+| LSTM | `paper` | 63.5 | 0.15 | 0.020 | 0.20 |
+| | `paper90` | 54.7 | 0.10 | 0.174 | **2×10⁻⁶** |
+| | `floor50` | 50.1 | **1×10⁻⁴** | 0.074 | **2×10⁻³** |
+
+**Three things follow, and the first is the one to remember.**
+
+**The settings were never the point; the epochs were.** `paper` — the notebook's optimizer,
+batch size and patience, pinned exactly — is indistinguishable from `archive` on every
+metric (p = 0.15 to 0.76). It stops at epoch 1 on this panel, because copying the recipe
+copies its stopping rule, and patience 5 at batch 32 fires on a flat curve even sooner
+than patience 7 at batch 256 does. Add the floor and the same recipe cuts MAPE by 22
+points and multiplies the ranking correlation by seven. **Batch 32 is not the fix; 90
+epochs is.**
+
+**The forecast collapse on electronics is substantially a training artefact.** The frozen
+benchmark's published row (MAPE 70.8, Spearman 0.032) reproduces as `archive`; trained to
+the paper's own epoch count the same architecture on the same inputs scores MAPE 46.8 and
+Spearman 0.177, and the spread of its per-customer predictions more than doubles (0.21 to
+0.49). It was not that the model could not tell customers apart. It was not trained long
+enough to try.
+
+**A floor works with the search intact**, which matters because only the benchmark has a
+published recipe to copy. `floor50` reaches `paper90`'s ground on both models and is the
+better of the two on level (LSTM bias +0.3 ± 18.2 against `archive`'s +30.4).
+
+### What it does not overturn
+
+Inputs still dominate ranking. A `kmeans_8` cluster label reaches Spearman 0.27
+(`docs/insights-cluster-ablation.md` §5.1) and Pareto/NBD 0.297, against 0.177 here; §6's
+ordering holds, with training length worth more than it looked at five replications (0.09)
+and still less than one persistent per-customer channel.
+
+RMSE separates nothing, as everywhere on these panels: every arm sits between 0.3763 and
+0.3774 against the all-zero forecast's 0.3775.
+
+Bias moves a lot and means less: `paper90`'s −5.7 ± 27.0 is a better centre than
+`archive`'s +39.8 ± 20.4, but the across-replication spread grows and the refit noise floor
+on this panel is 8.9 points of sd (§3). Read MAPE and Spearman.
+
+## 10. What this changes
+
+1. **`min_epochs` should become the default, not an opt-in** — a floor of 50 with the
+   existing search is a strict improvement on both models here, and every model in the
+   package except the benchmark has no published recipe to fall back on.
+2. **The published electronics rows are undertrained**, and by more than a footnote: MAPE
+   70.8 against 46.8 on the same architecture and inputs. Whether family N is re-run under
+   a floor is an ADR-level decision, taken in
+   `.scratch/training-budget/issues/06-report-and-decide.md`.
+3. **The other three panels are untested.** CDNOW leaves the most validation loss on the
+   table (10.7-13.0%, §2) and is the panel whose ranking never collapsed, so it is the one
+   that says whether this generalises or is an electronics story.
+4. **Adding batch 32 to the registry's search space is not the follow-up.** `paper` settles
+   that: at patience 7 the search would still stop it early, and at a floor the batch size
+   is not what is doing the work.
+
