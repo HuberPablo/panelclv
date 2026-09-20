@@ -75,6 +75,7 @@ Measured 2026-09-20, scripts beside this file, outputs in `results/`:
 | `seed_coupling.py` | whether the replication RNG coupling reaches the archive (it does not — `issues/05`) |
 | `paper_split_check.py` | the paper's recipe under the paper's OWN customer-wise split: 28-56 epochs, against epoch 1 under ours |
 | `family_t_stats.py` | each arm against the control, Mann-Whitney over 20 replications |
+| `why_flat.py` | the temporal validation curve decomposed, against the customer-wise one — why patience fires |
 
 Run them with the project venv and `PYTHONPATH=src` from the repo root.
 
@@ -88,3 +89,10 @@ Run them with the project venv and `PYTHONPATH=src` from the repo root.
 | 04 | `issues/04-register-family.md` | family T in `docs/studies-run.md` |
 | 05 | `issues/05-measure-seed-coupling.md` | how far the replication RNG coupling reaches |
 | 06 | `issues/06-report-and-decide.md` | read the result, decide what changes |
+
+## Where this goes next
+
+`docs/training-budget.md` §13 lists what to try, ranked, and §13.4 names the one thing to
+run first: re-score the family-T `archive` trials with `scripts/run_rescore_trials.py` and
+ask whether a validation-window rollout composite ranks them better than validation
+cross-entropy does. It needs no new training — the checkpoints exist.

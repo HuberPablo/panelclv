@@ -41,6 +41,7 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 10. [Why the paper's rule stops at epoch 1 here: the split, not the panel](#10-why-the-papers-rule-stops-at-epoch-1-here-the-split-not-the-panel)
 11. [What this is, relative to Valendin et al.](#11-what-this-is-relative-to-valendin-et-al)
 12. [What this changes](#12-what-this-changes)
+13. [What to try next: keep the temporal split, fix what it feeds](#13-what-to-try-next-keep-the-temporal-split-fix-what-it-feeds)
 
 ---
 
@@ -427,3 +428,150 @@ It is one panel; §12 says what is still owed.
    that: at patience 7 the search would still stop it early, and at a floor the batch size
    is not what is doing the work.
 
+## 13. What to try next: keep the temporal split, fix what it feeds
+
+§10 leaves an obvious but wrong move on the table — go back to the paper's customer-wise
+split, since the stopping rule works there. This section argues against it, says what is
+actually broken, and lists what to try instead. Nothing here has been run.
+
+### 13.1 Is the temporal split the right one? Mostly yes, and the reason is narrower than "time series"
+
+The blanket claim "time series must be split temporally" is too strong. For a purely
+autoregressive model with uncorrelated errors, [Bergmeir, Hyndman and Koo
+(2018)](https://robjhyndman.com/publications/cv-time-series/) show standard k-fold
+cross-validation is valid and can beat out-of-sample evaluation, because what makes
+random splitting unsafe is dependence between the held-out points and the training
+points, not the calendar as such.
+
+The argument for a temporal split here is more specific, and it survives:
+
+- **The test task is temporal.** The holdout is a future year for customers the model has
+  already seen. A validation split should resemble the test it stands in for, and out-of-time
+  backtesting (rolling origin) is the standard for exactly this reason in forecasting practice.
+- **A customer-wise split measures a different thing.** It scores the same calendar periods
+  the model trained on, for customers it did not. That is generalisation across the cross-section,
+  not across time — which is what ADR-0001 says, and §13.2 now shows numerically.
+- **It is not a leak.** Both splits stay inside the calibration window, so neither touches the
+  holdout. The customer-wise split is not *invalid*; it answers a question we are not asking.
+
+On the second half of the question — **do other papers split by customer?** Valendin et al.'s
+own reference notebook does (a random 10% of customers). Deep-learning forecasting over many
+related series generally does not: global models are backtested on held-out time windows, which
+is the convention this package follows. So the departure is from that paper, not from the field.
+
+**Keep the temporal split.** What needs to change is what is computed on it.
+
+### 13.2 Why the temporal curve is flat, measured
+
+One training run per split on electronics, early stopping off, 120 epochs, the notebook's
+recipe (`.scratch/training-budget/why_flat.py`):
+
+| split | val CE at epoch 0 | at epoch 1 | best | at epoch | mean gain per epoch after epoch 1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| temporal | 0.1303 | 0.0935 | 0.0893 | 79 | **5.4×10⁻⁵** |
+| customer-wise | 0.2433 | 0.1623 | 0.1427 | 39 | **5.2×10⁻⁴** |
+
+`fit_model` counts an epoch as an improvement only if it beats the best by **10⁻⁴**
+(`loop.py`, `improved = (val_loss + 1e-4) < best_val_loss`). So under the temporal split the
+average epoch improves by **half the threshold it must clear**, and under the customer-wise
+split by five times it. That single comparison is the whole of §10's mechanism: nothing is
+wrong with the curve, the rule simply cannot see it.
+
+Decomposing the same runs by cell type — the temporal validation window is 43,108 cells of
+which 589 (1.37%) carry a positive count:
+
+| | epoch 0 | epoch 1 | epoch 79 |
+| --- | ---: | ---: | ---: |
+| CE on zero cells | 0.00039 | 0.0135 | 0.0122 |
+| CE on positive cells | 9.51 | 5.87 | 5.66 |
+
+The untrained model is almost perfect on silence and useless on purchases; the first epoch
+trades one for the other, and everything after is slow refinement on the 1.4% of cells that
+carry 86% of the loss. **The flatness is real, not an artefact — one-step-ahead cross-entropy
+on future periods genuinely has little left to give.** Yet family T shows the forecast keeps
+improving for another 200 epochs. So the quantity being watched is not the quantity that
+matters, which is the same conclusion `docs/benchmarks-real-panels.md` reaches from the other
+direction ("Optuna's validation loss cannot see which runs forecast badly").
+
+### 13.3 The menu
+
+**A. Change what is measured on the validation window** — the highest-value group, because
+it fixes stopping and selection at once.
+
+1. **Rollout-based validation.** Simulate the validation window the way the holdout is
+   simulated — warm up on the training prefix, sample forward, average paths — and score it
+   with `compute_forecast_metrics`. This is ADR-0003 restored, and `docs/insights-study.md`
+   §5.4 already specifies how: through the single scoring authority this time, and wired into
+   `StudySuiteConfig` rather than reachable only from notebooks. ADR-0003 was retired for
+   those two defects, not for the idea.
+2. **A composite selection score.** Cross-entropy alone ranks trials badly for level
+   (`benchmarks-real-panels.md`: "every study contains a trial with near-zero bias, and
+   selection never finds it"). A composite over the validation rollout — rank-normalised
+   MAPE, |bias| and (1 − Spearman), averaged — targets the three numbers the thesis reports.
+   Two constraints: keep the **training** loss plain cross-entropy, because it is a proper
+   scoring rule for the distribution the rollout samples from and the others are not (the
+   argument `models/losses.py` already makes for class weighting); and normalise per study,
+   since the components have different scales and a fixed weighting will not transfer
+   between panels.
+3. **Two-stage selection, which is nearly free.** Shortlist the trials within a small margin
+   of the best validation CE — the archive says 1 to 22 trials sit within 0.5% — then rank
+   only the shortlist by a validation rollout. One rollout per shortlisted trial instead of
+   one per trial, so it costs a few percent rather than multiplying the search.
+4. **Multi-objective search.** Optuna's NSGA-II over (CE, rollout MAPE) and a pick from the
+   Pareto front. More machinery than 3 for a similar answer; list it, try 3 first.
+
+**B. Change the stopping rule so a flat curve does not read as convergence.**
+
+5. **A relative improvement threshold.** 10⁻⁴ absolute is 0.11% of this panel's loss and
+   0.4% of multichannel's — a threshold that means different things per panel. Express it as
+   a fraction of the current best.
+6. **Count patience in optimizer steps, not epochs.** An epoch is 4 batches at batch 256 on
+   electronics and 26 at batch 32; patience 7 therefore means two very different amounts of
+   training, which is what §5 shows the search exploiting.
+7. **Stop on a smoothed curve.** Compare a k-epoch moving average rather than single epochs,
+   so noise of the same size as the trend stops resetting the counter.
+8. **Drop early stopping entirely.** A fixed step budget with a cosine-decayed learning rate,
+   selecting the final weights — standard practice for deep models, and it removes the
+   interaction rather than patching it. `min_epochs` (§12) is the timid version of this.
+9. **Early-stop on the rollout metric** (A1 evaluated every k epochs). The most expensive
+   option and the most aligned.
+
+**C. Change the validation window itself, keeping it temporal.**
+
+10. **Rolling-origin validation.** Average the criterion over two or three cut points instead
+    of one. More signal, less dependence on where the single cut happened to fall, and it is
+    the standard construction for out-of-time model selection.
+11. **Score only the cells that carry signal.** Selection-only CE restricted to positive
+    counts, or class-balanced. §13.2 tempers this: positive cells already carry 86% of the
+    loss, so the gain is mostly in removing the zero-cell counter-movement, not in reweighting.
+
+**D. Use both splits for different jobs.** Hold out a block of customers *and* a time window:
+early-stop on the customer-wise part, where the curve has slope, and select trials on the
+temporal part, which matches the test. It is pragmatic and it is a hybrid — two criteria that
+can disagree, and a model stopped on one may not be the one the other would pick. Listed for
+completeness, below A and B in priority.
+
+### 13.4 What to run first
+
+**A measurement, not a training run.** `scripts/run_rescore_trials.py` already refits and
+scores archived non-winning trials through the production forecast path. Point it at the
+family-T `archive` studies and ask one question: does a validation-window **rollout**
+composite rank trials by holdout MAPE and Spearman better than validation CE does? The
+checkpoints exist, so this costs a refit per trial and no search.
+
+- If the composite ranks clearly better, A3 is the cheapest real fix and A1 is worth building.
+- If it ranks no better, selection is not the lever on this panel, and B (train longer,
+  sanely) is the whole story — which is what family T's floor already delivers.
+
+Then, and only then, pick one of B5-B8 and re-run family T's `archive` arm under it. One
+panel, 20 replications, about an hour of rented GPU at family T's measured cost.
+
+### 13.5 What not to do
+
+- **Do not switch back to the customer-wise split** to make the curve cooperate. It scores
+  a different question (§13.1), and family T shows the temporal criterion is fixable.
+- **Do not put MAPE, bias or Spearman in the training loss.** They are not proper scoring
+  rules for a sampled categorical distribution; `models/losses.py` makes the argument for
+  class weights and it applies identically here. Selection, yes; gradients, no.
+- **Do not re-implement rollout metrics beside `compute_forecast_metrics`.** That is what
+  cost ADR-0003 its credibility: its RMSE was 62x off the authority's, and only bias agreed.
