@@ -27,6 +27,12 @@ sampling its own counts forward. No validation period is ever an input.
 This runner therefore trains its own studies with the cleanup off, rescores them on the
 spot, and deletes the checkpoints — the boxes return CSVs, not gigabytes.
 
+**On panels.** `--panel` picks which one. The electronics run of 21 September read its
+LSTM dataset through `run_training_budget`, which carries a year index; this reads every
+dataset through `run_factorial`, which does not (its docstring says why). The question is
+a within-study rank correlation either way, but the two runs are not cell-for-cell
+comparable.
+
 Usage:
     python scripts/run_selection_rescore.py --preflight          # 3 trials, costs nothing
     python scripts/run_selection_rescore.py --worker 3/8         # a rented box's slice
@@ -53,16 +59,21 @@ from panelclv.studies import ModelSpec, StudySuiteConfig, run_study_suite
 from panelclv.trials import refit_best_trial
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from run_factorial import build_data, model_spec                     # noqa: E402
+from run_real_panel_benchmarks import WINDOWS                        # noqa: E402
 from run_real_panel_benchmarks import spearman                       # noqa: E402
 from run_rescore_trials import trial_shim                            # noqa: E402
-from run_training_budget import (                                    # noqa: E402
-    ARMS, BASE_SEED, MODELS, N_SIMULATIONS, PANEL, build_data, model_spec,
-)
+from run_training_budget import BASE_SEED, MODELS, N_SIMULATIONS     # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STUDIES_BASE = REPO_ROOT / "Studies"
 
 EXPERIMENT = "selection_rescore"
+# Which panel this invocation rescores. `--panel cdnow` is the falsifiable test
+# `docs/training-budget.md` §14.5 sets up: if validation cross-entropy is wrong-signed
+# because the calibration era's purchase rate exceeds the holdout era's, the sign should
+# flip on a panel where that relationship differs.
+PANEL = "electronics"
 # The per-trial table is written INSIDE the suite it describes, because that is the one
 # tree `VastAI/supervise/pull_results.sh` and `reap_finished.sh` move and verify. A file
 # anywhere else on a rented box is a file that never comes home.
@@ -151,7 +162,7 @@ def run_item(model: str, replication: int, device: str,
     name = suite_name(model, replication)
     out = out_path(model, replication)
     out.parent.mkdir(parents=True, exist_ok=True)
-    data = build_data(model)
+    data = build_data(PANEL, model, "no_cluster")
     suite_dir = STUDIES_BASE / name
 
     if not (suite_dir / model / "Optuna_Studies" / "study_01").exists():
@@ -284,7 +295,7 @@ def report() -> None:
     then summarised across studies. `val_loss` is the status quo; the rest are what §13.3
     proposes to replace it with.
     """
-    files = sorted(STUDIES_BASE.glob(f"{EXPERIMENT}__*/{OUT_NAME}"))
+    files = sorted(STUDIES_BASE.glob(f"{EXPERIMENT}__*__{PANEL}__*/{OUT_NAME}"))
     if not files:
         print(f"no {OUT_NAME} under {STUDIES_BASE}/{EXPERIMENT}__*")
         return
@@ -333,7 +344,11 @@ def main() -> None:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--check-complete", action="store_true")
     mode.add_argument("--report", action="store_true")
+    parser.add_argument("--panel", default=PANEL, choices=sorted(WINDOWS),
+                        help="which panel to rescore (default: electronics)")
     args = parser.parse_args()
+
+    globals()["PANEL"] = args.panel
 
     if args.worker:
         i, n = (int(x) for x in args.worker.split("/"))
