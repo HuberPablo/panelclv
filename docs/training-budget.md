@@ -43,6 +43,7 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 12. [What this changes](#12-what-this-changes)
 13. [What to try next: keep the temporal split, fix what it feeds](#13-what-to-try-next-keep-the-temporal-split-fix-what-it-feeds)
 14. [The selection test: cross-entropy is worse than useless, and nothing else is good](#14-the-selection-test-cross-entropy-is-worse-than-useless-and-nothing-else-is-good)
+15. [Family U: the two levers are substitutes, and one of them is dangerous](#15-family-u-the-two-levers-are-substitutes-and-one-of-them-is-dangerous)
 
 ---
 
@@ -618,11 +619,15 @@ the handover. Splitting each study's trials into quartiles by their own validati
 | worst CE | **+22.0** | 62.7 | 0.258 |
 
 The trials cross-entropy likes best are the ones that **over-predict the holdout most**,
-and the spread of the holdout forecast tracks holdout MAPE at +0.795. The mechanism is
-that the best in-window fit carries the calibration era's purchase rate forward, and the
-holdout year's rate is lower — so fitting the validation window harder buys a forecast
-that is further above the truth. This is the same direction family T found from the other
-end: training longer moved bias from +39.8 to −5.7 while improving MAPE.
+and the spread of the holdout forecast tracks holdout MAPE at +0.795.
+
+> **The explanation first given here has been retracted.** It read: the best in-window fit
+> carries the calibration era's purchase rate forward into a holdout year whose rate is
+> lower, so fitting harder buys a forecast further above the truth. §15.3 tested that and
+> it is false — every panel's holdout rate is below its calibration rate (ratios 0.23 to
+> 0.63), CDNOW's decline is *steeper* than electronics', and CDNOW's sign is the right one.
+> What the table above describes is real on electronics; why is answered in §15.3, and the
+> answer is about how much the trials differ from each other, not about eras.
 
 ### 14.3 The candidates beat it, and none of them is good
 
@@ -671,7 +676,135 @@ you are reporting, or pick one metric and own it** — do not average them and h
 4. **Expect little.** Selection is worth a couple of MAPE points here against training
    length's twenty. §12's ordering stands: fix the training budget first, and treat
    selection as the cheaper, smaller follow-up it is.
-5. **Untested and now more interesting**: whether the wrong sign in §14.1 is an electronics
-   property or a general one. It predicts that on a panel whose holdout rate is *higher*
-   than its calibration rate the sign should flip, which is a clean falsifiable test on the
-   other three panels.
+5. **Tested on CDNOW, and the prediction failed — see §15.3.** The sign does flip, but not
+   for the reason given: no panel has a holdout rate above its calibration rate. The real
+   discriminator is whether a study's trials differ from each other at all.
+
+## 15. Family U: the two levers are substitutes, and one of them is dangerous
+
+§13 and §14 each moved one lever from the same floor and neither knew what the other was
+doing. Family U crosses them: **training** (`archive` = patience 7 and the 100-trial
+search, against `floored` = the paper's recipe pinned with `min_epochs=90` and one trial)
+× **inputs** (`no_cluster` against `kmeans_8`), on two models and all four panels, 20
+replications a cell. 640 suites on vast.ai, 21 September 2026, $1.68.
+`scripts/run_factorial.py`; tests by `.scratch/training-budget/factorial_analysis.py`.
+
+### 15.1 Ranking: the label does the work, and the floor adds nothing on top of it
+
+Per-customer Spearman, mean over 20 replications:
+
+| panel | model | archive / no_cluster | archive / kmeans_8 | floored / no_cluster | **floored / kmeans_8** | Pareto/NBD |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| cdnow | ValendinLSTM | 0.364 | 0.403 | 0.383 | **0.406** | 0.450 |
+| | LSTM | 0.386 | 0.398 | 0.352 | **0.403** | |
+| electronics | ValendinLSTM | 0.021 | 0.305 | 0.178 | **0.305** | 0.297 |
+| | LSTM | 0.029 | 0.289 | 0.182 | **0.302** | |
+| gift | ValendinLSTM | 0.349 | 0.359 | 0.280 | **0.363** | 0.383 |
+| | LSTM | 0.326 | 0.356 | 0.263 | **0.359** | |
+| multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.189 |
+| | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
+
+**They do not add.** In seven of the eight cells the crossed cell is statistically
+indistinguishable from the cluster label alone (p = 0.23 to 0.97); only multichannel's
+LSTM gains significantly, and by 0.014 (p = 0.03). The label reaches the ceiling by
+itself, the floor reaches a little over half of it by itself, and together they reach the
+label's ceiling and stop.
+
+**On the two collapsed panels the floor is nevertheless a large effect on its own** —
+electronics 0.021 → 0.178 (p = 8×10⁻⁷), multichannel −0.004 → 0.119 (p = 7×10⁻⁸) — which
+matters because it needs no extra input. It is the fix available when no cluster label is
+allowed; it is not the better of the two.
+
+**Against the statistical benchmark, the collapse is closed and nothing more.** On the two
+panels where the neural model collapsed it now matches Pareto/NBD (electronics 0.305 vs
+0.297, multichannel 0.195 vs 0.189). On the two where it never collapsed it remains behind
+(cdnow 0.406 vs 0.450, gift 0.363 vs 0.383). One caveat belongs beside every one of those
+comparisons: `kmeans_8` is k-means over the Pareto/NBD sufficient statistics, so the cell
+that draws level has been handed the benchmark's own summary.
+
+### 15.2 Level: the floor is the lever, and on one panel it is a disaster
+
+Aggregate MAPE, same cells:
+
+| panel | model | archive / no_cluster | floored / no_cluster | p |
+| --- | --- | ---: | ---: | ---: |
+| multichannel | LSTM | 140.9 | **52.8** | 3×10⁻⁷ |
+| multichannel | ValendinLSTM | 84.9 | **56.0** | 1×10⁻⁶ |
+| electronics | ValendinLSTM | 69.1 | **46.3** | 5×10⁻⁷ |
+| electronics | LSTM | 56.9 | 51.7 | 0.11 |
+| gift | ValendinLSTM | 32.2 | 28.9 | 0.24 |
+| gift | LSTM | 30.3 | 29.9 | 0.92 |
+| cdnow | ValendinLSTM | 51.7 | 56.5 | 0.97 |
+| **cdnow** | **LSTM** | **57.7** | **183.9** | **1×10⁻⁴** |
+
+**The floor triples CDNOW's LSTM error.** That is the single most important line in this
+document for anyone about to act on §12: a 90-epoch floor on a 39-week calibration window
+overfits a model that then extrapolates catastrophically, and CDNOW is exactly the panel
+`run_real_panel_arms.py` already flags for unbounded extrapolation. The frozen benchmark
+on the same panel is unharmed (51.7 → 56.5, p = 0.97), so it is the interaction of a long
+floor with the developed model's engineered calendar on a short window.
+
+**So `min_epochs` must not become an unconditional default.** §12's first item is hereby
+qualified: a floor pays where the panel is long and sparse and the model collapses
+(electronics, multichannel), does nothing where it already works (gift), and does real
+damage on a short window (cdnow + LSTM). It has to be chosen per panel, or scaled to the
+calibration length rather than fixed in epochs.
+
+### 15.3 Why cross-entropy selects well on CDNOW and badly on electronics
+
+§14 measured validation CE as wrong-signed on electronics and §14.4 predicted the sign
+would flip where the holdout era's rate exceeds the calibration era's. **The sign flips on
+CDNOW and the prediction is wrong.** Ten CDNOW studies, 229 trials, same method:
+
+| target | electronics | cdnow |
+| --- | ---: | ---: |
+| holdout MAPE | −0.141 | **+0.244** |
+| holdout \|bias\| | −0.264 | **+0.176** |
+| holdout Spearman | +0.045 | **+0.472** |
+
+But no panel meets the stated condition — every holdout rate is *below* its calibration
+rate, and CDNOW's decline is the steeper one:
+
+| panel | calibration rate | holdout rate | ratio |
+| --- | ---: | ---: | ---: |
+| cdnow | 0.0522 | 0.0206 | 0.40 |
+| electronics | 0.0543 | 0.0340 | 0.63 |
+| gift | 0.0196 | 0.0107 | 0.54 |
+| multichannel | 0.0138 | 0.0031 | 0.23 |
+
+What actually separates them is **how much the trials differ from each other**. Splitting
+each study's trials into quartiles by their own validation CE:
+
+| quartile | electronics bias / MAPE / rho | cdnow bias / MAPE / rho |
+| --- | ---: | ---: |
+| best CE | +35.1 / 65.3 / 0.02 | +14.3 / 65.1 / 0.34 |
+| 2nd | +33.4 / 66.5 / 0.02 | +10.2 / 55.4 / 0.34 |
+| 3rd | +29.4 / 64.5 / 0.02 | +50.4 / 97.9 / 0.29 |
+| worst CE | +22.0 / 62.7 / 0.02 | **+98.7 / 114.2 / 0.16** |
+
+On CDNOW a study contains genuinely broken trials — the worst quartile misses by +99% —
+and cross-entropy finds them. On electronics every trial lands in the same narrow band
+(bias 22 to 35, MAPE 63 to 67, rank correlation flat at 0.02), because that is what the
+collapse *is*: nothing to choose between. With no real quality variation to detect, what
+is left is a small systematic tilt, and it happens to point the wrong way.
+
+**Cross-entropy selects well where the trials differ and badly where they do not.** That
+reconciles this document with `docs/benchmarks-real-panels.md`, which reports selection
+working "on two panels and not at all on the other two" — the two where it works are the
+two that never collapsed. It also means the §14 finding is narrower than it looked: not
+"the criterion is broken", but "the criterion has nothing to work with on a collapsed
+panel, and a collapsed panel is exactly where it gets used to justify a choice".
+
+### 15.4 What follows
+
+1. **Give the model a per-customer channel.** The cluster label is worth more than
+   anything else measured here, and it closes the gap to Pareto/NBD on both collapsed
+   panels — while being, by construction, the benchmark's own summary fed back in. The
+   honest reading is that the architecture cannot build that signal from counts alone,
+   which is the case `docs/absorbing-death-state.md` makes for a learned survival
+   variable rather than a borrowed one.
+2. **Use a floor only where it pays, and never unconditionally** (§15.2).
+3. **Stop selecting on validation cross-entropy where the panel collapses** — there it is
+   wrong-signed — and keep it where the panel does not (§15.3).
+4. **The ceiling is real.** Two levers, applied together, land on the ceiling either one
+   reaches alone. Getting past ~0.30 on electronics needs something neither of them is.

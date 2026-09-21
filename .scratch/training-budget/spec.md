@@ -77,6 +77,7 @@ Measured 2026-09-20, scripts beside this file, outputs in `results/`:
 | `family_t_stats.py` | each arm against the control, Mann-Whitney over 20 replications |
 | `why_flat.py` | the temporal validation curve decomposed, against the customer-wise one — why patience fires |
 | `selection_analysis.py` | every candidate selection criterion against the holdout, 80 studies (`docs/training-budget.md` §14) |
+| `factorial_analysis.py` | family U: training budget x cluster label, four panels (§15) |
 
 Run them with the project venv and `PYTHONPATH=src` from the repo root.
 
@@ -90,6 +91,14 @@ Run them with the project venv and `PYTHONPATH=src` from the repo root.
 | 04 | `issues/04-register-family.md` | family T in `docs/studies-run.md` |
 | 05 | `issues/05-measure-seed-coupling.md` | how far the replication RNG coupling reaches |
 | 06 | `issues/06-report-and-decide.md` | read the result, decide what changes |
+
+## Answered
+
+- §9-§12: the training budget. A floor is worth 22 MAPE points on electronics.
+- §14: the selection criterion. Wrong-signed on electronics.
+- §15: **family U** crosses the two levers. They are substitutes, not complements; the
+  floor does real damage on CDNOW's LSTM; and §14's wrong sign is a property of collapsed
+  panels rather than of the criterion.
 
 ## Where this goes next
 
