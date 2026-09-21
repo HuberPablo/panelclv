@@ -42,6 +42,7 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 11. [What this is, relative to Valendin et al.](#11-what-this-is-relative-to-valendin-et-al)
 12. [What this changes](#12-what-this-changes)
 13. [What to try next: keep the temporal split, fix what it feeds](#13-what-to-try-next-keep-the-temporal-split-fix-what-it-feeds)
+14. [The selection test: cross-entropy is worse than useless, and nothing else is good](#14-the-selection-test-cross-entropy-is-worse-than-useless-and-nothing-else-is-good)
 
 ---
 
@@ -551,7 +552,7 @@ temporal part, which matches the test. It is pragmatic and it is a hybrid — tw
 can disagree, and a model stopped on one may not be the one the other would pick. Listed for
 completeness, below A and B in priority.
 
-### 13.4 What to run first
+### 13.4 What to run first — run, and reported in §14
 
 **A measurement, not a training run.** `scripts/run_rescore_trials.py` already refits and
 scores archived non-winning trials through the production forecast path. Point it at the
@@ -575,3 +576,102 @@ panel, 20 replications, about an hour of rented GPU at family T's measured cost.
   class weights and it applies identically here. Selection, yes; gradients, no.
 - **Do not re-implement rollout metrics beside `compute_forecast_metrics`.** That is what
   cost ADR-0003 its credibility: its RMSE was 62x off the authority's, and only bias agreed.
+
+## 14. The selection test: cross-entropy is worse than useless, and nothing else is good
+
+§13.4 asked whether a rollout over the validation window ranks a study's trials better
+than validation cross-entropy does. Run on vast.ai on 21 September 2026: 80 studies (40
+per model), 40 trials sampled at random from each, **2,813 trials** scored twice over —
+once by a leak-free rollout over the validation window, once by the production path (the
+ADR-0008 refit and a holdout rollout), both through `compute_forecast_metrics`. 29 s a
+trial, $1.67 of rented GPU. `scripts/run_selection_rescore.py`, analysed by
+`.scratch/training-budget/selection_analysis.py`.
+
+Every criterion below is stated so **lower is better**, and so is every target, so a
+**positive** correlation means the criterion ranks trials correctly. One rank correlation
+per study; the test against the status quo is a paired Wilcoxon over the 80.
+
+### 14.1 The status quo is not weak, it is wrong-signed
+
+| target | mean rho of validation CE | 95% CI | p vs 0 | reading |
+| --- | ---: | :---: | ---: | --- |
+| holdout MAPE | **−0.141** | −0.188 to −0.094 | 6×10⁻⁷ | **actively misleading** |
+| holdout \|bias\| | **−0.264** | −0.302 to −0.225 | 2×10⁻¹³ | **actively misleading** |
+| holdout Spearman | +0.045 | −0.006 to +0.096 | 0.08 | no signal |
+
+`docs/benchmarks-real-panels.md` reports that the winning validation loss "does not
+predict the forecast". This is worse than that: on level accuracy the criterion points the
+**wrong way**. Picking a study's lowest-cross-entropy trial is a systematically worse
+choice than picking one of its trials at random.
+
+### 14.2 Why — the criterion fits the calibration era, and the holdout is a different era
+
+Within a study, validation CE does what it is supposed to do *inside the window it scores*:
+its rank correlation with **validation** MAPE is +0.372 (p = 2×10⁻¹⁴). The failure is in
+the handover. Splitting each study's trials into quartiles by their own validation CE:
+
+| quartile | holdout bias % | holdout MAPE | spread of holdout forecast |
+| --- | ---: | ---: | ---: |
+| best CE | **+35.1** | 65.3 | 0.277 |
+| 2nd | +33.4 | 66.5 | 0.272 |
+| 3rd | +29.4 | 64.5 | 0.267 |
+| worst CE | **+22.0** | 62.7 | 0.258 |
+
+The trials cross-entropy likes best are the ones that **over-predict the holdout most**,
+and the spread of the holdout forecast tracks holdout MAPE at +0.795. The mechanism is
+that the best in-window fit carries the calibration era's purchase rate forward, and the
+holdout year's rate is lower — so fitting the validation window harder buys a forecast
+that is further above the truth. This is the same direction family T found from the other
+end: training longer moved bias from +39.8 to −5.7 while improving MAPE.
+
+### 14.3 The candidates beat it, and none of them is good
+
+| target | criterion | mean rho | beats val CE | paired p |
+| --- | --- | ---: | ---: | ---: |
+| holdout MAPE | val rollout MAPE | **+0.033** | 66/80 | 6×10⁻⁸ |
+| | val rollout Spearman | −0.012 | 56/80 | 3×10⁻⁴ |
+| | composite of three | −0.069 | 52/80 | 0.02 |
+| | val rollout \|bias\| | −0.176 | 38/80 | 0.37 |
+| holdout \|bias\| | best epoch (longer better) | **−0.009** | 66/80 | 9×10⁻¹⁰ |
+| | val rollout Spearman | −0.015 | 63/80 | 1×10⁻⁸ |
+| | val rollout MAPE | −0.113 | 61/80 | 7×10⁻⁸ |
+| holdout Spearman | val rollout Spearman | **+0.128** | 46/80 | 0.07 |
+| | composite of three | +0.039 | 38/80 | 0.71 |
+| | val rollout MAPE | −0.056 | 24/80 | 3×10⁻⁴ (**worse**) |
+
+Three things to take from this.
+
+**The improvements are real but they are removals, not additions.** Swapping validation CE
+for a validation-window rollout MAPE moves the correlation with holdout MAPE from −0.141
+to +0.033 in 66 of 80 studies. That is a large, highly significant change — and it lands
+on zero. What it buys is the deletion of a harmful signal, not the arrival of a useful one.
+
+**The best number in the whole table is +0.128.** A validation rollout's Spearman is the
+only thing that predicts the holdout's Spearman, and it explains under 2% of the rank
+variance. **Selection is a weak lever on this panel**: family T moved MAPE by 22 points by
+training longer, and nothing here moves it by more than about 3.
+
+**The composite is worse than its parts, which answers the question §13.3 asked of it.**
+Averaging three ranks that measure different things dilutes each one: for ranking customers
+the composite scores +0.039 where pure validation Spearman scores +0.128, and for MAPE it
+scores −0.069 where pure validation MAPE scores +0.033. **Match the criterion to the metric
+you are reporting, or pick one metric and own it** — do not average them and hope.
+
+### 14.4 What this changes
+
+1. **Stop treating validation cross-entropy as a selection criterion for level accuracy.**
+   It is wrong-signed for bias and MAPE at p ≤ 10⁻⁶. Keep it as the *training* loss — it is
+   the proper scoring rule and §13.5 still applies — but the argmin over trials should not
+   be taken on it.
+2. **If one criterion has to be picked now, it is the validation-window rollout scored on
+   the metric being reported**: rollout MAPE when the claim is about level, rollout Spearman
+   when it is about ranking. Both beat the status quo on their own target at p < 10⁻⁷ and
+   p = 0.07 respectively.
+3. **Do not build the composite.** §13.3 A2 is answered and the answer is no.
+4. **Expect little.** Selection is worth a couple of MAPE points here against training
+   length's twenty. §12's ordering stands: fix the training budget first, and treat
+   selection as the cheaper, smaller follow-up it is.
+5. **Untested and now more interesting**: whether the wrong sign in §14.1 is an electronics
+   property or a general one. It predicts that on a panel whose holdout rate is *higher*
+   than its calibration rate the sign should flip, which is a clean falsifiable test on the
+   other three panels.

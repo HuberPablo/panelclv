@@ -1,0 +1,19 @@
+target,criterion,mean_rho,n_studies
+holdout MAPE,val CE (status quo),-0.14093033028367657,80
+holdout MAPE,val rollout MAPE,0.03299779512856422,80
+holdout MAPE,val rollout |bias|,-0.175927419382772,80
+holdout MAPE,val rollout Spearman,-0.011551874047139327,80
+holdout MAPE,composite (3 ranks),-0.06941106381375692,80
+holdout MAPE,best epoch (longer=better),-0.04324509023714834,80
+holdout |bias|,val CE (status quo),-0.2638728569193157,80
+holdout |bias|,val rollout MAPE,-0.11307127963743321,80
+holdout |bias|,val rollout |bias|,-0.17651616083398988,80
+holdout |bias|,val rollout Spearman,-0.014986552138708356,80
+holdout |bias|,composite (3 ranks),-0.14447931226560184,80
+holdout |bias|,best epoch (longer=better),-0.008911439792489706,80
+holdout Spearman,val CE (status quo),0.04531367802809061,80
+holdout Spearman,val rollout MAPE,-0.05568903785044806,80
+holdout Spearman,val rollout |bias|,0.003914919445493883,80
+holdout Spearman,val rollout Spearman,0.12825687943308103,80
+holdout Spearman,composite (3 ranks),0.03907416543275146,80
+holdout Spearman,best epoch (longer=better),0.019914041119975533,80

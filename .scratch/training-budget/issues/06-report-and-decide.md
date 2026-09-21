@@ -91,3 +91,25 @@ That makes a fifth decision, and it outranks decision 1:
    patience scaled to the curve, or rollout-based selection
    (`docs/insights-study.md` §5.4). Untested. Whoever takes decision 1 should decide
    whether the floor is the answer or the stopgap.
+
+## The selection question, answered (21 September 2026)
+
+80 studies, 2,813 trials scored twice, $1.67. `docs/training-budget.md` §14.
+
+Validation cross-entropy is **wrong-signed** against the holdout: rho −0.141 on MAPE
+(p = 6e-7) and −0.264 on |bias| (p = 2e-13). A study's lowest-CE trial is a worse choice
+than one of its trials picked at random. The mechanism is in §14.2 — the best in-window
+fit carries the calibration era's purchase rate forward into a holdout year whose rate is
+lower, so it over-predicts most (bias +35.1 in the best-CE quartile against +22.0 in the
+worst).
+
+A validation-window rollout beats it at p < 1e-7, and lands on zero. The largest
+correlation anywhere in the test is +0.128. So:
+
+6. **Swap the selection criterion for a validation-window rollout scored on the metric
+   being reported** — rollout MAPE for level, rollout Spearman for ranking. Keep
+   cross-entropy as the training loss.
+7. **Do not build the composite** (§13.3 A2). Averaging three ranks scores worse than
+   whichever one matches the target.
+8. **Keep the ordering.** Selection is worth a couple of MAPE points; the training budget
+   was worth twenty. Decisions 1-3 above come first.

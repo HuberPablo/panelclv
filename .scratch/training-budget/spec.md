@@ -76,6 +76,7 @@ Measured 2026-09-20, scripts beside this file, outputs in `results/`:
 | `paper_split_check.py` | the paper's recipe under the paper's OWN customer-wise split: 28-56 epochs, against epoch 1 under ours |
 | `family_t_stats.py` | each arm against the control, Mann-Whitney over 20 replications |
 | `why_flat.py` | the temporal validation curve decomposed, against the customer-wise one — why patience fires |
+| `selection_analysis.py` | every candidate selection criterion against the holdout, 80 studies (`docs/training-budget.md` §14) |
 
 Run them with the project venv and `PYTHONPATH=src` from the repo root.
 
