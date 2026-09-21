@@ -51,7 +51,9 @@ on; none generalises.
 | 7 | The paper's rule stops early under our split and not under theirs | mechanism | electronics (n=3) | epochs | established | 10 |
 | 8 | The temporal curve gains 5.4×10⁻⁵/epoch against a 10⁻⁴ threshold | mechanism | electronics (n=1/split) | val CE | established | 13.2 |
 | 9 | Validation CE is wrong-signed against the holdout | superiority | electronics (80 studies) | MAPE, \|bias\| | established | 14.1 |
-| 10 | A validation rollout ranks trials better than CE, and lands on zero | bounded | electronics | MAPE | bounded | 14.3 |
+| 9b | …and right-signed on cdnow | superiority | cdnow (10 studies) | MAPE, Spearman | established (bias **not supported**) | 15.3 |
+| 10 | A validation rollout ranks trials better than CE | superiority | electronics | MAPE | established (Δ +0.174, +0.124 to +0.228) | 14.3 |
+| 10b | …but its own correlation with the holdout is not supported | descriptive | electronics | MAPE | established (+0.033, −0.018 to +0.083) | 14.3 |
 | 11 | A composite of three criteria is worse than whichever matches the target | descriptive | electronics | Spearman | established | 14.3 |
 | 12 | *The wrong sign comes from a calibration/holdout rate shift* | mechanism | — | — | **retracted** | 14.2, 15.3 |
 | 13 | CE selects well where a study's trials differ and badly where they do not | mechanism | cdnow, electronics | — | established | 15.3 |
@@ -763,11 +765,14 @@ per study; the test against the status quo is a paired Wilcoxon over the 80.
 
 ### 14.1 The status quo is not weak, it is wrong-signed
 
-| target | mean rho of validation CE | 95% CI | p vs 0 | reading |
-| --- | ---: | :---: | ---: | --- |
-| holdout MAPE | **−0.141** | −0.188 to −0.094 | 6×10⁻⁷ | **actively misleading** |
-| holdout \|bias\| | **−0.264** | −0.302 to −0.225 | 2×10⁻¹³ | **actively misleading** |
-| holdout Spearman | +0.045 | −0.006 to +0.096 | 0.08 | no signal |
+One rank correlation per study, 80 studies; the mean with its 95% bootstrap interval, and
+supported when the interval excludes zero.
+
+| target | mean rho of validation CE | 95% CI | supported | reading |
+| --- | ---: | :---: | :---: | --- |
+| holdout MAPE | **−0.141** | −0.187 to −0.093 | yes | **actively misleading** |
+| holdout \|bias\| | **−0.264** | −0.301 to −0.225 | yes | **actively misleading** |
+| holdout Spearman | +0.045 | −0.004 to +0.095 | no | no signal |
 
 `docs/benchmarks-real-panels.md` reports that the winning validation loss "does not
 predict the forecast". This is worse than that: on level accuracy the criterion points the
@@ -777,8 +782,8 @@ choice than picking one of its trials at random.
 ### 14.2 Why — the criterion fits the calibration era, and the holdout is a different era
 
 Within a study, validation CE does what it is supposed to do *inside the window it scores*:
-its rank correlation with **validation** MAPE is +0.372 (p = 2×10⁻¹⁴). The failure is in
-the handover. Splitting each study's trials into quartiles by their own validation CE:
+its rank correlation with **validation** MAPE is +0.372 (95% CI +0.326 to +0.413,
+supported). The failure is in the handover. Splitting each study's trials into quartiles by their own validation CE:
 
 | quartile | holdout bias % | holdout MAPE | spread of holdout forecast |
 | --- | ---: | ---: | ---: |
@@ -788,7 +793,8 @@ the handover. Splitting each study's trials into quartiles by their own validati
 | worst CE | **+22.0** | 62.7 | 0.258 |
 
 The trials cross-entropy likes best are the ones that **over-predict the holdout most**,
-and the spread of the holdout forecast tracks holdout MAPE at +0.795.
+and the spread of the holdout forecast tracks holdout MAPE at +0.795 (+0.763 to +0.821),
+while validation CE tracks that spread at −0.267 (−0.308 to −0.223) — both supported.
 
 > **The explanation first given here has been retracted.** It read: the best in-window fit
 > carries the calibration era's purchase rate forward into a holdout year whose rate is
@@ -803,15 +809,22 @@ and the spread of the holdout forecast tracks holdout MAPE at +0.795.
 Paired over the same 80 studies, so these are Δ of within-study rank correlation against
 validation CE, with a 95% bootstrap CI on the paired difference:
 
-| target | criterion | mean rho | Δ vs val CE | 95% CI of Δ |
+| target | criterion | mean rho | 95% CI of rho | Δ vs val CE | 95% CI of Δ |
 | --- | --- | ---: | ---: | ---: |
-| holdout MAPE | val rollout MAPE | **+0.033** | **+0.174** | +0.124 to +0.228 |
-| | val rollout Spearman | −0.012 | **+0.129** | +0.058 to +0.196 |
-| | composite of three | −0.069 | **+0.072** | +0.005 to +0.137 |
-| | val rollout \|bias\| | −0.176 | −0.035 | −0.106 to +0.037 |
-| holdout Spearman | val rollout Spearman | **+0.128** | **+0.083** | +0.013 to +0.159 |
-| | composite of three | +0.039 | −0.006 | −0.062 to +0.054 |
-| | val rollout MAPE | −0.056 | **−0.101** | −0.156 to −0.037 (**worse**) |
+| holdout MAPE | val rollout MAPE | +0.033 | −0.018 to +0.083 (**not supported**) | **+0.174** | +0.124 to +0.228 |
+| | val rollout Spearman | −0.012 | −0.065 to +0.038 | **+0.129** | +0.058 to +0.196 |
+| | composite of three | −0.069 | −0.125 to −0.011 | **+0.072** | +0.005 to +0.137 |
+| | val rollout \|bias\| | −0.176 | −0.233 to −0.119 | −0.035 | −0.106 to +0.037 |
+| holdout Spearman | val rollout Spearman | **+0.128** | **+0.075 to +0.184** | **+0.083** | +0.013 to +0.159 |
+| | composite of three | +0.039 | −0.004 to +0.084 | −0.006 | −0.062 to +0.054 |
+| | val rollout MAPE | −0.056 | −0.100 to −0.009 | **−0.101** | −0.156 to −0.037 (**worse**) |
+
+The two interval columns answer different questions and both matter: the first asks
+whether a criterion ranks trials correctly at all, the second whether it ranks them better
+than validation CE does. **The best replacement for level accuracy does the second and not
+the first** — val rollout MAPE improves on CE by +0.174 while its own correlation with
+holdout MAPE, +0.033, has an interval spanning zero. It removes a harmful signal without
+supplying a useful one, which is the finding stated numerically.
 
 Three things to take from this.
 
@@ -834,13 +847,17 @@ you are reporting, or pick one metric and own it** — do not average them and h
 ### 14.4 What this changes
 
 1. **Stop treating validation cross-entropy as a selection criterion for level accuracy.**
-   It is wrong-signed for bias and MAPE at p ≤ 10⁻⁶. Keep it as the *training* loss — it is
-   the proper scoring rule and §13.5 still applies — but the argmin over trials should not
-   be taken on it.
+   Its correlation with holdout MAPE is −0.141 (−0.187 to −0.093) and with holdout \|bias\|
+   −0.264 (−0.301 to −0.225), both intervals excluding zero on the wrong side. Keep it as
+   the *training* loss — it is the proper scoring rule and §13.5 still applies — but the
+   argmin over trials should not be taken on it.
 2. **If one criterion has to be picked now, it is the validation-window rollout scored on
    the metric being reported**: rollout MAPE when the claim is about level, rollout Spearman
-   when it is about ranking. Both beat the status quo on their own target at p < 10⁻⁷ and
-   p = 0.07 respectively.
+   when it is about ranking. Both beat the status quo on their own target — Δ +0.174
+   (+0.124 to +0.228) and +0.083 (+0.013 to +0.159) — but only rollout Spearman also has a
+   supported correlation of its own (+0.128, +0.075 to +0.184). Rollout MAPE's own
+   correlation, +0.033, spans zero: it buys the removal of a harmful signal, not a useful
+   one.
 3. **Do not build the composite.** §13.3 A2 is answered and the answer is no.
 4. **Expect little.** Selection is worth a couple of MAPE points here against training
    length's twenty. §12's ordering stands: fix the training budget first, and treat
@@ -1014,11 +1031,17 @@ calibration length rather than fixed in epochs.
 would flip where the holdout era's rate exceeds the calibration era's. **The sign flips on
 CDNOW and the prediction is wrong.** Ten CDNOW studies, 229 trials, same method:
 
-| target | electronics | cdnow |
+| target | electronics (80 studies) | cdnow (10 studies) |
 | --- | ---: | ---: |
-| holdout MAPE | −0.141 | **+0.244** |
-| holdout \|bias\| | −0.264 | **+0.176** |
-| holdout Spearman | +0.045 | **+0.472** |
+| holdout MAPE | −0.141 (−0.187, −0.093) | **+0.244 (+0.081, +0.418)** |
+| holdout \|bias\| | −0.264 (−0.301, −0.225) | +0.176 (−0.026, +0.378) |
+| holdout Spearman | +0.045 (−0.004, +0.095) | **+0.472 (+0.341, +0.599)** |
+
+Two qualifications the bare correlations hid. **The flip is supported on MAPE and on
+Spearman, not on bias** — CDNOW's +0.176 has an interval spanning zero. And **CDNOW rests
+on 10 studies against electronics' 80**, so its intervals are three to four times wider;
+the sign is clear, its magnitude is not. On electronics the Spearman row is the one that
+is *not* supported in either direction, which is what "no signal" meant in §14.1.
 
 But no panel meets the stated condition — every holdout rate is *below* its calibration
 rate, and CDNOW's decline is the steeper one:
