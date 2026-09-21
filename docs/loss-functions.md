@@ -286,15 +286,27 @@ forecasters that *read the holdout* were scored with `compute_forecast_metrics`:
 | ORACLE customer × period (rank-1) | **0.14026** | **0.36686** |
 
 The entire span between predicting zeros and a rank-1 oracle that cheats is **7.8% of
-RMSE on CDNOW and 2.8% on electronics.** For comparison, the archived 10-study
-electronics suite
-(`Studies/cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_10Studies_100_simulations/results.csv`):
+RMSE on CDNOW and 2.8% on electronics.** For comparison, the archived electronics suite
+`Studies/cross_entropy_cfg_2y_Train_1yPred_NoCov_V1_10Studies_100_simulations` (family M
+of `docs/studies-run.md`, 22 June 2026): arm `no_ar-no_cluster`, no calendar channel,
+**10 studies × 100 Optuna trials × 100 Monte Carlo paths** for each neural model and one
+deterministic `ParetoNBD_MLE` fit, seeds 43–52, 829 customers, calibration 1999–2000 with
+holdout 2001 — 104 / 52 weeks, 7 classes.
 
-| model | rmse (mean ± sd over 10 studies) | bias_percent | mape_aggregate |
-|---|---|---|---|
-| LSTM | 0.379 ± 0.001 | **+39.1 ± 27.5** | 71.3 ± 18.1 |
-| Transformer | 0.377 ± 0.000 | **+11.1 ± 16.2** | 47.3 ± 5.7 |
-| Pareto/NBD | 0.375 | **−53.4** | 59.5 |
+| model | n | rmse (mean ± sd) | bias_percent | mape_aggregate |
+|---|---:|---|---|---|
+| LSTM | 10 | 0.379 ± 0.001 | **+39.1 ± 27.5** | 71.3 ± 18.1 |
+| Transformer | 10 | 0.377 ± 0.000 | **+11.1 ± 16.2** | 47.3 ± 5.7 |
+| Pareto/NBD (MLE) | 1 | 0.375 | **−53.4** | 59.5 |
+
+Two provenance caveats on that suite, both from reading its files. Its `config.json`
+predates the `panel_config` block, so **the windows and the arm above are read off the
+suite's name** (`cfg_2y_Train_1yPred_NoCov`) and the panel, not out of the archive: nothing
+stored with the run records which columns reached the model. And its `results.csv` has no
+`param_embedder` column — the embedder predates ADR-0005's seam and was not a searched
+parameter — so this is the one table in this document whose embedder is inferred from the
+code of the day rather than recorded. Its MAPE column is named `mape_aggregate_style`, the
+former name of the same key (`studies/pareto_nbd_grid.py:56`).
 
 Three architectures, one classical and two neural, span 0.375–0.379 — a 1% band, well
 inside the oracle headroom, and the LSTM is *worse at RMSE than predicting zero
@@ -831,9 +843,19 @@ differently and could disagree. Note in the write-up that the arms' Optuna objec
 on different scales, so only the forecast metrics are comparable across arms, never the
 `objective` column.
 
-**Measured — CDNOW, 2026-08-31.** Run by `scripts/run_loss_ablation.py --panel cdnow`:
-three arms, 10 studies each, paired seeds 43–52, 20 Optuna trials per study, 300
-simulations, archived at `Studies/loss_ablation_cdnow`. Across studies, mean ± SD:
+**Measured — CDNOW, 2026-08-31.** Run by `scripts/run_loss_ablation.py --panel cdnow`
+(family I of `docs/studies-run.md`), archived at `Studies/loss_ablation_cdnow`.
+
+| | |
+|---|---|
+| arms | three, differing only in `loss_type`: `LSTM_ce`, `LSTM_emd`, `LSTM_ce_emd` |
+| features | `seq_cols = [Transactions, period_since_last_transaction, has_transacted_before]` — an AR pair matching no token in `docs/studies-run.md` §3; no cluster, no calendar |
+| budget | **10 studies × 20 Optuna trials × 300 Monte Carlo paths** per arm, paired seeds 43–52 |
+| embedder | `valendin` (from `param_embedder`) |
+| windows | calibration 1997-01-01 → 1997-09-30, validation from 1997-08-06, holdout 1997-10-01 → 1998-06-30 — **39 / 38 weeks**, the pre-ADR-0009 CDNOW window; 2,357 customers, `clip_target_upper=4` → 5 classes |
+| metrics | `bias_percent`, `mape_aggregate`, `rmse` from `results.csv`. No per-customer Spearman: the pre-ADR-0009 window blocks recomputation (`docs/studies-run.md` §7). |
+
+Across studies, mean ± SD:
 
 | arm | `bias_percent` | `mape_aggregate` | `rmse` |
 |---|---|---|---|

@@ -55,14 +55,17 @@ on; none generalises.
 | 11 | A composite of three criteria is worse than whichever matches the target | descriptive | electronics | Spearman | established | 14.3 |
 | 12 | *The wrong sign comes from a calibration/holdout rate shift* | mechanism | — | — | **retracted** | 14.2, 15.3 |
 | 13 | CE selects well where a study's trials differ and badly where they do not | mechanism | cdnow, electronics | — | established | 15.3 |
-| 14 | A cluster label improves discrimination | superiority | all four, separately | Spearman | established | 15.1 |
+| 14 | A cluster label improves discrimination | superiority | electronics, multichannel | Spearman | established | 15.1 |
+| 14b | …on cdnow, and on gift's benchmark | superiority | cdnow, gift | Spearman | **not supported** | 15.1 |
+| 14c | A cluster label added to an already-floored model improves discrimination | superiority | all four, separately (8/8 cells) | Spearman | established | 15.1 |
 | 15 | A training floor improves discrimination | superiority | electronics, multichannel | Spearman | established | 15.1 |
 | 16 | A training floor has no detectable effect on discrimination | descriptive | cdnow | Spearman | established | 15.1 |
 | 16b | A training floor **worsens** discrimination | superiority (negative) | gift | Spearman | established | 15.1 |
 | 17 | Adding the floor on top of the label adds nothing beyond ±0.012 | bounded | electronics | Spearman | bounded | 15.1 |
 | 18 | The floored paper-recipe arm triples CDNOW's LSTM error | superiority (negative) | cdnow | MAPE | established | 15.2 |
 | 18b | *…and the floor is what causes it* | mechanism | cdnow | MAPE | **not identified** (E1) | 15.2 |
-| 19 | The best cell reaches approximately Pareto/NBD's Spearman | bounded | electronics, multichannel | Spearman | bounded | 15.1 |
+| 19 | The best cell reaches approximately Pareto/NBD's Spearman | descriptive | electronics, multichannel | Spearman | established (interval contains or exceeds it) | 15.1 |
+| 19b | …and remains below it | descriptive | cdnow, gift | Spearman | established | 15.1 |
 | 20 | The replication RNG coupling does not reach the archive | mechanism | all four | val CE | established | 7 |
 
 ## How claims are made
@@ -325,8 +328,11 @@ is the smaller part. Per-customer Spearman recomputed from the stored `Predictio
 the trained row is roughly twice what the pilot suggested — which narrows the gap between
 the two levers without closing it.)*
 
-Within the studies that carry no cluster label (n = 40), more training still helps —
-Spearman correlates +0.33 with updates and +0.28 with best epoch — but it does not
+Within the studies that carry no cluster label (n = 40, the pre-experiment archive only —
+family T, U and V suites are excluded, or this would be circular), more training still
+helps, though one of the two correlations does not clear the standard: **+0.328 with
+updates (95% CI +0.028 to +0.581, supported)** and **+0.280 with best epoch (−0.004 to
++0.532, not supported)**. So the archive's hint is real but thin, and it does not
 approach what one persistent per-customer input buys. That ordering matches
 `docs/insights-cluster-ablation.md` §5.1, and the honest summary is: **on electronics both
 levers are large, the input is the larger, and §15.1 measures the two crossed — stacking
@@ -867,6 +873,39 @@ Per-customer Spearman, mean over 20 replications:
 | multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.189 |
 | | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
 
+**Every contrast the 2×2 supports, under the standard** — Δ of condition means with a 95%
+bootstrap CI, 20 independent replications a cell, beside that panel's Spearman refit
+floor. `label alone` and `floor alone` are measured against `archive / no_cluster`;
+`+label` and `+floor` are measured against the other lever already applied.
+
+| panel | model | label alone | floor alone | +floor (on label) | +label (on floor) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| cdnow | ValendinLSTM | +0.039 (−0.003, +0.088) | +0.019 (−0.019, +0.065) | +0.003 (−0.024, +0.032) | **+0.023 (+0.000, +0.047)** |
+| | LSTM | +0.012 (−0.013, +0.040) | −0.034 (−0.097, +0.019) | +0.004 (−0.014, +0.024) | **+0.051 (+0.001, +0.111)** |
+| electronics | ValendinLSTM | **+0.283 (+0.265, +0.302)** | **+0.157 (+0.119, +0.193)** | +0.001 (−0.010, +0.012) | **+0.127 (+0.094, +0.163)** |
+| | LSTM | **+0.260 (+0.235, +0.282)** | **+0.153 (+0.116, +0.188)** | +0.013 (−0.005, +0.035) | **+0.120 (+0.087, +0.156)** |
+| gift | ValendinLSTM | +0.010 (−0.005, +0.026) | **−0.069 (−0.118, −0.027)** | +0.004 (−0.005, +0.014) | **+0.084 (+0.044, +0.130)** |
+| | LSTM | **+0.030 (+0.005, +0.061)** | **−0.063 (−0.117, −0.012)** | +0.003 (−0.005, +0.011) | **+0.096 (+0.053, +0.143)** |
+| multichannel | ValendinLSTM | **+0.182 (+0.162, +0.199)** | **+0.123 (+0.099, +0.148)** | **+0.018 (+0.004, +0.035)** | **+0.077 (+0.054, +0.100)** |
+| | LSTM | **+0.173 (+0.158, +0.186)** | **+0.076 (+0.051, +0.100)** | +0.014 (−0.003, +0.031) | **+0.111 (+0.085, +0.137)** |
+
+Bold = interval excludes zero. Three readings, and the first corrects an earlier claim:
+
+**The label's effect is supported on two panels, not four.** On electronics and
+multichannel it is large and certain. On cdnow it is not supported for either model
+(+0.039 and +0.012, both intervals spanning zero) and on gift only for the LSTM, by
++0.030. An earlier version of this section said the label "lifts ranking on every panel,
+decisively on two and marginally on two", resting on a Mann-Whitney p of 0.008 for cdnow;
+under the standard this document now holds itself to, that comparison is **not
+supported**.
+
+**What is supported on all eight cells is the label added to an already-floored model**
+(+0.023 to +0.127). That is the robust form of the claim: whatever the floor does, adding
+a per-customer channel on top of it helps everywhere.
+
+**The floor alone is the heterogeneous one** — large and positive on electronics and
+multichannel, **negative and supported on gift**, and not supported on cdnow.
+
 **Crossing them adds little, and how little is now bounded.** Δ from adding the floor on
 top of the label, 95% bootstrap CI, 20 replications a cell, beside that panel's Spearman
 refit floor:
@@ -905,14 +944,25 @@ helps decisively on two panels, does nothing on a third and **hurts** on the fou
 matters because it needs no extra input — it is the fix available when no cluster label
 is allowed — but it is not the better of the two, and it is not safe everywhere.
 
-**Against the statistical benchmark, the collapse is closed and nothing more.** On the two
-panels where the neural model collapsed it reaches approximately the same Spearman:
-electronics 0.305 (95% CI 0.298 to 0.312) against Pareto/NBD's 0.297, multichannel 0.195
-(0.187 to 0.205) against 0.189. **No equivalence test is available**, because Pareto/NBD
-is a single deterministic fit with no interval of its own, so "approximately the same" is
-as far as this goes — not "matches", and not "beats". On the two panels that never
-collapsed it remains clearly behind (cdnow 0.406 against 0.450, gift 0.363 against
-0.383). One caveat belongs beside every one of those
+**Against the statistical benchmark, the collapse is closed and nothing more.** The best
+cell's mean with its 95% interval, against Pareto/NBD's single deterministic fit:
+
+| panel | model | best cell | 95% CI | Pareto/NBD | reading |
+| --- | --- | ---: | :---: | ---: | --- |
+| electronics | ValendinLSTM | 0.305 | 0.298 to 0.312 | 0.297 | interval **above** it |
+| | LSTM | 0.302 | 0.289 to 0.310 | 0.297 | interval contains it |
+| multichannel | ValendinLSTM | 0.195 | 0.187 to 0.204 | 0.189 | interval contains it |
+| | LSTM | 0.189 | 0.170 to 0.200 | 0.189 | interval contains it |
+| cdnow | ValendinLSTM | 0.406 | 0.394 to 0.416 | 0.450 | **below** |
+| | LSTM | 0.403 | 0.390 to 0.415 | 0.450 | **below** |
+| gift | ValendinLSTM | 0.363 | 0.358 to 0.368 | 0.383 | **below** |
+| | LSTM | 0.359 | 0.353 to 0.365 | 0.383 | **below** |
+
+Pareto/NBD has **no interval of its own** — it is one deterministic fit — so these are
+comparisons of an interval against a point, not equivalence tests. On that basis: the
+frozen benchmark's interval sits marginally above Pareto/NBD on electronics, contains it
+on the other two collapsed cells, and sits clearly below on the two panels that never
+collapsed. One caveat belongs beside every one of those
 comparisons: `kmeans_8` is k-means over the Pareto/NBD sufficient statistics, so the cell
 that draws level has been handed the benchmark's own summary.
 

@@ -319,8 +319,12 @@ temporal calibration split, the ADR-0008 warm-started full-calibration refit, th
 Monte Carlo rollout, `compute_forecast_metrics` as the single scoring authority. The
 config `scripts/run_studies.py` already carries: 829 customers, calibration
 1999–2000 (104 weeks), holdout 2001 (52 weeks), `clip_target_upper=6` → 7 classes, no
-covariates so `F = 1`. Both neural models: identical protocol, AdamW, lr 1e-3, wd
-1e-4, early stopping patience 5, 30-path rollout, seeds 0–7.
+covariates so `F = 1`. Validation is the ADR-0001 temporal window, the second calibration
+year. Both neural models: identical protocol, embedder **`valendin`**, loss
+`cross_entropy`, **no Optuna search — one hand-picked architecture point, so the n below is
+8 independent training runs × 30 Monte Carlo paths, not 8 studies**; AdamW, lr 1e-3, wd
+1e-4, early stopping patience 5, seeds 0–7. Arm: `no_ar-no_cluster` with no calendar
+channel. Per-customer Spearman was not computed for either run.
 
 | model | RMSE | bias % | aggregate MAPE % | mean \|bias\| % |
 |---|---|---|---|---|

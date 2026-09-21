@@ -31,6 +31,7 @@ heatmaps as figures, is published at
 8. [Every tree, pooled](#8-every-tree-pooled)
 9. [What this says to build next](#9-what-this-says-to-build-next)
 10. [What this does not establish](#10-what-this-does-not-establish)
+11. [Panel size: the slope does not survive tripling the customers](#11-panel-size-the-slope-does-not-survive-tripling-the-customers)
 
 ---
 
@@ -54,9 +55,19 @@ The arm axis crosses three AR encodings with two cluster settings on one embedde
 | cluster | `no_cluster` / `kmeans_8` | the triple as a frozen category instead of a counter |
 | embedder | `valendin` | declared but not crossed; `projected` was cut on cost |
 
-Each suite is one study, 100 Optuna trials, a 200-path rollout. Panels are 1000 customers
-over 156 weeks (two calibration years, one holdout year), `clip_target_upper=6`, four
-mean transaction rates × four churn rates × ten seeds.
+### Provenance for every number in this document
+
+| | |
+| --- | --- |
+| archive | family B of `docs/studies-run.md` — 1,920 neural suites + 160 Pareto/NBD, vast.ai, 4–6 September 2026 |
+| replications | **1 study per panel**, so a cell's spread is across its **10 replicate panels**, not across training runs on one panel. Every mean over a whole tree averages 160 studies; every cell mean averages 10. `base_seed=42` throughout. |
+| budget | **100 Optuna trials × 200 Monte Carlo paths** per study, for both neural models — equalised, unlike the archived run (§2) |
+| embedder | **`valendin`** on every neural suite, verified from `param_embedder` in every `results.csv`. `projected` was declared and cut on cost (§10). |
+| loss | `cross_entropy` |
+| models | LSTM, Transformer, ParetoNBD. `ValendinLSTM` cannot run here at all (§1). |
+| panels | 1,000 customers × 156 weeks, `clip_target_upper=6` → 7 softmax classes, calendar `add_week_sin_cos` + `add_year_idx` |
+| windows | calibration 1999-01-01 → 2000-12-31, validation from 2000-01-01 (ADR-0001), holdout 2001-01-01 → 2001-12-31 — **104 calibration / 52 holdout weeks** |
+| metrics | `bias_percent`, `mape_aggregate`, `rmse` from each suite's `results.csv`, all three from `compute_forecast_metrics`. **No per-customer Spearman exists for this grid**: nothing recomputes it from the 2,080 stored forecast sets, and the discrimination question is asked here through `shape_correlation` (§6) and the latent-churn split (§7) instead, both of which are synthetic-only because they need `ground_truth.csv`. So a ranking claim from `docs/benchmarks-real-panels.md` has no counterpart here. |
 
 The panels are generated *by* a Pareto/NBD, so that benchmark is correct by construction.
 It is the **ceiling**, not a competitor — and `ar_unbounded` is literally what it
@@ -125,6 +136,9 @@ the Transformer's from 3.5× to 1.8×. Both still end four to nine times outside
 benchmark's +15.8%.
 
 This is the finding the arms were built to attack, and it is the one they did not move.
+**At 1,000 customers.** §11 re-runs two of these arms on the same generator at 3,000
+and the slope does not survive it, which makes the sentence above a statement about
+this panel size rather than about the arms.
 
 ---
 
@@ -556,3 +570,86 @@ replicate-to-replicate variance as well as the level.
 
 - **Seasonality is held fixed across the grid.** Only the `(rate, churn)` regime varies, so
   nothing here says how any arm behaves when the seasonal pattern changes.
+
+---
+
+## 11. Panel size: the slope does not survive tripling the customers
+
+Every number above comes from panels of 1,000 generated customers. That is not a neutral
+choice, because `require_calibration_activity=True` drops customers with no calibration
+purchase, and it drops most of them exactly where the bias is worst:
+
+| churn | surviving customers @1,000 generated | @3,000 generated |
+| ---: | ---: | ---: |
+| 0.20 | 798 [454, 971] | 2,395 [1,403, 2,909] |
+| 0.40 | 726 [363, 942] | 2,165 [1,144, 2,802] |
+| 0.60 | 633 [286, 893] | 1,902 [874, 2,635] |
+| 0.80 | 511 [177, 796] | 1,535 [553, 2,351] |
+
+So §3's churn axis is also a panel-size axis: it loses a third of its customers between
+its first row and its last, and the sparsest single panel trains on 177. A slope measured
+along it cannot say which of the two is responsible.
+
+`grids/seasonal_4x4x10_n3000.py` removes the confound the only way it can be removed —
+by moving panel size while holding the regime fixed. It is `seasonal_4x4x10` with
+`n_customers=3000` and **nothing else changed**: same axes, same `base_seed=42`, same
+seasonality, same windows, same 100 trials and 200 Monte Carlo paths.
+
+**Provenance** — family S of `docs/studies-run.md`; 17–18 September 2026; two arms,
+`no_ar-no_cluster-valendin` and `ar_bounded-no_cluster-valendin`; LSTM on ten vast.ai
+boxes, Pareto/NBD on the workstation; `$1.81`. `scripts/reconcile_grid.py --grid
+seasonal_4x4x10_n3000` reports **160/160 on all four trees**. The Transformer was not run
+(below), and `ValendinLSTM` is `ABSENT` for the same F11 reason as §1.
+
+Aggregate bias %, marginal over the four transaction rates, mean ± sd over the 40 panels
+per entry:
+
+| config | churn 0.2 | 0.4 | 0.6 | 0.8 | ratio 0.2→0.8 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Pareto/NBD @3,000** | **+1.2 ± 10.5** | **+4.8 ± 13.7** | **+5.3 ± 18.1** | **+0.8 ± 16.0** | — |
+| Pareto/NBD @1,000 | +2.2 ± 10.9 | +9.2 ± 19.3 | +10.2 ± 22.5 | +15.8 ± 34.5 | 7.2× |
+| LSTM `ar_bounded` @3,000 | +15.1 ± 14.1 | +14.9 ± 21.4 | +19.6 ± 39.6 | +23.8 ± 77.3 | **1.6×** |
+| LSTM `ar_bounded` @1,000 | +32.3 ± 26.0 | +49.1 ± 45.6 | +65.8 ± 85.4 | +146.5 ± 321.8 | 4.5× |
+| LSTM `no_ar` @3,000 | +32.9 ± 31.4 | +57.0 ± 52.0 | +89.0 ± 117.0 | +156.0 ± 205.6 | 4.7× |
+| LSTM `no_ar` @1,000 | +37.4 ± 21.5 | +73.6 ± 55.4 | +126.6 ± 116.4 | +365.2 ± 367.9 | 9.8× |
+
+**Neither axis explains it alone; they multiply.** Tripling the customers leaves `no_ar`
+monotone and steep — 33 → 156, still 4.7× across the axis and ten times outside the
+benchmark — so panel size is not the explanation. The bounded encoding at 1,000 customers
+left the slope at 4.5×, so the encoding is not the explanation either. Together they very
+nearly remove it: `ar_bounded` at 3,000 runs 15 → 15 → 20 → 24, a 1.6× slope, ending
+within ~23 points of a ceiling that is itself at +0.8%.
+
+**The encoding's value grows with the panel.** `ar_bounded` against `no_ar` at the worst
+churn level is a 60% reduction in bias at 1,000 customers (365 → 146) and an 85%
+reduction at 3,000 (156 → 24). That is the interaction: bounded flags are a *sample-hungry*
+representation. They give the model a place to put "this customer has been silent for k
+periods", and it takes customers to learn what that silence predicts. At 511 effective
+customers it half-learns it; at 1,535 it mostly does.
+
+This does not overturn §9's recommendation. An absorbing state is still the principled
+fix, and §7 still finds no death mechanism anywhere in these trees. What it does change is
+the *urgency*: a large part of what looked like a structural failure at 1,000 customers is
+recoverable with a representation that is already implemented, on panels of a size real
+datasets routinely reach.
+
+### What this section does not establish
+
+- **The Transformer was not run at 3,000 customers.** Its cost there is now measured
+  rather than guessed — **~6.7 s per Monte Carlo path against ~1.0 s at 1,000**, with the
+  Optuna search only doubling — so a 200-path suite is ~22 minutes and the same two arms
+  are ~150–215 GPU-hours, roughly $17–24. The rollout is the term that scales, not the
+  search, so `n_simulations` is the lever if that run is wanted cheaply
+  (`VastAI/Rules.md` §7).
+- **Two points are not a curve.** 1,000 → 3,000 says the direction and rough size of the
+  effect; it does not locate the customer count at which `ar_bounded`'s slope flattens,
+  and nothing here says it keeps improving beyond 3,000.
+- **The spread did not collapse with the mean.** `ar_bounded` at churn 0.8 is still
+  ±77.3 with a worst panel at +325%. Individual panels still fail; what fell is how often.
+  Part of that variance drop is mechanical — an aggregate over three times the customers
+  is a steadier statistic — whereas the drop in the *mean* is not, since `bias_percent` is
+  scale-invariant when the per-customer error is proportional.
+- **`ar_unbounded` and the cluster arms were not re-run**, so §4's ranking of the full arm
+  axis stands only at 1,000 customers. `kmeans_8` in particular cannot be compared across
+  the two grids at all: eight clusters fitted over 3,000 customers is not the same
+  covariate as eight over 1,000.

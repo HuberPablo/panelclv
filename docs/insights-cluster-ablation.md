@@ -230,10 +230,27 @@ trains. Per-customer Spearman, 20 replications a cell, `ValendinLSTM`:
 
 Three things this adds to §5.1.
 
-**The effect generalises, and CDNOW does behave as predicted above.** The label lifts
-ranking on every panel, decisively on the two that collapse (electronics, multichannel)
-and marginally on the two that do not (cdnow p = 0.008, gift p = 0.47) — which is the
-reading §5.1 guessed at without the measurement.
+**The effect is supported on two panels, not four — and §5.1's guess about CDNOW was
+right.** Δ Spearman from adding the label, 95% bootstrap CI, 20 replications a cell,
+`ValendinLSTM`:
+
+| panel | Δ | 95% CI | supported | refit floor |
+| --- | ---: | :---: | :---: | ---: |
+| electronics | **+0.283** | +0.265 to +0.302 | yes | 0.0105 |
+| multichannel | **+0.182** | +0.162 to +0.199 | yes | 0.0152 |
+| cdnow | +0.039 | −0.003 to +0.088 | no | 0.0159 |
+| gift | +0.010 | −0.005 to +0.026 | no | 0.0116 |
+
+On the two panels that collapse the label is decisive. On the two that do not, the
+interval spans zero — so this document's "sevenfold rise" is an electronics and
+multichannel result, and §5.1's expectation that CDNOW would not show the same effect is
+borne out. (An earlier version of this subsection reported cdnow as a marginal gain at
+p = 0.008; under the standard in `docs/training-budget.md`, "How claims are made", a
+difference of means with an interval spanning zero is not supported.)
+
+**What *is* supported on all eight (panel, model) cells is the label added to a model
+that has already been trained past its early plateau** — Δ +0.023 to +0.127, every
+interval excluding zero. That is the robust form of the claim.
 
 **A training floor is a partial substitute for the label.** On the collapsing panels,
 simply training the same no-label model to the reference paper's epoch count reaches

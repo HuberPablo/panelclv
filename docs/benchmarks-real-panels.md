@@ -43,30 +43,98 @@ never exceed 4 transactions in a week.
 A transaction is a purchase on CDNOW and gift, a line item on electronics, and a distinct
 order on multichannel (`docs/dataset-preparation.md`).
 
-### Every Pareto/NBD row in this document is shifted one period early
+### One caveat on the Pareto/NBD rows: they are single fits, and CDNOW's is not stable
 
-`benchmarks/pareto_nbd._build_cbs` measures each customer's calibration age `T_cal` to the
-**start** of the last calibration period rather than its end, because `period_start` is a
-period's first day. The forecaster then puts holdout period `t` on customer time
-`[T_cal + t - 1, T_cal + t]`, so forecast column 0 covers the last *calibration* period
-while being scored against holdout period 0. Verified on all four panels and both
-calibrations — exactly one period, everywhere
-(`.scratch/pnbd-cdnow-replication/check_window_alignment.py`, 2026-09-17).
+The Setup table above calls the Pareto/NBD "deterministic, so **n = 1** and no spread".
+That holds on electronics — ±0.35 points of bias over three seeds (`docs/p-slstm.md` §10)
+— and **does not hold on CDNOW**, where the death parameters sit on a nearly flat
+likelihood ridge. Refitting the CDNOW benchmark on seeds 42, 43 and 44 gives biases of
+−15.97, −15.08 and −11.50: a 4.5-point spread, and the row reported here is seed 42, the
+most pessimistic of the three. Any CDNOW comparison drawn within ~5 points of bias against
+this benchmark is not a result. Ranking is stable (Spearman 0.450, 0.457, 0.440), so the
+Spearman comparisons are unaffected.
 
-Measured cost, paired on three seeds, against the archived fits
-(`.scratch/pnbd-cdnow-replication/measure_window_shift.py`): correcting the age moves
-CDNOW's aggregate bias from −14.2% to −21.2% and electronics' from −63.1% to −64.4%. The
-effect is one period's worth of customer age, so it scales inversely with the calibration
-window — about 7 points on CDNOW's 39 weeks, about 1 on a 104-week panel. **Spearman is
-untouched** (CDNOW 0.449 → 0.441, electronics 0.304 → 0.312), so every ranking comparison
-in this document stands as written; only the level rows move, and they move *against* the
-benchmark, which already under-predicts.
+A fit is ~16 s, so replacing the CDNOW row with a seed distribution is five minutes of
+compute; it has not been done.
 
-Gift and multichannel were not measured; both are 104-week panels, so ~1 point is the
-expectation rather than a result. The code is unchanged pending a decision —
-`.scratch/pnbd-cdnow-replication/issues/01-pareto-calibration-age-off-by-one.md` has the
-mechanism, the blast radius (every Pareto/NBD number in the repo came through this one
-path), the one-line fix and why `scripts/validate_pareto_benchmark.py` cannot see it.
+For the record, the suspicion in `docs/pareto-nbd-cdnow-replication.md` §9(b) that the
+benchmark's forecast window is misaligned by one period **was investigated on 2026-09-17
+and is not true** — the model's clock is built from differences of week labels, so the
+within-week anchor cancels and the windows line up exactly. The residual discretisation
+effect is worth +0.36 points on CDNOW and does not hold its sign across seeds. Details and
+the measurement:
+`.scratch/pnbd-cdnow-replication/issues/01-pareto-weekly-discretisation-convention.md`.
+
+### A second caveat: every neural row here is undertrained
+
+**Measured 2026-09-20, `docs/training-budget.md`.** The ValendinLSTM and LSTM rows below
+come from models that stopped training while their validation loss was still falling. The
+median winning trial kept the weights from epoch 7–14; with early stopping switched off
+the same model keeps improving to epoch 88–247, and the validation cross-entropy it leaves
+behind is 3.4–5.3% on electronics, 1.4–4.4% on multichannel and 10.7–13.0% on CDNOW.
+
+The cause is that the training recipe here is not the reference notebook's: it trains at
+batch 32 with plain Adam for about 90 epochs — roughly 2,300 gradient updates — while a
+winner in this family receives about 32, because patience 7 stops small-batch trials
+before their advantage appears and the search space does not contain batch 32 at all.
+
+**This has now been tested** (family T, 20 September, 160 suites on vast.ai). On
+electronics, with the architecture, the inputs and the windows held exactly as below,
+training the frozen benchmark for the paper's own ~90 epochs instead of stopping at
+patience 7 gives:
+
+| | bias % | MAPE | Spearman |
+| --- | ---: | ---: | ---: |
+| as published here (reproduced as the control) | +39.8 ± 20.4 | 69.1 | 0.027 ± 0.043 |
+| trained to the paper's epoch count | −5.7 ± 27.0 | **46.8** | **0.177 ± 0.089** |
+
+As differences of condition means with 95% bootstrap intervals, 20 independent
+replications each: MAPE −22.3 (−28.2 to −16.2) and Spearman +0.150 (+0.108 to +0.191),
+against a refit floor of 3.63 MAPE and 0.0105 Spearman on this panel. The developed LSTM
+moves the same way on discrimination. Copying the notebook's optimizer, batch size and
+patience *without* the epoch count moves neither (both intervals span zero) — it is the
+training length, not the settings.
+
+**The cause is this package's own doing, not the published method.** Run under the
+paper's own customer-wise validation split, the same recipe trains 28-56 epochs on this
+same panel. It quits at epoch 1 under the temporal split ADR-0001 substitutes for it: a
+temporal window over a 98.6%-zero panel gains about 5.4×10⁻⁵ of cross-entropy an epoch,
+while `fit_model` requires an absolute 10⁻⁴ to count an epoch as an improvement — so the
+average epoch improves by half the threshold it must clear, and patience fires. The split is the right call for a forecasting
+evaluation; what nobody checked is what it did to the stopping rule bolted on beside it.
+
+So **the electronics rows below are a lower bound on what the architecture does, not a
+measurement of it**, and the collapse this document calls "the forecast collapse on long
+sparse panels" is substantially a training artefact on that panel. No number here has been
+restated or withdrawn: family T is a separate family, `archive` reproduces these rows, and
+whether they are regenerated under a training floor is decided in
+`.scratch/training-budget/issues/06-report-and-decide.md`.
+
+**All four panels, 21 September 2026** (family U, 640 suites, `docs/training-budget.md`
+§15). Per-customer Spearman for `ValendinLSTM`, 20 replications a cell, against the rows
+in this document:
+
+Δ is against family U's own `archive / no_cluster` control, with a 95% bootstrap interval
+over 20 replications; the panel's Spearman refit floor is 0.0105–0.0159.
+
+| panel | control | trained past the plateau | Δ (95% CI) | with a `kmeans_8` label | Δ (95% CI) | Pareto/NBD |
+| --- | ---: | ---: | :---: | ---: | :---: | ---: |
+| cdnow | 0.364 | 0.383 | +0.019 (−0.019, +0.065) | 0.403 | +0.039 (−0.003, +0.088) | 0.450 |
+| electronics | 0.021 | **0.178** | **+0.157 (+0.119, +0.193)** | **0.305** | **+0.283 (+0.265, +0.302)** | 0.297 |
+| gift | 0.349 | 0.280 | **−0.069 (−0.118, −0.027)** | 0.359 | +0.010 (−0.005, +0.026) | 0.383 |
+| multichannel | −0.004 | **0.119** | **+0.123 (+0.099, +0.148)** | **0.178** | **+0.182 (+0.162, +0.199)** | 0.189 |
+
+Three things follow for the rows below. **The collapse is closed on both panels where it
+occurred** — with both levers applied, electronics reaches 0.305 (interval 0.298 to 0.312,
+marginally above Pareto/NBD's single fit at 0.297) and multichannel 0.195 (0.187 to 0.204,
+interval containing 0.189) — and it took either a training floor or a per-customer input;
+stacking the two adds at most a few hundredths of Spearman, the order of an unseeded
+refit's own movement. **Neither lever is supported on cdnow or gift**, where the intervals
+span zero (and the floor is supported *negative* on gift). **The two panels that never collapsed gain nothing**, and a floor makes gift
+slightly worse. And **a training floor is not safe everywhere**: on CDNOW it triples the
+developed LSTM's MAPE (57.7 to 183.9, p = 10⁻⁴), though the frozen benchmark there is
+unharmed. So the undertraining caveat applies to the **electronics and multichannel rows**
+specifically, not to this document as a whole.
 
 ## Results
 
@@ -761,7 +829,13 @@ CDNOW — read the two together.
   at most 0.36 in magnitude. Against holdout Spearman it is at most 0.49.
 - **Why:** the search ranks trials by one-step cross-entropy on the validation window,
   but the forecast is a rollout of up to 52 weeks. Near-tied models get selected almost
-  at random and roll out very differently. This is the failure mode ADR-0003's
+  at random and roll out very differently. **`docs/training-budget.md` §15.3 sharpens
+  this**: measured over 80 electronics and 10 CDNOW studies, cross-entropy ranks trials
+  correctly where a study's trials genuinely differ (CDNOW, ρ = +0.472 against holdout
+  Spearman, where the worst-loss quartile misses by +99% bias) and wrong-signed where they
+  do not (electronics, ρ = −0.141 against holdout MAPE, where every trial lands in the
+  same narrow band). The two panels where selection works below are the two that never
+  collapsed, which is the same fact seen from the other side. This is the failure mode ADR-0003's
   rollout-based selection guarded against before it was retired (see
   `docs/insights-study.md` §4.2 and §5.4).
 - **Very early stopping is common on multichannel.** The best trial stopped at epoch 3
