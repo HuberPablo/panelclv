@@ -239,6 +239,11 @@ Four of the five unstopped runs reached a deep optimum at epoch 215–247 and sc
 35.9–56.0 with Spearman 0.08–0.17; the fifth never left epoch 11 and looks like a
 patience-7 run.
 
+> **Superseded by §9**, which runs the same comparison at n = 20 with the standard's Δ and
+> intervals. Read this section as the pilot that motivated it, not as evidence: five
+> replications, no interval, and the arms here are RNG-coupled (§7), so they are paired
+> where §9's are independent. Its direction held; its magnitudes moved.
+
 **Read MAPE and Spearman here, not bias.** `docs/benchmarks-real-panels.md` measures a
 refit noise floor on electronics of 8.9 points of sd — refitting one checkpoint twice
 moves aggregate bias by that much with everything else held fixed. The bias difference
@@ -308,18 +313,26 @@ every customer the same forecast (Spearman 0.032). Training length is part of th
 is the smaller part. Per-customer Spearman recomputed from the stored `Predictions/` of
 1,580 archived electronics studies:
 
-| what changes | Spearman |
-| --- | ---: |
-| no per-customer feature, patience 7 (archived benchmark) | 0.03 |
-| same inputs, trained to the validation optimum (§3) | 0.09 |
-| a `kmeans_8` cluster label added, patience 7 | **0.29** |
-| Pareto/NBD on the same panel | 0.30 |
+| what changes | Spearman | source |
+| --- | ---: | --- |
+| no per-customer feature, patience 7 (archived benchmark) | 0.03 | archive |
+| same inputs, trained to the paper's epoch count | **0.178** | §15.1, n = 20 |
+| a `kmeans_8` cluster label added, patience 7 | **0.305** | §15.1, n = 20 |
+| Pareto/NBD on the same panel | 0.297 | single fit |
+
+*(This table first reported 0.09 for the trained row, from §3's five-replication pilot.
+§15.1 measures 0.178 at n = 20 with an interval of +0.119 to +0.193 on the difference, so
+the trained row is roughly twice what the pilot suggested — which narrows the gap between
+the two levers without closing it.)*
 
 Within the studies that carry no cluster label (n = 40), more training still helps —
 Spearman correlates +0.33 with updates and +0.28 with best epoch — but it does not
 approach what one persistent per-customer input buys. That ordering matches
-`docs/insights-cluster-ablation.md` §5.1, and it is the honest summary: **the collapse is
-mostly an input problem with a training-length component, not the other way round.**
+`docs/insights-cluster-ablation.md` §5.1, and the honest summary is: **on electronics both
+levers are large, the input is the larger, and §15.1 measures the two crossed — stacking
+them adds at most a few hundredths.** An earlier version of this line called the collapse
+"mostly an input problem with a training-length component"; at 0.178 against 0.305 that
+understates the training half.
 
 On CDNOW, which never collapsed, training length has no relationship with ranking at all
 (Spearman flat at ~0.40 across every quartile of best epoch) — even though CDNOW is the
@@ -358,6 +371,11 @@ order, and say which. Measurement:
 `.scratch/training-budget/issues/05-measure-seed-coupling.md`.
 
 ## 8. What this does not establish
+
+**Scope: §1–§7.** Written before the experiments, and three of these limits were later
+lifted — §9 replaces the five replications with twenty and an interval, and §15 takes the
+forecast comparison to all four panels. The last two still stand. The document's current
+limits are in the closing **To do** section, §D.
 
 - **One hyperparameter setting.** §2 and §3 fix learning rate, weight decay and batch size
   at one archived winner's values. A search allowed to train longer might select
@@ -454,8 +472,9 @@ better of the two on level (LSTM bias +0.3 ± 18.2 against `archive`'s +30.4).
 
 Inputs still dominate ranking. A `kmeans_8` cluster label reaches Spearman 0.27
 (`docs/insights-cluster-ablation.md` §5.1) and Pareto/NBD 0.297, against 0.177 here; §6's
-ordering holds, with training length worth more than it looked at five replications (0.09)
-and still less than one persistent per-customer channel.
+ordering holds, with training length worth more than it looked at five replications
+(0.178 at n = 20 against the pilot's 0.09) and still less than one persistent
+per-customer channel.
 
 RMSE separates nothing, as everywhere on these panels: every arm sits between 0.3763 and
 0.3774 against the all-zero forecast's 0.3775.
@@ -526,26 +545,38 @@ temporal window over a 98.6%-zero panel the curve is flat from epoch 1 and patie
 immediately. Every neural result in this repository was trained under that combination.
 
 **And a contribution, stated narrowly.** Combining this architecture with a temporally
-honest validation split requires a training floor — or a different stopping criterion —
-or the model stops after the first large adjustment and never reaches the long, slow
-refinement that the forecast depends on — §13.2 measures that first epoch moving
+honest validation split **can** require a training floor — or a different stopping
+criterion — or the model stops after the first large adjustment and never reaches the long,
+slow refinement that the forecast depends on — §13.2 measures that first epoch moving
 validation CE from 0.1303 to 0.0935, so it is emphatically not stuck at its
 initialisation. On electronics the floor is worth 22 MAPE points and a sevenfold increase in per-customer rank correlation, at 20 replications per
 arm, on a benchmark whose architecture, inputs and windows are otherwise untouched. That
 is a result about *applying* Valendin et al.'s model under a stricter evaluation protocol,
 not about their model.
 
-The thesis claim this supports is therefore: **the published LSTM's weak per-customer
-discrimination on sparse retail panels is substantially an artefact of how it was trained
-here, and the training protocol has to be re-derived when the validation split changes.**
-It is one panel; §12 says what is still owed.
+The thesis claim this supports is therefore, stated as narrowly as the evidence allows:
+**on our electronics and multichannel panels, the weak per-customer discrimination
+observed when the published LSTM architecture is applied under this package's temporal
+split is substantially an artefact of how the model was trained here, and the training
+protocol has to be re-derived when the validation split changes.**
+
+Three limits on that sentence, all measured. It names *our* panels and *our* protocol, not
+Valendin et al.'s results. It names two panels, because §15.1 found the floor doing nothing
+on cdnow and actively worsening discrimination on gift — so "sparse retail panels" as a
+class is not a thing this document may say. And the re-derivation claim is about the
+*need* for one, not about the floor being the right answer: §13.3's principled
+alternatives are all untested.
 
 ## 12. What this changes
 
-1. **`min_epochs` should become the default, not an opt-in** — a floor of 50 with the
-   existing search is a strict improvement on both models here, and every model in the
-   package except the benchmark has no published recipe to fall back on. The floor is a
-   patch, though: the real problem (§13.2) is an absolute 10⁻⁴ improvement threshold
+1. **`min_epochs` earns its place on electronics, and must not become an unconditional
+   default** — a floor of 50 with the existing search improves both models *on this
+   panel*, and every model in the package except the benchmark has no published recipe to
+   fall back on. **§15.1 and §15.2 then measured it on the other three and it does not
+   transfer**: no detectable effect on cdnow, a *supported worsening* on gift (Δ Spearman
+   −0.069, −0.118 to −0.027), and a threefold MAPE blow-up in the floored arm on cdnow's
+   LSTM whose cause is not yet identified (E1). This item said "should become the default,
+   not an opt-in" before those panels were run. The floor is also a patch: the real problem (§13.2) is an absolute 10⁻⁴ improvement threshold
    applied to a curve that gains 5.4×10⁻⁵ an epoch. A stopping criterion that suits
    that curve — a relative improvement threshold, or selection on the rollout
    (`docs/insights-study.md` §5.4) — would be the principled fix, and is untested.
@@ -553,9 +584,11 @@ It is one panel; §12 says what is still owed.
    70.8 against 46.8 on the same architecture and inputs. Whether family N is re-run under
    a floor is an ADR-level decision, taken in
    `.scratch/training-budget/issues/06-report-and-decide.md`.
-3. **The other three panels are untested.** CDNOW leaves the most validation loss on the
-   table (10.7-13.0%, §2) and is the panel whose ranking never collapsed, so it is the one
-   that says whether this generalises or is an electronics story.
+3. ~~**The other three panels are untested.**~~ **Tested in §15**, and the answer is
+   heterogeneity rather than generalisation: the floor helps decisively on electronics and
+   multichannel, does nothing on cdnow and hurts on gift. It is an electronics-and-
+   multichannel story, and this document does not claim it is a property of sparse panels
+   as a class.
 4. **Adding batch 32 to the registry's search space is not the follow-up.** `paper` settles
    that: at patience 7 the search would still stop it early, and at a floor the batch size
    is not what is doing the work.
