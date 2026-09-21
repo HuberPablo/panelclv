@@ -241,10 +241,14 @@ simply training the same no-label model to the reference paper's epoch count rea
 persistent per-customer channel lifts it" is not the whole story: *enough training* lifts
 it too, and the archived 0.039 was measured on a model that stopped at epoch 8.
 
-**They do not add.** Crossing the two leaves the label's ceiling untouched in seven of
-eight cells (p = 0.23 to 0.97). The label and the training budget are substitutes for
-one another, not complements, and the ceiling is a property of the architecture rather
-than of either lever.
+**Crossing them adds little, and the increment is bounded.** Adding the floor on top of
+the label moves Spearman by +0.001 to +0.018 depending on the cell, with 95% bootstrap
+intervals spanning zero in seven of eight and ruling out a gain larger than about +0.035
+anywhere — the order of what an unseeded refit moves on its own
+(`docs/training-budget.md`, "How claims are made"). One cell, multichannel/ValendinLSTM,
+does show a supported increment of +0.018. So the label and the training budget overlap
+heavily; whether anything beyond them is reachable is untested, and an apparent plateau is
+not an established ceiling.
 
 ### 5.2 They rescue the unbounded counters, on one panel
 

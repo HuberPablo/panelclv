@@ -81,7 +81,9 @@ epoch 28-56), in the same range as the ~90 it reports on its banking data
 So the finding is not that Valendin et al.'s protocol is wrong. It is that **this
 package's temporal validation split (ADR-0001) and the paper's patience rule do not work
 together**: a temporal window over a 98.6%-zero panel is flat from epoch 1, and
-`min_delta=0` patience reads flat as converged. Every neural result in the repository was
+a patience rule with an absolute 10⁻⁴ improvement threshold reads a curve gaining
+5.4×10⁻⁵ an epoch as converged (`docs/training-budget.md` §13.2; `min_delta=0` is the
+notebook's Keras setting, not ours). Every neural result in the repository was
 trained under that combination.
 
 That makes a fifth decision, and it outranks decision 1:

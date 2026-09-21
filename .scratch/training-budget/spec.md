@@ -27,7 +27,7 @@ split (ADR-0001), the ADR-0008 refit, 200 Monte Carlo paths, seeds 43–62, cros
 | --- | --- | --- |
 | `archive` | today's settings: lr / weight decay / batch searched, `patience=7`, `n_epochs=100`, 100 trials | the control — reproduces family N, which also gave this panel 100 trials |
 | `paper` | the notebook's recipe, pinned, 1 trial: `lr=1e-3`, `weight_decay=0.0`, `batch_size=32`, `patience=5`, `n_epochs=150` | the literal reading of the paper, with no hyperparameter selection at all |
-| `paper90` | the same, plus `min_epochs=90` | the paper's recipe trained for the paper's ~90 epochs. Measured before launch: `paper` alone stops at epoch 1 here (see `issues/01`), so it copies the settings without copying the training |
+| `paper90` | the same, plus `min_epochs=90` | the paper's recipe trained for the paper's ~90 epochs. Measured before launch: `paper` alone keeps the checkpoint from epoch 1 here, terminating after 7 (see `issues/01`), so it copies the settings without copying the training |
 | `floor50` | `archive`'s search plus `min_epochs=50`, `n_epochs=300`, 100 trials | whether a warm-up floor recovers the same ground while keeping the search — the only option open to models with no published recipe |
 
 Four arms x two models x 20 replications = **160 suites**.

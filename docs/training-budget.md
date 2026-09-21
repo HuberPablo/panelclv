@@ -12,20 +12,126 @@ paper we reproduce uses: the notebook trains at batch 32 with plain Adam for abo
 epochs, roughly 2,300 gradient updates, and our benchmark winners receive about 32. §4 is
 that comparison, and the rest of the document is the evidence that it matters.
 
-**Tested, §9.** On electronics, 20 replications per arm: training the frozen benchmark for
-the paper's own 90 epochs takes MAPE from 69.1 to 46.8 and per-customer Spearman from
-0.027 to 0.177 (p ≈ 2×10⁻⁶ on both). Copying the paper's *settings* without the epochs
-changes nothing. The published electronics collapse is substantially a training artefact.
+**Tested, §9.** On electronics, 20 independent replications per arm: training the frozen
+benchmark for the paper's own 90 epochs moves MAPE by −22.3 (95% CI −27.0 to −17.7) and
+per-customer Spearman by +0.150 (95% CI +0.114 to +0.186). Copying the paper's *settings*
+without the epochs moves neither. **The electronics collapse reported in
+`docs/benchmarks-real-panels.md` is substantially a training artefact** — that row is
+ours, not a published result of Valendin et al.
 
-**And §10 finds why, which is not what §4 assumed.** The paper's stopping rule works fine
-under the paper's own customer-wise split on this same panel (28-56 epochs). It quits at
-epoch 1 under the temporal split this package substitutes for it (ADR-0001). The defect is
+**And §10 finds why, which is not what §4 assumed.** The paper's stopping rule keeps the
+checkpoint from epoch 1 here, terminating after 7 epochs; under the paper's own
+customer-wise split on this same panel it keeps epoch 28–56 and runs 34–62. The defect is
 in the combination — our split with their stopping rule — not in either alone, and §11
 states what that does and does not let the thesis claim.
 
 Everything below was measured on 2026-09-20: the archive numbers by reading `Studies/`,
 the rest by re-running the frozen benchmark with the project venv on the ROCm
 workstation. The scripts are in `.scratch/training-budget/` and are named at each step.
+
+---
+
+## Claims register
+
+What this document currently asserts, how strongly, and where the evidence is. **Status**
+is `established` (a 95% bootstrap CI on the difference excludes zero, or the observation
+is a direct measurement), `bounded` (an effect that is real only within a stated
+interval, or absent to within a stated margin), `retracted`, or `not identified` (the
+experiment cannot separate the cause claimed). Every row names the panel it was measured
+on; none generalises.
+
+| # | claim | type | panel | metric | status | § |
+| ---: | --- | --- | --- | --- | --- | ---: |
+| 1 | Patience, not the epoch budget, ends every archived run | descriptive | all four | — | established | 1 |
+| 2 | With early stopping off, validation CE keeps falling to epoch 88–247 | mechanism | cdnow, electronics, multichannel (n=3) | val CE | established | 2 |
+| 3 | The reference notebook's training recipe differs from ours on five settings | descriptive | — | — | established | 4 |
+| 4 | Under patience 7 the search prefers the batch size that trains least | descriptive | electronics | val CE | established | 5 |
+| 5 | Training to the paper's epoch count improves level and discrimination | superiority | electronics | MAPE, Spearman | established | 9 |
+| 6 | The paper's settings without the floor change nothing | bounded | electronics | MAPE, Spearman | bounded | 9 |
+| 7 | The paper's rule stops early under our split and not under theirs | mechanism | electronics (n=3) | epochs | established | 10 |
+| 8 | The temporal curve gains 5.4×10⁻⁵/epoch against a 10⁻⁴ threshold | mechanism | electronics (n=1/split) | val CE | established | 13.2 |
+| 9 | Validation CE is wrong-signed against the holdout | superiority | electronics (80 studies) | MAPE, \|bias\| | established | 14.1 |
+| 10 | A validation rollout ranks trials better than CE, and lands on zero | bounded | electronics | MAPE | bounded | 14.3 |
+| 11 | A composite of three criteria is worse than whichever matches the target | descriptive | electronics | Spearman | established | 14.3 |
+| 12 | *The wrong sign comes from a calibration/holdout rate shift* | mechanism | — | — | **retracted** | 14.2, 15.3 |
+| 13 | CE selects well where a study's trials differ and badly where they do not | mechanism | cdnow, electronics | — | established | 15.3 |
+| 14 | A cluster label improves discrimination | superiority | all four, separately | Spearman | established | 15.1 |
+| 15 | A training floor improves discrimination | superiority | electronics, multichannel | Spearman | established | 15.1 |
+| 16 | A training floor has no detectable effect on discrimination | descriptive | cdnow | Spearman | established | 15.1 |
+| 16b | A training floor **worsens** discrimination | superiority (negative) | gift | Spearman | established | 15.1 |
+| 17 | Adding the floor on top of the label adds nothing beyond ±0.012 | bounded | electronics | Spearman | bounded | 15.1 |
+| 18 | The floored paper-recipe arm triples CDNOW's LSTM error | superiority (negative) | cdnow | MAPE | established | 15.2 |
+| 18b | *…and the floor is what causes it* | mechanism | cdnow | MAPE | **not identified** (E1) | 15.2 |
+| 19 | The best cell reaches approximately Pareto/NBD's Spearman | bounded | electronics, multichannel | Spearman | bounded | 15.1 |
+| 20 | The replication RNG coupling does not reach the archive | mechanism | all four | val CE | established | 7 |
+
+## How claims are made
+
+The standard the rest of this document is held to. It was written after §15, which is why
+several rows above are `bounded` rather than `established`: they were stated more strongly
+before there was a standard to state them against.
+
+**One metric per claim.** Per-customer Spearman is the primary metric for claims about
+customer-level discrimination. Aggregate MAPE is the primary metric for claims about
+level accuracy. Bias is a secondary calibration diagnostic, used as \|bias\| when comparing
+calibration accuracy, and it supports a directional claim only when the effect clearly
+exceeds its refit variability. RMSE is reported for completeness and supports no ranking
+claim: under these panels' sparsity every arm sits within 0.004 of the all-zero forecast.
+
+**Effects are differences, reported with an interval.** Run *n* independent replications
+per condition (*n* = 20 throughout). Report Δ = M̄_B − M̄_A with a **95% bootstrap
+confidence interval** for that difference. **A result is statistically supported when the
+interval excludes zero.** That is the whole criterion; a p-value may appear as
+supplementary colour but is not the test. One implementation computes every effect in this
+document: `.scratch/training-budget/effects.py`.
+
+**The refit floor is a magnitude reference, not a second threshold.** Refit the same
+checkpoint a second time, change nothing else, and the forecast still moves. Measured over
+the 80 archived family-N winners paired with their re-scored refits
+(`.scratch/training-budget/refit_floor.py`):
+
+| panel | MAPE | bias % | Spearman | RMSE |
+| --- | ---: | ---: | ---: | ---: |
+| cdnow | 5.83 | 12.58 | 0.0159 | 0.00036 |
+| electronics | 3.63 | 5.94 | 0.0105 | 0.00014 |
+| gift | 5.89 | 14.99 | 0.0116 | 0.00009 |
+| multichannel | 7.71 | 12.56 | 0.0152 | 0.00003 |
+
+This is printed beside every effect so a reader can see whether Δ is large or small
+relative to what an unseeded refit moves on its own. It never adds a significance hurdle:
+an effect whose interval excludes zero but whose Δ sits under the floor is supported and
+small, and is described that way.
+
+**Equivalence needs a margin, named first.** The refit floor is the natural one, since an
+equivalence margin is by definition a practical-magnitude reference. The claim is made
+when the 95% CI of Δ lies entirely inside ±margin, and is always worded as "no difference
+larger than ±m is detectable at n = 20" — never "no difference". Using the 95% interval
+rather than the conventional 90% TOST interval is deliberately conservative and keeps one
+convention in the document.
+
+**Generalisation is not claimed; disagreement between panels is heterogeneity.** Every
+result is stated for the panel it was measured on. Where panels disagree — and §15.1 is
+mostly disagreement — that is reported as heterogeneity to be explained, never averaged
+into a claim about panels as a class. The panels differ in ways that plausibly matter:
+
+| panel | customers | T_CAL / T_HOLD | zero cells | holdout tx | tx per customer | holdout/calibration rate | collapses? |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
+| cdnow | 2,357 | 39 / 39 | 98.0% | 1,895 | 0.80 | 0.40 | no |
+| electronics | 829 | 104 / 52 | 98.6% | 1,467 | 1.77 | 0.63 | **yes** |
+| gift | 2,062 | 104 / 52 | 99.0% | 1,146 | 0.56 | 0.54 | no |
+| multichannel | 1,402 | 104 / 52 | 99.7% | 228 | 0.16 | 0.23 | **yes** |
+
+**No measured characteristic yet predicts which panels collapse.** Electronics is *less*
+sparse than gift and has the most holdout transactions per customer, and it collapses
+while gift does not. A reader may form hypotheses from this table; this document does not
+assert one.
+
+**Seeding protocol**, because "independent replications" is the load-bearing assumption
+above. Within a worker, replication *r*'s forecast seeds the RNG entering replication
+*r+1*'s training (§7); work lists are arm-major and strided across workers, so two arms at
+the same replication index land at different positions on different machines and are **not
+paired**. Conditions are therefore compared as independent samples, which is what the
+bootstrap resamples. The archive-wide check found 0 exact repeats across 3,020 suites.
 
 ## Contents
 
@@ -38,12 +144,12 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 7. [An unrelated finding: the forecast seeds the next replication's training](#7-an-unrelated-finding-the-forecast-seeds-the-next-replications-training)
 8. [What this does not establish](#8-what-this-does-not-establish)
 9. [The experiment, and what it showed](#9-the-experiment-and-what-it-showed)
-10. [Why the paper's rule stops at epoch 1 here: the split, not the panel](#10-why-the-papers-rule-stops-at-epoch-1-here-the-split-not-the-panel)
+10. [Why the paper's rule keeps epoch 1 here: the split, not the panel](#10-why-the-papers-rule-keeps-epoch-1-here-the-split-not-the-panel)
 11. [What this is, relative to Valendin et al.](#11-what-this-is-relative-to-valendin-et-al)
 12. [What this changes](#12-what-this-changes)
 13. [What to try next: keep the temporal split, fix what it feeds](#13-what-to-try-next-keep-the-temporal-split-fix-what-it-feeds)
 14. [The selection test: cross-entropy is worse than useless, and nothing else is good](#14-the-selection-test-cross-entropy-is-worse-than-useless-and-nothing-else-is-good)
-15. [Family U: the two levers are substitutes, and one of them is dangerous](#15-family-u-the-two-levers-are-substitutes-and-one-of-them-is-dangerous)
+15. [Family U: crossing the two levers adds little, and one of them may be dangerous](#15-family-u-crossing-the-two-levers-adds-little-and-one-of-them-may-be-dangerous)
 
 ---
 
@@ -301,25 +407,37 @@ replications on electronics, 100 trials for the searched arms, 200 Monte Carlo p
 | `paper90` | +31.1 ± 31.7 | 54.7 | 0.174 ± 0.075 | 0.56 |
 | **`floor50`** | **+0.3 ± 18.2** | **50.1** | 0.074 ± 0.049 | 0.19 |
 
-Each arm against `archive`, Mann-Whitney, 20 vs 20:
+Each arm against `archive`, as Δ of condition means with a 95% bootstrap CI, 20
+independent replications each. Electronics' refit floor is 3.63 MAPE and 0.0105 Spearman.
 
-| model | arm | MAPE | p | Spearman | p |
-| --- | --- | ---: | ---: | ---: | ---: |
-| ValendinLSTM | `paper` | 68.5 | 0.76 | 0.016 | 0.70 |
-| | `paper90` | 46.8 | **2×10⁻⁶** | 0.177 | **5×10⁻⁶** |
-| | `floor50` | 47.9 | **1×10⁻⁶** | 0.168 | **1×10⁻⁵** |
-| LSTM | `paper` | 63.5 | 0.15 | 0.020 | 0.20 |
-| | `paper90` | 54.7 | 0.10 | 0.174 | **2×10⁻⁶** |
-| | `floor50` | 50.1 | **1×10⁻⁴** | 0.074 | **2×10⁻³** |
+| model | arm | Δ MAPE | 95% CI | Δ Spearman | 95% CI |
+| --- | --- | ---: | :---: | ---: | :---: |
+| ValendinLSTM | `paper` | −0.6 | −6.3 to +5.0 | −0.011 | −0.034 to +0.011 |
+| | `paper90` | **−22.3** | **−28.2 to −16.2** | **+0.150** | **+0.108 to +0.191** |
+| | `floor50` | **−21.2** | **−26.8 to −15.6** | **+0.141** | **+0.099 to +0.180** |
+| LSTM | `paper` | +4.3 | −0.3 to +9.0 | −0.011 | −0.034 to +0.012 |
+| | `paper90` | −4.5 | −12.9 to +4.5 | **+0.144** | **+0.105 to +0.180** |
+| | `floor50` | **−9.2** | **−13.4 to −4.5** | **+0.043** | **+0.014 to +0.071** |
+
+Bold rows are the supported ones — interval excludes zero. Two readings the earlier
+p-value version of this table obscured: **the LSTM's level gain under `paper90` is not
+supported** (−4.5, interval spanning zero), and **the LSTM's discrimination gain under
+`floor50`, though supported, is +0.043 against a refit floor of 0.0105** — real, and four
+times the noise rather than fourteen times it as for the benchmark.
 
 **Three things follow, and the first is the one to remember.**
 
 **The settings were never the point; the epochs were.** `paper` — the notebook's optimizer,
 batch size and patience, pinned exactly — is indistinguishable from `archive` on every
-metric (p = 0.15 to 0.76), because it stops at epoch 1: copying the recipe copies its
-stopping rule, and that rule quits immediately here (§10 shows why). Add the floor and
+metric, because it keeps the checkpoint from **epoch 1** and terminates after 7:
+copying the recipe copies its stopping rule, and that rule quits immediately here (§10
+shows why). Best epoch and stop epoch are not the same number — §1 — and the one that
+matters for how much training happened is the 7. Add the floor and
 the same recipe cuts MAPE by 22 points and multiplies the ranking correlation by seven.
-**Batch 32 is not the fix; 90 epochs is.**
+**Batch 32 is not the fix. Training past the early plateau is** — and *what* should be
+held fixed is open: `paper90` gets there with ~2,300 updates at batch 32 while `floor50`
+gets there with a few hundred at batch 256, so neither epochs nor gradient updates is a
+clean invariant. §5's argument points at an optimizer-step budget; it is untested.
 
 **The forecast collapse on electronics is substantially a training artefact.** The frozen
 benchmark's published row (MAPE 70.8, Spearman 0.032) reproduces as `archive`; trained to
@@ -346,9 +464,10 @@ Bias moves a lot and means less: `paper90`'s −5.7 ± 27.0 is a better centre t
 `archive`'s +39.8 ± 20.4, but the across-replication spread grows and the refit noise floor
 on this panel is 8.9 points of sd (§3). Read MAPE and Spearman.
 
-## 10. Why the paper's rule stops at epoch 1 here: the split, not the panel
+## 10. Why the paper's rule keeps epoch 1 here: the split, not the panel
 
-`paper` stopping at epoch 1 has two possible causes, and they point in opposite
+`paper` keeping the checkpoint from epoch 1 — it runs 7 and rolls back — has two
+possible causes, and they point in opposite
 directions. Either the panel's validation curve is flat from the start — in which case the
 published protocol does not transfer to sparse retail data — or **our** validation split
 makes it flat, in which case the fault is ours.
@@ -371,11 +490,20 @@ identical recipe quits at epoch 1.
 
 So the mechanism is an **interaction**, not a defect in the published method: a temporal
 validation window over all customers gives a much flatter early curve than a held-out
-slice of customers does, and `min_delta=0` patience reads that flatness as convergence.
-This package departs from the paper's split deliberately and documents why — a customer-wise
-split leaks time, and the thing being forecast is the future — but nothing checked what
-that departure did to the stopping rule bolted on beside it. It quietly cost most of the
-training.
+slice of customers does, and a patience rule reads that flatness as convergence. §13.2
+measures exactly how: the temporal curve gains 5.4×10⁻⁵ per epoch on average while
+`fit_model` requires **10⁻⁴** to count an epoch as an improvement
+(`loop.py`, `improved = (val_loss + 1e-4) < best_val_loss`), so the average epoch improves
+by half the threshold it must clear. (`min_delta=0` is the *notebook's* Keras setting, not
+ours; an earlier draft of this section attributed it to our loop.)
+This package departs from the paper's split deliberately and documents why: a
+customer-wise split scores the same calendar periods the model trained on, so it measures
+generalisation across the cross-section rather than across time, and the thing being
+forecast is the future (ADR-0001). **It is not a leak** — both splits stay inside the
+calibration window and neither touches the holdout; §13.1 states this correctly and an
+earlier draft of this paragraph said "leaks time", which was wrong. What nobody checked is
+what the departure did to the stopping rule bolted on beside it. It quietly cost most of
+the training.
 
 *(`.scratch/training-budget/paper_split_check.py`)*
 
@@ -399,8 +527,10 @@ immediately. Every neural result in this repository was trained under that combi
 
 **And a contribution, stated narrowly.** Combining this architecture with a temporally
 honest validation split requires a training floor — or a different stopping criterion —
-or the model never leaves its initialisation. On electronics that floor is worth 22 MAPE
-points and a sevenfold increase in per-customer rank correlation, at 20 replications per
+or the model stops after the first large adjustment and never reaches the long, slow
+refinement that the forecast depends on — §13.2 measures that first epoch moving
+validation CE from 0.1303 to 0.0935, so it is emphatically not stuck at its
+initialisation. On electronics the floor is worth 22 MAPE points and a sevenfold increase in per-customer rank correlation, at 20 replications per
 arm, on a benchmark whose architecture, inputs and windows are otherwise untouched. That
 is a result about *applying* Valendin et al.'s model under a stricter evaluation protocol,
 not about their model.
@@ -415,9 +545,9 @@ It is one panel; §12 says what is still owed.
 1. **`min_epochs` should become the default, not an opt-in** — a floor of 50 with the
    existing search is a strict improvement on both models here, and every model in the
    package except the benchmark has no published recipe to fall back on. The floor is a
-   patch, though: §10 says the real problem is that a patience rule with `min_delta=0`
-   reads a flat temporal-validation curve as convergence. A stopping criterion that suits
-   that curve — a relative `min_delta`, or selection on the rollout
+   patch, though: the real problem (§13.2) is an absolute 10⁻⁴ improvement threshold
+   applied to a curve that gains 5.4×10⁻⁵ an epoch. A stopping criterion that suits
+   that curve — a relative improvement threshold, or selection on the rollout
    (`docs/insights-study.md` §5.4) — would be the principled fix, and is untested.
 2. **The published electronics rows are undertrained**, and by more than a footnote: MAPE
    70.8 against 46.8 on the same architecture and inputs. Whether family N is re-run under
@@ -631,18 +761,18 @@ and the spread of the holdout forecast tracks holdout MAPE at +0.795.
 
 ### 14.3 The candidates beat it, and none of them is good
 
-| target | criterion | mean rho | beats val CE | paired p |
+Paired over the same 80 studies, so these are Δ of within-study rank correlation against
+validation CE, with a 95% bootstrap CI on the paired difference:
+
+| target | criterion | mean rho | Δ vs val CE | 95% CI of Δ |
 | --- | --- | ---: | ---: | ---: |
-| holdout MAPE | val rollout MAPE | **+0.033** | 66/80 | 6×10⁻⁸ |
-| | val rollout Spearman | −0.012 | 56/80 | 3×10⁻⁴ |
-| | composite of three | −0.069 | 52/80 | 0.02 |
-| | val rollout \|bias\| | −0.176 | 38/80 | 0.37 |
-| holdout \|bias\| | best epoch (longer better) | **−0.009** | 66/80 | 9×10⁻¹⁰ |
-| | val rollout Spearman | −0.015 | 63/80 | 1×10⁻⁸ |
-| | val rollout MAPE | −0.113 | 61/80 | 7×10⁻⁸ |
-| holdout Spearman | val rollout Spearman | **+0.128** | 46/80 | 0.07 |
-| | composite of three | +0.039 | 38/80 | 0.71 |
-| | val rollout MAPE | −0.056 | 24/80 | 3×10⁻⁴ (**worse**) |
+| holdout MAPE | val rollout MAPE | **+0.033** | **+0.174** | +0.124 to +0.228 |
+| | val rollout Spearman | −0.012 | **+0.129** | +0.058 to +0.196 |
+| | composite of three | −0.069 | **+0.072** | +0.005 to +0.137 |
+| | val rollout \|bias\| | −0.176 | −0.035 | −0.106 to +0.037 |
+| holdout Spearman | val rollout Spearman | **+0.128** | **+0.083** | +0.013 to +0.159 |
+| | composite of three | +0.039 | −0.006 | −0.062 to +0.054 |
+| | val rollout MAPE | −0.056 | **−0.101** | −0.156 to −0.037 (**worse**) |
 
 Three things to take from this.
 
@@ -680,7 +810,7 @@ you are reporting, or pick one metric and own it** — do not average them and h
    for the reason given: no panel has a holdout rate above its calibration rate. The real
    discriminator is whether a study's trials differ from each other at all.
 
-## 15. Family U: the two levers are substitutes, and one of them is dangerous
+## 15. Family U: crossing the two levers adds little, and one of them may be dangerous
 
 §13 and §14 each moved one lever from the same floor and neither knew what the other was
 doing. Family U crosses them: **training** (`archive` = patience 7 and the 100-trial
@@ -689,7 +819,7 @@ search, against `floored` = the paper's recipe pinned with `min_epochs=90` and o
 replications a cell. 640 suites on vast.ai, 21 September 2026, $1.68.
 `scripts/run_factorial.py`; tests by `.scratch/training-budget/factorial_analysis.py`.
 
-### 15.1 Ranking: the label does the work, and the floor adds nothing on top of it
+### 15.1 Ranking: the label does most of the work, and the floor adds little on top of it
 
 Per-customer Spearman, mean over 20 replications:
 
@@ -704,21 +834,52 @@ Per-customer Spearman, mean over 20 replications:
 | multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.189 |
 | | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
 
-**They do not add.** In seven of the eight cells the crossed cell is statistically
-indistinguishable from the cluster label alone (p = 0.23 to 0.97); only multichannel's
-LSTM gains significantly, and by 0.014 (p = 0.03). The label reaches the ceiling by
-itself, the floor reaches a little over half of it by itself, and together they reach the
-label's ceiling and stop.
+**Crossing them adds little, and how little is now bounded.** Δ from adding the floor on
+top of the label, 95% bootstrap CI, 20 replications a cell, beside that panel's Spearman
+refit floor:
 
-**On the two collapsed panels the floor is nevertheless a large effect on its own** —
-electronics 0.021 → 0.178 (p = 8×10⁻⁷), multichannel −0.004 → 0.119 (p = 7×10⁻⁸) — which
-matters because it needs no extra input. It is the fix available when no cluster label is
-allowed; it is not the better of the two.
+| panel | model | Δ | 95% CI | supported | refit floor |
+| --- | --- | ---: | :---: | :---: | ---: |
+| cdnow | ValendinLSTM | +0.003 | −0.024 to +0.033 | no | 0.0159 |
+| | LSTM | +0.004 | −0.014 to +0.024 | no | |
+| electronics | ValendinLSTM | +0.001 | −0.010 to +0.012 | no | 0.0105 |
+| | LSTM | +0.013 | −0.005 to +0.035 | no | |
+| gift | ValendinLSTM | +0.005 | −0.005 to +0.014 | no | 0.0116 |
+| | LSTM | +0.003 | −0.005 to +0.011 | no | |
+| multichannel | ValendinLSTM | **+0.018** | **+0.004 to +0.035** | **yes** | 0.0152 |
+| | LSTM | +0.014 | −0.003 to +0.031 | no | |
+
+So: **in one of eight cells the increment is supported, and everywhere the interval rules
+out a gain larger than about +0.035** — the same order as what an unseeded refit moves on
+its own. That is the honest statement, and it is weaker than "they do not add": a
+non-significant difference is not an established absence, and only gift/LSTM meets the
+equivalence margin outright. The label reaches most of what is reachable by itself, the
+floor reaches a little over half of it by itself, and stacking them buys at most a few
+hundredths.
+
+**On its own the floor is a large effect on two panels, nothing on one, and negative on
+another** — Δ Spearman from adding the floor with no label, ValendinLSTM:
+
+| panel | Δ | 95% CI | supported | refit floor |
+| --- | ---: | :---: | :---: | ---: |
+| electronics | **+0.157** | +0.119 to +0.193 | yes | 0.0105 |
+| multichannel | **+0.123** | +0.099 to +0.148 | yes | 0.0152 |
+| cdnow | +0.019 | −0.019 to +0.065 | no | 0.0159 |
+| gift | **−0.069** | −0.118 to −0.027 | yes (**worse**) | 0.0116 |
+
+That heterogeneity is the result, not a nuisance to average away: the same intervention
+helps decisively on two panels, does nothing on a third and **hurts** on the fourth. It
+matters because it needs no extra input — it is the fix available when no cluster label
+is allowed — but it is not the better of the two, and it is not safe everywhere.
 
 **Against the statistical benchmark, the collapse is closed and nothing more.** On the two
-panels where the neural model collapsed it now matches Pareto/NBD (electronics 0.305 vs
-0.297, multichannel 0.195 vs 0.189). On the two where it never collapsed it remains behind
-(cdnow 0.406 vs 0.450, gift 0.363 vs 0.383). One caveat belongs beside every one of those
+panels where the neural model collapsed it reaches approximately the same Spearman:
+electronics 0.305 (95% CI 0.298 to 0.312) against Pareto/NBD's 0.297, multichannel 0.195
+(0.187 to 0.205) against 0.189. **No equivalence test is available**, because Pareto/NBD
+is a single deterministic fit with no interval of its own, so "approximately the same" is
+as far as this goes — not "matches", and not "beats". On the two panels that never
+collapsed it remains clearly behind (cdnow 0.406 against 0.450, gift 0.363 against
+0.383). One caveat belongs beside every one of those
 comparisons: `kmeans_8` is k-means over the Pareto/NBD sufficient statistics, so the cell
 that draws level has been handed the benchmark's own summary.
 
@@ -726,23 +887,37 @@ that draws level has been handed the benchmark's own summary.
 
 Aggregate MAPE, same cells:
 
-| panel | model | archive / no_cluster | floored / no_cluster | p |
-| --- | --- | ---: | ---: | ---: |
-| multichannel | LSTM | 140.9 | **52.8** | 3×10⁻⁷ |
-| multichannel | ValendinLSTM | 84.9 | **56.0** | 1×10⁻⁶ |
-| electronics | ValendinLSTM | 69.1 | **46.3** | 5×10⁻⁷ |
-| electronics | LSTM | 56.9 | 51.7 | 0.11 |
-| gift | ValendinLSTM | 32.2 | 28.9 | 0.24 |
-| gift | LSTM | 30.3 | 29.9 | 0.92 |
-| cdnow | ValendinLSTM | 51.7 | 56.5 | 0.97 |
-| **cdnow** | **LSTM** | **57.7** | **183.9** | **1×10⁻⁴** |
+Δ MAPE from the floored arm against `archive`, no cluster label, 95% bootstrap CI:
 
-**The floor triples CDNOW's LSTM error.** That is the single most important line in this
-document for anyone about to act on §12: a 90-epoch floor on a 39-week calibration window
-overfits a model that then extrapolates catastrophically, and CDNOW is exactly the panel
-`run_real_panel_arms.py` already flags for unbounded extrapolation. The frozen benchmark
-on the same panel is unharmed (51.7 → 56.5, p = 0.97), so it is the interaction of a long
-floor with the developed model's engineered calendar on a short window.
+| panel | model | archive | floored | Δ | 95% CI | supported | refit floor |
+| --- | --- | ---: | ---: | ---: | :---: | :---: | ---: |
+| multichannel | LSTM | 140.9 | **52.8** | **−88.1** | −112.3 to −66.3 | yes | 7.71 |
+| multichannel | ValendinLSTM | 84.9 | **56.0** | **−28.9** | −37.9 to −20.1 | yes | 7.71 |
+| electronics | ValendinLSTM | 69.1 | **46.3** | **−22.8** | −28.2 to −17.2 | yes | 3.63 |
+| electronics | LSTM | 56.9 | 51.7 | −5.2 | −12.4 to +2.5 | no | 3.63 |
+| gift | ValendinLSTM | 32.2 | 28.9 | −3.3 | −7.0 to −0.1 | yes (below floor) | 5.89 |
+| gift | LSTM | 30.3 | 29.9 | −0.5 | −4.1 to +3.2 | no | 5.89 |
+| cdnow | ValendinLSTM | 51.7 | 56.5 | +4.8 | −20.8 to +30.8 | no | 5.83 |
+| **cdnow** | **LSTM** | **57.7** | **183.9** | **+126.2** | +78.6 to +174.0 | yes (**worse**) | 5.83 |
+
+Gift/ValendinLSTM is the case the floor column exists for: the interval excludes zero, so
+the effect is supported, but Δ = −3.3 sits under that panel's 5.89 refit floor. Supported
+and small.
+
+**Something in the floored arm triples CDNOW's LSTM error** (Δ +126.2, +78.6 to +174.0).
+That is the single most important line in this document for anyone about to act on §12.
+
+> **The cause is not identified, and an earlier draft of this paragraph claimed it was.**
+> It read: "a 90-epoch floor on a 39-week calibration window overfits a model that then
+> extrapolates catastrophically". That does not follow from this experiment. Family U's
+> `floored` arm changed the floor **and** the batch size, the weight decay, the learning
+> rate, the search and the epoch budget, so the blow-up could belong to any of them. What
+> is established is that **the floored paper-recipe configuration catastrophically worsens
+> CDNOW's LSTM**; which ingredient does it is to-do E1, which runs `floor50` — the archive
+> recipe and search with `min_epochs` as the only change — on this panel.
+
+The frozen benchmark on the same panel is unharmed (Δ +4.8, −20.8 to +30.8), so whatever
+it is interacts with the developed model rather than with the panel alone.
 
 **So `min_epochs` must not become an unconditional default.** §12's first item is hereby
 qualified: a floor pays where the panel is long and sparse and the model collapses
@@ -806,5 +981,59 @@ panel, and a collapsed panel is exactly where it gets used to justify a choice".
 2. **Use a floor only where it pays, and never unconditionally** (§15.2).
 3. **Stop selecting on validation cross-entropy where the panel collapses** — there it is
    wrong-signed — and keep it where the panel does not (§15.3).
-4. **The ceiling is real.** Two levers, applied together, land on the ceiling either one
-   reaches alone. Getting past ~0.30 on electronics needs something neither of them is.
+4. **An apparent plateau, not an established ceiling.** Two levers applied together land
+   within a few hundredths of where either reaches alone, under these configurations. That
+   is an observation about what has been tried, not a proof that ~0.30 bounds the
+   architecture on electronics; nothing here rules out a third lever doing better.
+
+---
+
+## To do
+
+Raised by an external review of this document on 21 September 2026, plus what the review
+prompted me to check in the code. Grouped by whether it needs an experiment, a
+measurement, or only a correction. Corrections marked ✔ are applied; the register at the
+top carries the resulting status of each claim.
+
+### A. Experiments owed
+
+| # | what | why it is owed | status |
+| ---: | --- | --- | --- |
+| E1 | CDNOW `archive` / `paper` / `floor50` — the floor as the **only** change against the control | §15.2 attributes CDNOW's MAPE blow-up to the epoch floor, but family U's `floored` arm also changed the batch size, the weight decay, the learning rate, the search and the epoch budget. The claim is **not identified** by that design. | running |
+| E2 | Recompute `kmeans_8` from calibration periods **before** the validation window, re-run the electronics `archive/kmeans_8` cell, 20 replications | The label is read at the last calibration period (`cluster_features.py:97`) and broadcast to every calibration row (`panel_dataset.py:961`), so a model training on period 5 sees a summary of periods 1–104. Holdout scoring is clean — the statistic is available at the forecast origin — but validation-based selection and early stopping see a label that has seen the window they score. | to do |
+| E3 | The Spearman refit floor | ✔ done — 0.0105 to 0.0159 depending on panel, now in "How claims are made" | done |
+| E4 | A stopping criterion that suits a flat curve — relative threshold, smoothed curve, step budget, or no early stopping at all (§13.3 B5–B8) | The floor is a patch. §13.2 says the mechanism is an absolute 10⁻⁴ threshold against a curve gaining 5.4×10⁻⁵ an epoch; none of the principled alternatives has been tried. | to do |
+| E5 | Whether the epoch floor should scale with calibration length rather than be fixed | `paper90` fixes 90 epochs whether the window is 39 weeks (cdnow) or 104 (electronics, gift, multichannel). If E1 confirms harm on cdnow, a fixed epoch count is the likely culprit. | blocked on E1 |
+
+### B. Corrections applied
+
+| # | correction | ✔ |
+| ---: | --- | :---: |
+| T1 | `min_delta=0` described our loop; ours uses an **absolute 10⁻⁴** (`loop.py`). `min_delta=0` is the notebook's Keras setting. §13.2's mechanism is the correct one and is now used throughout | ✔ |
+| T2 | "stops at epoch 1" conflated best epoch with stop epoch, a distinction §1 sets up. The `paper` arm **keeps the checkpoint from epoch 1 and terminates after 7** | ✔ |
+| T3 | "a customer-wise split leaks time" contradicted §13.1 and was wrong: both splits stay inside calibration and neither touches the holdout. It measures cross-sectional rather than temporal generalisation | ✔ |
+| T4 | "they are substitutes" and "the ceiling is real" rested on non-significance, which is not equivalence. Now stated as a bounded increment with intervals, and as an apparent plateau | ✔ |
+| T5 | "matches Pareto/NBD" — the benchmark is a single deterministic fit with no interval, so no equivalence test exists. Now "reaches approximately the same Spearman" | ✔ |
+| T6 | "Batch 32 is not the fix; 90 epochs is" claimed an invariant the evidence does not identify — `floor50` reaches the same place with a few hundred updates where `paper90` needs ~2,300 | ✔ |
+| T7 | "never leaves its initialisation" is contradicted by §13.2's own first epoch (CE 0.1303 → 0.0935) | ✔ |
+| T8 | "the published electronics collapse" reads as a Valendin et al. result. It is **our** benchmark row | ✔ |
+| T9 | The seeding protocol was inferable but unstated, and "independent replications" is what the bootstrap assumes | ✔ |
+| T10 | Comparisons were reported as bare p-values. Every effect is now Δ with a 95% bootstrap CI, computed by one implementation (`.scratch/training-budget/effects.py`) | ✔ |
+
+### C. Decisions deferred, and what unblocks them
+
+| decision | blocked on |
+| --- | --- |
+| Whether `min_epochs` becomes a package default rather than an opt-in | E1, and E5 if E1 confirms harm |
+| Whether family N's published rows are regenerated under a floor — an ADR-level change to `docs/benchmarks-real-panels.md` | E1 |
+| Whether the selection criterion is replaced rather than floored | E4, and §14's finding that a validation rollout beats cross-entropy but lands on zero |
+| Whether the cluster result can be central to the thesis | E2 |
+
+### D. What this document still cannot say
+
+- **Anything about panels as a class.** Four panels, each stated separately, and no
+  measured characteristic yet predicts which of them collapse.
+- **That better selection would help much.** The largest correlation in §14 is +0.128.
+- **That ~0.30 bounds the architecture on electronics.** Two levers stopped there; that is
+  an observation about two levers.
+- **That the cluster label's lift is free of within-calibration hindsight.** E2 decides it.
