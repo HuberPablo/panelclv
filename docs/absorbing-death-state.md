@@ -288,6 +288,29 @@ three times — so it has no spread to report):
 **A single integer per customer — weeks since last purchase — recovers 0.296 of the
 0.321 that recency can possibly buy, and the neural models recover none of it.**
 
+> **Superseded in part, 21 September 2026.** The ρ ≈ 0 above is real, but it is a property
+> of how those archived models were *trained*, not only of what they were given.
+> `docs/training-budget.md` §15 re-runs the same configuration —
+> `["Transactions", "week_sin", "week_cos"]`, no AR features, no cluster label — with a
+> training floor instead of patience 7, over 20 replications on all four panels:
+>
+> | panel | as archived (patience 7) | trained to the paper's epoch count |
+> | --- | ---: | ---: |
+> | electronics | 0.029 | **0.182** |
+> | multichannel | 0.003 | **0.079** |
+> | cdnow | 0.386 | 0.352 |
+> | gift | 0.326 | 0.263 |
+>
+> So on the two panels this section is about, the models recover *some* of the recency
+> signal once they are trained long enough to try — a sixfold rise on electronics from an
+> input set that contains no recency at all. They still fall short of the 0.296 that the
+> single integer buys, and short of the 0.305 a cluster label buys (§15.1), so **the
+> argument below is unchanged in direction and weaker in magnitude**: the gap to close is
+> 0.18 → 0.30, not 0.00 → 0.30.
+>
+> Read "the neural models recover none of it" as "an undertrained neural model recovers
+> none of it".
+
 **The caveat that governs this whole subsection:** that configuration's `seq_cols` are
 `["Transactions", "week_sin", "week_cos"]` — **no autoregressive features**. Recency was
 never an input; the models could only infer it from the target's own history through the

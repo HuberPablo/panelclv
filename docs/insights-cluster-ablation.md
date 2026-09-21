@@ -9,8 +9,9 @@ index handed to the model as a frozen embedded category (`CONTEXT.md`,
 This document answers two questions that were never written down: **how K was chosen**, and
 **what the K sweep found**. The second half exists because family F of
 `docs/studies-run.md` — 24 suites, 480 studies, all complete on disk since 3 September 2026
-— had never been reported. Every number below was recomputed from the archived
-`Studies/cluster__*/LSTM/metrics.csv` files.
+— had never been reported. Every level number below was recomputed from the archived
+`Studies/cluster__*/results.csv` files, and every Spearman from the stored
+`Studies/cluster__*/LSTM/Predictions/` via `run_cluster_ablation.py --report`.
 
 ## Contents
 
@@ -18,7 +19,9 @@ This document answers two questions that were never written down: **how K was ch
 2. [What ran](#2-what-ran)
 3. [The level, per K](#3-the-level-per-k)
 4. [Is any K better than no cluster at all?](#4-is-any-k-better-than-no-cluster-at-all)
-5. [The one thing clusters do](#5-the-one-thing-clusters-do)
+5. [The two things clusters do](#5-the-two-things-clusters-do)
+   - [5.1 They rank customers](#51-they-rank-customers-which-nothing-else-in-this-family-does)
+   - [5.2 They rescue the unbounded counters](#52-they-rescue-the-unbounded-counters-on-one-panel)
 6. [The synthetic corroboration](#6-the-synthetic-corroboration)
 7. [Calibration does not rank K](#7-calibration-does-not-rank-k)
 8. [What this does not establish](#8-what-this-does-not-establish)
@@ -60,14 +63,19 @@ Family F, `scripts/run_cluster_ablation.py`, vast.ai, 3 September 2026.
 
 | | |
 |---|---|
-| Panels | electronics (104 calibration / 52 holdout weeks), CDNOW (39 / 39) |
-| Model | LSTM, `valendin` embedder, `cross_entropy` loss |
-| Arms | `no_cluster`, `cluster_4`, `cluster_8`, `cluster_16`, `ar_unbounded`, `ar_plus_cluster_8` |
-| Budget | 50 Optuna trials × 20 studies × 2 shards, 300-path Monte Carlo rollout |
+| Panels | electronics — 829 customers, calibration 1999-01-01 → 2000-12-31 (validation from 2000-01-01), holdout 2001, 104 / 52 weeks, 7 classes. CDNOW — 2,357 customers, calibration 1997-01-01 → 1997-09-30 (validation from 1997-08-06), holdout 1997-10-01 → 1998-06-30, 39 / **38** weeks, 5 classes. |
+| Model | LSTM, **`valendin` embedder** (verified from `param_embedder` in every `results.csv`), `cross_entropy` loss |
+| Arms | `no_cluster`, `cluster_4`, `cluster_8`, `cluster_16`, `ar_unbounded`, `ar_plus_cluster_8` — the cluster arms carry no AR channel, and every arm carries the embedded target count |
+| Budget | **40 replications × 50 Optuna trials × 300 Monte Carlo paths** per arm per panel, as 20 studies in each of 2 seed shards (`a` = seeds 43–62, `b` = 63–82) |
 | Suites | 24 (6 arms × 2 panels × 2 shards), **all 24 present, 20/20 studies each** |
+| Metrics | bias, MAPE, RMSE from each suite's `results.csv`; **Spearman recomputed** from the stored `Predictions/` by `--report`, on electronics only (§3) |
 
-Shards `a` and `b` carry disjoint seed ranges (43–62, 63–82), so each arm has **40 distinct
-replications** per panel, not twenty run twice.
+CDNOW's windows are the **pre-ADR-0009** ones — 38 holdout weeks from 1997-10-01, not the
+39 from 09-30 that `docs/benchmarks-real-panels.md` uses. A CDNOW row here cannot be put in
+a table beside one from the four-panel runs without saying so.
+
+The two shards carry disjoint seed ranges, so each arm has **40 distinct replications** per
+panel, not twenty run twice.
 
 Two properties make the comparison clean. Nothing can drop the cluster column — `ModelSpec`
 has no `removable_features` field and no study suite passes one, so the covariate-subset
@@ -84,27 +92,36 @@ below are therefore two-sample rank tests, not paired ones.
 Aggregate bias %, over 40 replications per arm. `|bias|` columns treat over- and
 under-forecasting alike, which is what makes arms with opposite signs comparable.
 
-**electronics**
+**electronics** — 40 replications × 50 trials × 300 paths per arm, `valendin` embedder,
+104 / 52 weeks, holdout 2001. Spearman is the rank correlation of per-customer holdout
+totals, recomputed from the stored forecasts.
 
-| arm | mean bias | sd | median bias | mean \|bias\| | median \|bias\| | RMSE | MAPE | val. objective |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `no_cluster` | +20.9 | 14.1 | +22.8 | 21.7 | 22.8 | 0.377 | 54.9 | 0.0893 |
-| `cluster_4` | +13.3 | 24.8 | +9.1 | 19.8 | 14.9 | 0.377 | 51.8 | **0.0840** |
-| `cluster_8` | **+11.4** | 22.9 | +9.8 | **19.0** | **13.0** | 0.377 | 53.1 | 0.0849 |
-| `cluster_16` | +18.7 | 19.0 | +15.2 | 21.0 | 16.7 | 0.377 | 55.2 | 0.0863 |
-| `ar_unbounded` | +208.6 | 174.7 | +154.1 | 208.6 | 154.1 | 0.433 | 213.4 | 0.0892 |
-| `ar_plus_cluster_8` | +91.8 | 126.5 | +47.0 | 94.5 | 47.0 | 0.402 | 115.5 | 0.0850 |
+| arm | mean bias | sd | median bias | mean \|bias\| | median \|bias\| | RMSE | MAPE | **Spearman** | val. objective |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `no_cluster` | +20.9 | 14.1 | +22.8 | 21.7 | 22.8 | 0.377 | 54.9 | **0.039 ± 0.078** | 0.0893 |
+| `cluster_4` | +13.3 | 24.8 | +9.1 | 19.8 | 14.9 | 0.377 | 51.8 | **0.264 ± 0.015** | **0.0840** |
+| `cluster_8` | **+11.4** | 22.9 | +9.8 | **19.0** | **13.0** | 0.377 | 53.1 | **0.270 ± 0.055** | 0.0849 |
+| `cluster_16` | +18.7 | 19.0 | +15.2 | 21.0 | 16.7 | 0.377 | 55.2 | **0.257 ± 0.043** | 0.0863 |
+| `ar_unbounded` | +208.6 | 174.7 | +154.1 | 208.6 | 154.1 | 0.433 | 213.4 | 0.229 ± 0.069 | 0.0892 |
+| `ar_plus_cluster_8` | +91.8 | 126.5 | +47.0 | 94.5 | 47.0 | 0.402 | 115.5 | **0.279 ± 0.051** | 0.0850 |
 
-**CDNOW**
+**CDNOW** — same budget and embedder, 39 / 38 weeks, holdout 1997-10-01 → 1998-06-30.
 
-| arm | mean bias | sd | median bias | mean \|bias\| | median \|bias\| | RMSE | MAPE | val. objective |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `no_cluster` | **−1.0** | **16.2** | −5.4 | **12.9** | 9.7 | **0.148** | 23.1 | 0.0933 |
-| `cluster_4` | +30.0 | 28.5 | +20.9 | 30.1 | 20.9 | 0.151 | 39.6 | 0.0705 |
-| `cluster_8` | +2.9 | 20.7 | +1.9 | 14.3 | 9.8 | 0.151 | 26.9 | 0.0690 |
-| `cluster_16` | +1.0 | 24.3 | −3.0 | 15.7 | **9.6** | 0.151 | 29.1 | **0.0668** |
-| `ar_unbounded` | +313.9 | 531.8 | +102.1 | 314.6 | 102.1 | 0.251 | 325.6 | 0.0929 |
-| `ar_plus_cluster_8` | +249.3 | 364.7 | +119.8 | 273.2 | 119.8 | 0.286 | 296.7 | 0.0680 |
+| arm | mean bias | sd | median bias | mean \|bias\| | median \|bias\| | RMSE | MAPE | Spearman | val. objective |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `no_cluster` | **−1.0** | **16.2** | −5.4 | **12.9** | 9.7 | **0.148** | 23.1 | n/a | 0.0933 |
+| `cluster_4` | +30.0 | 28.5 | +20.9 | 30.1 | 20.9 | 0.151 | 39.6 | n/a | 0.0705 |
+| `cluster_8` | +2.9 | 20.7 | +1.9 | 14.3 | 9.8 | 0.151 | 26.9 | n/a | 0.0690 |
+| `cluster_16` | +1.0 | 24.3 | −3.0 | 15.7 | **9.6** | 0.151 | 29.1 | n/a | **0.0668** |
+| `ar_unbounded` | +313.9 | 531.8 | +102.1 | 314.6 | 102.1 | 0.251 | 325.6 | n/a | 0.0929 |
+| `ar_plus_cluster_8` | +249.3 | 364.7 | +119.8 | 273.2 | 119.8 | 0.286 | 296.7 | n/a | 0.0680 |
+
+**CDNOW has no Spearman and cannot get one from this archive.**
+`run_cluster_ablation.py --panel cdnow --report` rebuilds the panel under today's week rule
+(ADR-0009), which yields 39 holdout weeks, and scores it against stored predictions of
+width 38 — it raises `ValueError: operands could not be broadcast together with shapes
+(2357,38) (2357,39)` rather than returning a number. Recovering it means rebuilding the
+pre-ADR-0009 panel. `n/a` above means exactly that, not "small".
 
 `val. objective` is the best Optuna trial's validation cross-entropy
 (`tuning.optuna_tuning.objective` returns `best_val_loss`) — the best score obtainable
@@ -127,6 +144,15 @@ does it to the aggregate level and not to per-customer accuracy.
 A better central tendency bought with more dispersion is a worse instrument, not a better
 one — the point of the study-suite design (`CLAUDE.md` priority 3) is that the spread is
 part of the result.
+
+**And the one thing they move decisively is the ranking.** On electronics Spearman goes
+from **0.039** without a label to **0.257–0.270** with one — a sevenfold rise, at every K,
+far outside the across-replication SD, and level with Pareto/NBD's 0.297 on that panel.
+This is the measurement §8 of the first draft of this document listed as missing, and it
+does not point the same way as the level does: on the metric the rest of this document
+scores, clusters are indistinguishable from nothing; on the metric it never computed, they
+are the difference between ordering customers and not ordering them at all. §5.1 takes it
+up, because it changes what "drop the cluster axis" can be read to mean.
 
 ## 4. Is any K better than no cluster at all?
 
@@ -158,7 +184,69 @@ among 4, 8 and 16 is a choice among three arms that are individually indistingui
 not using the feature. K = 8 is not a mistake; it is simply not a decision the downstream
 evidence was ever able to make.
 
-## 5. The one thing clusters do
+## 5. The two things clusters do
+
+### 5.1 They rank customers, which nothing else in this family does
+
+On electronics the label is the difference between a model that orders customers and one
+that does not. Spearman over the same 40 replications per arm:
+
+| arm | Spearman | vs `no_cluster` | mean \|bias\| |
+|---|---:|---:|---:|
+| `no_cluster` | 0.039 ± 0.078 | — | 21.7 |
+| `cluster_4` | 0.264 ± 0.015 | **+0.225** | 19.8 |
+| `cluster_8` | 0.270 ± 0.055 | **+0.231** | 19.0 |
+| `cluster_16` | 0.257 ± 0.043 | **+0.218** | 21.0 |
+| Pareto/NBD (benchmark, n = 1) | 0.297 | +0.258 | 63.0 |
+
+The gap is 3 to 15 across-replication SDs wide at every K, so unlike the level effect it is
+not a coin toss at n = 40. **It is bought for nothing on the level** — |bias| is flat to
+slightly better and RMSE is unmoved at 0.377.
+
+This is the same phenomenon `docs/benchmarks-real-panels.md` calls *the forecast collapse
+on long sparse panels*: with only the count as input, an LSTM on electronics gives every
+customer nearly the same forecast (Spearman 0.03–0.04), and **any** persistent per-customer
+channel lifts it — bounded flags reach 0.20–0.26, clusters 0.26–0.27. The cluster label is
+one instance of that fix, and on this panel it is the strongest one measured.
+
+Two things this does **not** license. It is one panel: CDNOW's Spearman cannot be recovered
+from this archive at all (§3), and CDNOW is the panel that does not collapse, so there is no
+reason to expect the same effect there. And it says nothing about the level, where §4 is
+unchanged and §6's synthetic evidence says the label actively hurts. **The two criteria
+disagree, and the arm has to be chosen against one of them** — §6.
+
+### 5.1.1 Confirmed on four panels, and it has a rival — 21 September 2026
+
+`docs/training-budget.md` §15 (family U, 640 suites) ran the cluster axis on all four
+panels, crossed with a second lever this document did not know about: how long the model
+trains. Per-customer Spearman, 20 replications a cell, `ValendinLSTM`:
+
+| panel | no label | **label** | no label, trained longer | label + trained longer | Pareto/NBD |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| electronics | 0.021 | **0.305** | 0.178 | 0.305 | 0.297 |
+| multichannel | −0.004 | **0.178** | 0.119 | 0.195 | 0.189 |
+| cdnow | 0.364 | **0.403** | 0.383 | 0.406 | 0.450 |
+| gift | 0.349 | **0.359** | 0.280 | 0.363 | 0.383 |
+
+Three things this adds to §5.1.
+
+**The effect generalises, and CDNOW does behave as predicted above.** The label lifts
+ranking on every panel, decisively on the two that collapse (electronics, multichannel)
+and marginally on the two that do not (cdnow p = 0.008, gift p = 0.47) — which is the
+reading §5.1 guessed at without the measurement.
+
+**A training floor is a partial substitute for the label.** On the collapsing panels,
+simply training the same no-label model to the reference paper's epoch count reaches
+0.178 and 0.119 — over half of what the label buys, from no extra input at all. So "any
+persistent per-customer channel lifts it" is not the whole story: *enough training* lifts
+it too, and the archived 0.039 was measured on a model that stopped at epoch 8.
+
+**They do not add.** Crossing the two leaves the label's ceiling untouched in seven of
+eight cells (p = 0.23 to 0.97). The label and the training budget are substitutes for
+one another, not complements, and the ceiling is a property of the architecture rather
+than of either lever.
+
+### 5.2 They rescue the unbounded counters, on one panel
 
 `ar_plus_cluster_8` against `ar_unbounded` — the same three counters, with the bounded
 category added:
@@ -208,6 +296,19 @@ different costume — bounded in *range*, but equally stale in *time*.
 Family F neither confirms nor contradicts this on the real panels: it is consistent with a
 null effect, and the synthetic evidence is what settles the direction.
 
+**On the level.** Every number in this section, and in §3 and §4, is aggregate bias. The
+synthetic grid computes no per-customer Spearman at all — it reports `shape_correlation`,
+the correlation of the *weekly aggregate* curves, which is a different quantity — so it has
+nothing to say about §5.1. The two bodies of evidence are therefore not in conflict; they
+measure different things, and they point opposite ways:
+
+| criterion | evidence | verdict on `kmeans_8` |
+|---|---|---|
+| aggregate bias | 160 paired synthetic panels, both models (§6) | **hurts**, significantly, in 3 of 4 usable contrasts |
+| aggregate bias | 40 replications, 2 real panels (§4) | no effect either way |
+| per-customer Spearman | 40 replications, electronics (§5.1) | **helps**, 0.039 → 0.27, far outside noise |
+| per-customer Spearman | synthetic grid | never computed |
+
 **Consolidated verdict: drop the cluster axis.** It improves exactly one arm, and that arm
 is the one to drop.
 
@@ -228,17 +329,42 @@ median |bias| goes 9.7 → 20.9 → 9.8 → 9.6. A rule that minimised validatio
 choose the *largest* K on offer, and would choose a cluster arm over no clusters on every
 panel here, at exactly the moment §4 shows the feature buys nothing.
 
-Ranking the six arms by each criterion:
+Ranking the six arms by each criterion. The right-hand column is the rank correlation
+*between the two orderings* — not the per-customer Spearman of §5.1, which is a metric, not
+a criterion:
 
-| panel | by calibration objective (best first) | by holdout median \|bias\| (best first) | Spearman |
+| panel | by calibration objective (best first) | by holdout median \|bias\| (best first) | agreement |
 |---|---|---|---:|
 | electronics | `cluster_4`, `cluster_8`, `ar_plus_cluster_8`, `cluster_16`, `ar_unbounded`, `no_cluster` | `cluster_8`, `cluster_4`, `cluster_16`, `no_cluster`, `ar_plus_cluster_8`, `ar_unbounded` | 0.66 |
 | CDNOW | `cluster_16`, `ar_plus_cluster_8`, `cluster_8`, `cluster_4`, `ar_unbounded`, `no_cluster` | `cluster_16`, `no_cluster`, `cluster_8`, `cluster_4`, `ar_unbounded`, `ar_plus_cluster_8` | 0.09 |
 
 On both panels the calibration criterion ranks `no_cluster` **last of six**, and on CDNOW
 the two rankings are essentially unrelated. Within a single arm it is no better: across an
-arm's 40 replications, Spearman between the validation objective and holdout |bias| is
-between −0.37 and +0.37, and is 0.00 for `cluster_8` on CDNOW.
+arm's 40 replications, the rank correlation between the validation objective and holdout
+|bias| is between −0.37 and +0.37, and is 0.00 for `cluster_8` on CDNOW.
+
+**But it is not ranking noise — it is ranking the other metric.** Order the same six
+electronics arms by holdout *discrimination* instead of by level and the calibration
+objective agrees at **0.77**, better than its 0.66 against |bias|, and it gets the bottom
+half exactly right:
+
+| arm | by calibration objective | by holdout Spearman |
+|---|---:|---:|
+| `cluster_4` | 1 | 3 |
+| `cluster_8` | 2 | 2 |
+| `ar_plus_cluster_8` | 3 | 1 |
+| `cluster_16` | 4 | 4 |
+| `ar_unbounded` | 5 | 5 |
+| `no_cluster` | 6 | 6 |
+
+That the objective puts `no_cluster` last is then correct rather than perverse: on
+electronics `no_cluster` really is last, by a factor of seven, on the metric the objective
+is measuring. Validation cross-entropy scores a *conditional density per customer-period*,
+so it rewards exactly what separates customers; the holdout level is a property of a
+52-step rollout, and it does not. **The objective is not blind — it is pointed at
+discrimination, and the arm tables lead with level.** That is the same split
+`docs/benchmarks-real-panels.md` finds across whole studies: validation loss is a real
+proxy for ranking and RMSE on two panels, and a coin toss for bias everywhere.
 
 The reason is structural rather than statistical. Validation cross-entropy scores
 **one-step-ahead conditional** predictions with the true history fed in; the holdout metric
@@ -253,12 +379,13 @@ rollout's structure, not against the fitting loss. That is the thing to design n
 
 ## 8. What this does not establish
 
-- **No discrimination measurement.** Everything above is level (bias, RMSE, MAPE). The
-  achieved-Spearman number that `run_cluster_ablation.py --report` computes from the
-  archived predictions is not included here, because it requires the panel actuals and was
-  not recomputed. The AR ablation's finding — that the continuous triple raises per-customer
-  discrimination ~5× — has no cluster counterpart yet, so "does the *category* carry the
-  discrimination the *counters* carried?" remains open on the real panels.
+- **Discrimination on one panel only — CDNOW's is unrecoverable.** §5.1 answers "does the
+  *category* carry the discrimination the *counters* carried?" on electronics, and yes: the
+  label reaches 0.26–0.27 against the unbounded triple's 0.229 and no-cluster's 0.039.
+  CDNOW has no such number and cannot get one from this archive, because
+  `--panel cdnow --report` raises on the pre-ADR-0009 window (§3). So the discrimination
+  finding rests on a single panel — and on the one panel where the count-only model
+  collapses, which is where any persistent channel is expected to help.
 - **LSTM only.** Family F ran no Transformer and no ValendinLSTM. The synthetic grid shows
   the two architectures respond differently to `kmeans_8` (§6: the LSTM is hurt
   significantly under `no_ar`, the Transformer is not), so the real-panel result should not

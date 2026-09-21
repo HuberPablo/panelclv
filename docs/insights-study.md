@@ -69,6 +69,16 @@ The panels are generated *by* a Pareto/NBD process, so that benchmark is the cor
 model by construction and is the ceiling, not a competitor. What the grid asks is how
 far below the ceiling the neural models sit, and where.
 
+**Provenance of this section's tables** — family A of `docs/studies-run.md`, vast.ai,
+23–24 August 2026. Arm `no_ar-no_cluster-valendin`; loss `cross_entropy`; **1 study per
+panel × 10 trials (LSTM) or 20 (Transformer) × 200 Monte Carlo paths**; 160 panels of
+1,000 customers; calibration 1999-01-01 → 2000-12-31 with validation from 2000-01-01,
+holdout 2001 — **104 / 52 weeks**, 7 softmax classes. The embedder is `valendin` by the
+registry default, but **these 320 suites predate the `param_embedder` column** and do not
+record it, unlike the arm sweep's 1,920 (`docs/studies-run.md` §1). Metrics are
+`bias_percent`, `mape_aggregate` and `rmse` from each suite's `results.csv`; **no
+per-customer Spearman exists for the synthetic grid** (`docs/insights-arm-sweep.md` §1).
+
 Aggregate bias %, marginal over the four transaction rates (n = 40 studies per cell,
 mean ± sd across them):
 
@@ -182,8 +192,13 @@ amplifies.
 
 ### 4.1 P-sLSTM: better density model, worse forecast
 
-`.scratch/p-slstm/comparison-p-slstm.md`, run 2026-08-18 on the electronics panel,
-8 seeds, both neural models at one hand-picked architecture point:
+`.scratch/p-slstm/comparison-p-slstm.md`, run 2026-08-18 on the electronics panel
+(`docs/p-slstm.md` §10 has the full setup). Arm `no_ar-no_cluster` with no calendar channel
+(`F = 1`); embedder `valendin`; loss `cross_entropy`; **8 independent training runs × 30
+Monte Carlo paths, no Optuna search** — both neural models sit at one hand-picked
+architecture point, so these are runs, not studies; Pareto/NBD n = 3. Calibration
+1999–2000 (104 weeks, validation the second year), holdout 2001 (52 weeks), 7 classes. No
+Spearman was computed:
 
 | model | best validation CE | RMSE | aggregate bias % | aggregate MAPE % |
 |---|---|---|---|---|
@@ -219,8 +234,11 @@ support the original decision never had.
 
 ### 4.3 Out-of-range AR features, and what they say about the rollout
 
-From the arms of `scripts/run_ar_encoding_ablation.py` under `Studies/`, 20 studies per
-shard, aggregate bias %:
+From the arms of `scripts/run_ar_encoding_ablation.py` under `Studies/` — family E,
+**20 studies × 50 Optuna trials × 300 Monte Carlo paths** per shard, LSTM only, embedder
+`valendin`, loss `cross_entropy`; electronics 104 / 52 weeks with holdout 2001, CDNOW
+39 / **38** weeks with holdout 1997-10-01 → 1998-06-30 (pre-ADR-0009). Aggregate bias %,
+shard `a` / shard `b`:
 
 | arm | electronics (a / b) | CDNOW (a / b) |
 |---|---|---|
@@ -228,6 +246,12 @@ shard, aggregate bias %:
 | bounded (K=32 / K=16) | +0.4 / +6.7 | −9.5 / −9.8 |
 | bounded (K=52 / K=32) | −10.3 / −7.5 | +22.6 / +63.3 |
 | **unbounded triple** | **+198.1 / +272.9** | **+460.9 / +207.3** |
+
+That ablation was **extended on 10 September** to five shards and three further encodings
+(`ar_log`, `ar_ratio`, `ar_saturating`). The 100-replication figures, with Spearman where
+it is recoverable, are in `docs/benchmarks-real-panels.md`; the shard map is
+`docs/studies-run.md` §4.1. The two-shard numbers above are what this section was written
+on and they stand — but they are 40 replications of an arm that now has 100.
 
 The unbounded arm is `(period_since_last_transaction, cumulative_transactions,
 period_since_first_transaction)` — the Pareto/NBD sufficient statistics `(t_x, x, T)`.
@@ -319,6 +343,24 @@ This directly targets §4.1 and §4.2. It is expensive per trial — a rollout i
 Optuna trial — so it competes with §5.2 for compute. §5.2 first: selection can only pick
 the best available model, and if none of them can represent death, better selection picks
 the least-bad drifter.
+
+> **Measured, 21 September 2026 — and the ordering above was right.**
+> `docs/training-budget.md` §14 built exactly this and scored 2,813 electronics trials
+> both ways: a leak-free rollout over the validation window against the holdout the trial
+> actually produces. Two results.
+>
+> Validation cross-entropy is not weak on that panel, it is **wrong-signed** — rank
+> correlation −0.141 with holdout MAPE and −0.264 with holdout |bias| over 80 studies, so
+> taking a study's lowest-loss trial is worse than taking one at random. A validation
+> rollout beats it in 66 of 80 studies (p = 6×10⁻⁸) **and lands on zero**: the largest
+> correlation anywhere in the test is +0.128. Restoring rollout selection removes a
+> harmful signal rather than supplying a useful one.
+>
+> §15.3 then found why, and it sharpens this section's premise: cross-entropy selects
+> well where a study's trials genuinely differ (CDNOW, ρ = +0.472 against holdout
+> Spearman) and badly where they do not (electronics, where every trial lands in the same
+> narrow band). Better selection cannot help on a panel whose trials are
+> indistinguishable — which is §5.2's argument, arrived at from the selection side.
 
 ### 5.5 Skip the architecture papers, or spend one on a negative result
 
@@ -412,12 +454,33 @@ assumed.
 
 ## 8. The real panels: what the arm axis did on CDNOW and electronics
 
-Run 2026-09-06 with `scripts/run_real_panel_arms.py` on a vast.ai fleet of eight
-workers: the same six arms as the seasonal grid, plus two electronics-only arms with
-the engineered time features removed, 20 studies per (model, panel, arm), 50 trials
-(25 for the frozen benchmark), 50 Monte Carlo paths. 32 arm-suites, 640 studies,
-~$2.50 of GPU. Everything below is the **ensemble** — the mean of the 20 forecasts,
-scored once — for the reason §9 gives.
+> **This section reports the 50-path run, which has been superseded twice.** It is family
+> G of `docs/studies-run.md`, since moved to `Studies/_archive_50sim/`. The same arms were
+> re-run at 200 paths (family H) and are reported in `docs/benchmarks-real-panels.md`, and
+> the four-panel runs at 100 replications × 100 trials × 500 paths (families N–P) are there
+> too. **Take a number from there, not from here.** What is kept below is the three
+> findings that have no counterpart in the later runs: the unbounded-AR blowup being
+> LSTM-specific, the MAPE ≈ 18 oracle floor on CDNOW, and the bias-by-cancellation reading
+> of the tracking plots.
+
+Run 2026-09-06 with `scripts/run_real_panel_arms.py` on a vast.ai fleet of eight workers.
+
+| | |
+| --- | --- |
+| archive | family G — 34 suites, 642 studies, ~$2.50 of GPU |
+| arms | the same six as the seasonal grid (3 AR × 2 cluster), plus two electronics-only arms with the engineered time features removed |
+| models | LSTM, Transformer, ValendinLSTM, ParetoNBD |
+| budget | **20 studies × 50 Optuna trials × 50 Monte Carlo paths** per (model, panel, arm); 25 trials for ValendinLSTM, whose ADR-0004 search space holds three training hyperparameters |
+| embedder | `valendin` on LSTM and Transformer; frozen on ValendinLSTM (ADR-0004) |
+| loss | `cross_entropy` |
+| windows | electronics 104 / 52, holdout 2001. CDNOW 39 / **38**, holdout 1997-10-01 → 1998-06-30 — the pre-ADR-0009 window, one week away from the benchmark's |
+| metrics | `bias_percent`, `mape_aggregate`, `rmse`; Spearman recomputed from the stored forecasts |
+
+Everything below is the **ensemble** — the mean of the 20 forecasts, scored once — for the
+reason §9 gives. `docs/benchmarks-real-panels.md` reports mean ± sd across replications
+instead, which is why its numbers for the same arms differ from these even where the run is
+the same: §9 is the whole of that difference on the magnitude metrics, and none of it on
+bias.
 
 ### It reproduces
 
@@ -633,7 +696,9 @@ Pareto/NBD is a single deterministic MCMC fit with no scatter; every neural row 
 mean of 20 independent fits. The two are not comparable on a convex metric.
 
 Averaging the 20 forecasts first, then scoring once — which is both what one would
-deploy and what Pareto/NBD gets for free:
+deploy and what Pareto/NBD gets for free. Same run as §8 throughout: family G, CDNOW,
+**20 studies × 50 trials × 50 paths** (25 trials for ValendinLSTM), embedder `valendin`
+(frozen on ValendinLSTM), 39 / 38 weeks on the pre-ADR-0009 window:
 
 | CDNOW MAPE | mean of 20 | ensemble |
 |---|---|---|
