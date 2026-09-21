@@ -97,6 +97,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 STUDIES_BASE = REPO_ROOT / "Studies"
 
 EXPERIMENT = "training_budget"
+# Which panel the arms run on. `--panel cdnow` exists to answer an identification
+# problem family U created: there the floored arm also changed the optimizer, the batch
+# size and the search, so "the floor triples CDNOW's LSTM error" was not attributable.
+# `floor50` here changes `min_epochs` and nothing else against `archive`.
 PANEL = "electronics"
 
 # --- budget -----------------------------------------------------------------------
@@ -180,7 +184,7 @@ def build_data(model: str) -> dict:
 
 
 def suite_name(model: str, arm: str, replication: int) -> str:
-    """`training_budget__<Model>__electronics__<arm>__r<NN>` -- one per work item."""
+    """`training_budget__<Model>__<panel>__<arm>__r<NN>` -- one per work item."""
     return f"{EXPERIMENT}__{model}__{PANEL}__{arm}__r{replication:02d}"
 
 
@@ -376,7 +380,11 @@ def main() -> None:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--check-complete", action="store_true")
     mode.add_argument("--report", action="store_true")
+    parser.add_argument("--panel", default=PANEL,
+                        help="panel to run the arms on (default: electronics)")
     args = parser.parse_args()
+
+    globals()["PANEL"] = args.panel
 
     # Declaration order, never the order they were typed: a worker's stride is an
     # index into the work list, so two workers passing the same arms in a different
