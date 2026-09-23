@@ -120,12 +120,27 @@ result is stated for the panel it was measured on. Where panels disagree — and
 mostly disagreement — that is reported as heterogeneity to be explained, never averaged
 into a claim about panels as a class. The panels differ in ways that plausibly matter:
 
-| panel | customers | T_CAL / T_HOLD | zero cells | holdout tx | tx per customer | holdout/calibration rate | collapses? |
+| panel | customers | T_CAL / T_HOLD | zero cells (holdout) | calibration tx | holdout tx | holdout/calibration rate | collapses? |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
-| cdnow | 2,357 | 39 / 39 | 98.0% | 1,895 | 0.80 | 0.40 | no |
-| electronics | 829 | 104 / 52 | 98.6% | 1,467 | 1.77 | 0.63 | **yes** |
-| gift | 2,062 | 104 / 52 | 99.0% | 1,146 | 0.56 | 0.54 | no |
-| multichannel | 1,402 | 104 / 52 | 99.7% | 228 | 0.16 | 0.23 | **yes** |
+| cdnow | 2,357 | 39 / 39 | 98.0% | 4,796 | 1,895 | 0.40 | no |
+| electronics | 829 | 104 / 52 | 98.6% | 4,684 | 1,467 | 0.63 | **yes** |
+| gift | 2,062 | 104 / 52 | 99.0% | 4,207 | 1,146 | 0.54 | no |
+| multichannel | 1,402 | 104 / 52 | 99.7% | 2,016 | 228 | 0.23 | **yes** |
+
+How much each customer buys. Transactions per customer are over the whole window, not per
+week. The top 10% are the customers with the most calibration transactions, so their
+holdout column shows how much the heaviest known buyers keep buying.
+
+| panel | tx per customer, calibration | tx per customer, holdout | top 10%, calibration | top 10%, holdout | < 4 tx, calibration | < 4 tx, holdout | < 4 tx, both windows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cdnow | 2.03 | 0.80 | 6.97 | 3.53 | 87.6% | 93.6% | 77.6% |
+| electronics | 5.65 | 1.77 | 18.77 | 5.20 | 45.0% | 83.5% | 36.8% |
+| gift | 2.04 | 0.56 | 5.48 | 1.63 | 86.2% | 97.7% | 76.9% |
+| multichannel | 1.44 | 0.16 | 3.70 | 0.57 | 96.0% | 99.6% | 93.9% |
+
+"< 4 tx" is the share of customers with at most 3 transactions in that window; "both
+windows" counts calibration and holdout together. Counts are the target channel the
+models read, so a week's count is already capped at the panel's top class.
 
 **No measured characteristic yet predicts which panels collapse.** Electronics is *less*
 sparse than gift and has the most holdout transactions per customer, and it collapses
