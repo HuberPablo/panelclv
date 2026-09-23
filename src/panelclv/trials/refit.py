@@ -41,7 +41,7 @@ def refit_best_trial(
     n_epochs: int | None = None,
     batch_size: int = 512,
     learning_rate: float = 1e-3,
-    weight_decay: float = 1e-3,
+    weight_decay: float = 0.0,
     device: str | torch.device | None = None,
     checkpoint_dir: str | Path = "./checkpoints",
     loss_type: str = "cross_entropy",

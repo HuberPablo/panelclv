@@ -154,7 +154,6 @@ TRANSFORMER = ModelSpec(
         "num_encoder_layers": (1, 3, "int"),
         "dropout":            {0.0, 0.1, 0.2, 0.3},
         "learning_rate":      (1e-4, 3e-3, "log"),
-        "weight_decay":       (1e-6, 1e-2, "log"),
     },
     training={
         "n_epochs": 100,

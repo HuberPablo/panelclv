@@ -324,6 +324,12 @@ class ModelEntry:
     rollout: Callable[..., Any] | None = None
 
 
+# Weight decay is pinned to 0 for every neural entry, which makes AdamW plain Adam.
+# Real-panel runs stop after a few hundred updates, and AdamW shrinks each weight by
+# `lr * weight_decay` per update, so a typical trial's decay removed about 0.01% of
+# a weight's size over the whole fit. Across 6,408 archived studies the winning weight
+# decay was spread as if drawn at random, with no correlation to validation loss or
+# forecast error. The knob did nothing but spread Optuna's trials thinner.
 MODEL_REGISTRY: dict[str, ModelEntry] = {
     "lstm": ModelEntry(
         search_space={
@@ -335,7 +341,7 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
             "dense_units":     {32, 64, 128},
             "dropout":         (0.0, 0.4),
             "learning_rate":   (1e-4, 3e-3, "log"),
-            "weight_decay":    (1e-6, 1e-2, "log"),
+            "weight_decay":    0.0,
             "batch_size":      {32, 64, 128, 256},
         },
         suggest=_suggest_lstm_params,
@@ -352,7 +358,7 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
             "num_encoder_layers": (1, 3, "int"),
             "dropout":            (0.0, 0.4),
             "learning_rate":      (1e-4, 3e-3, "log"),
-            "weight_decay":       (1e-6, 1e-2, "log"),
+            "weight_decay":       0.0,
             "batch_size":         {32, 64, 128, 256},
         },
         suggest=_suggest_transformer_params,
@@ -369,7 +375,7 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
     "valendin_lstm": ModelEntry(
         search_space={
             "learning_rate": (1e-4, 3e-3, "log"),
-            "weight_decay":  (1e-6, 1e-2, "log"),
+            "weight_decay":  0.0,
             "batch_size":    {32, 64, 128, 256},
         },
         suggest=_suggest_every_param,

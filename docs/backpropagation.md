@@ -398,9 +398,9 @@ Two properties of this call that the document should not leave implicit. AdamW i
 to the gradient, so it does not interact with Adam's per-parameter scaling. And **there
 is no learning-rate schedule.** A search for `scheduler` or `lr_scheduler` across the
 training path returns nothing; the rate is constant from the first batch to the last. The
-learning rate and weight decay are instead chosen per trial by Optuna over the ranges the
-registry declares (`registry/model_registry.py:337-339`): `learning_rate` log-uniform on
-`(1e-4, 3e-3)`, `weight_decay` log-uniform on `(1e-6, 1e-2)`.
+learning rate is instead chosen per trial by Optuna, log-uniform on `(1e-4, 3e-3)` as the
+registry declares. Weight decay is pinned to `0.0` in the registry, so in practice the
+optimiser is plain Adam; the registry's comment records why.
 
 One optimiser step per batch. No gradient accumulation.
 
