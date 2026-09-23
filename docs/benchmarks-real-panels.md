@@ -90,7 +90,7 @@ patience 7 gives:
 
 As differences of condition means with 95% bootstrap intervals, 20 independent
 replications each: MAPE −22.3 (−28.2 to −16.2) and Spearman +0.150 (+0.108 to +0.191),
-against a refit floor of 3.63 MAPE and 0.0105 Spearman on this panel. The developed LSTM
+against a refit noise of 3.63 MAPE and 0.0105 Spearman on this panel. The developed LSTM
 moves the same way on discrimination. Copying the notebook's optimizer, batch size and
 patience *without* the epoch count moves neither (both intervals span zero) — it is the
 training length, not the settings.
@@ -115,7 +115,7 @@ whether they are regenerated under a training floor is decided in
 in this document:
 
 Δ is against family U's own `archive / no_cluster` control, with a 95% bootstrap interval
-over 20 replications; the panel's Spearman refit floor is 0.0105–0.0159.
+over 20 replications; the panel's Spearman refit noise is 0.0105–0.0159.
 
 | panel | control | trained past the plateau | Δ (95% CI) | with a `kmeans_8` label | Δ (95% CI) | Pareto/NBD |
 | --- | ---: | ---: | :---: | ---: | :---: | ---: |
@@ -936,7 +936,7 @@ Means over the same studies. "Oracle" is the best trial of that study on that me
   worse than the selected one on three panels of four. What is on the table for bias is
   large; the objective simply does not point at it.
 
-### The refit noise floor, and the stopping epoch
+### The refit noise, and the stopping epoch
 
 Each study's winner is refit here a second time, and its first refit is in the archive, so
 the pair measures what an unseeded refit moves on its own (80 studies, one pair each).
@@ -950,7 +950,7 @@ the pair measures what an unseeded refit moves on its own (80 studies, one pair 
 
 - **Refitting one checkpoint twice moves aggregate bias by 6–14 points of sd, up to 51
   points at worst**, with the panel, windows, weights, feature set and simulation seed all
-  held fixed. RMSE moves by less than 0.001. That is the floor any two trials must clear
+  held fixed. RMSE moves by less than 0.001. That is the refit noise any two trials must clear
   to be distinguishable, and on gift the spread across a study's trials (19.4) barely
   clears one trial's spread against itself (14.4).
 - **The stopping epoch carries what the loss does not.** Within a study, its rank

@@ -59,7 +59,7 @@ for f in sorted((REPO / "Rescored").glob("real_panel_benchmarks__ValendinLSTM__*
                      d_spearman=abs(first["spearman"] - second.spearman)))
 
 d = pd.DataFrame(rows)
-d.to_csv(RESULTS / "refit_floor.csv", index=False)
+d.to_csv(RESULTS / "refit_noise.csv", index=False)
 print(f"{len(d)} winners refit twice\n")
 print("Mean |movement| from an unseeded refit of the same checkpoint:\n")
 print("| panel | n | MAPE | bias % | Spearman | RMSE |")

@@ -2,7 +2,7 @@
 
 `docs/training-budget.md` "How claims are made": one metric per claim, effects reported as
 Δ of condition means with a 95% bootstrap CI, supported when the interval excludes zero,
-the measured refit floor printed beside it for magnitude, and nothing pooled across panels.
+the measured refit noise printed beside it for magnitude, and nothing pooled across panels.
 
 This regenerates the numbers for every table in:
 
@@ -24,7 +24,7 @@ from scipy.stats import bootstrap
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from effects import REFIT_FLOOR, effect                                  # noqa: E402
+from effects import REFIT_NOISE, effect                                  # noqa: E402
 
 F = pd.read_csv(HERE / "results" / "factorial.csv")
 PANELS = ["cdnow", "electronics", "gift", "multichannel"]
@@ -53,18 +53,18 @@ def contrasts(metric):
                            panel)
                 rows.append(dict(panel=panel, model=model, contrast=name,
                                  mean_a=e.mean_a, mean_b=e.mean_b, delta=e.delta,
-                                 lo=e.lo, hi=e.hi, supported=e.supported, floor=e.floor))
+                                 lo=e.lo, hi=e.hi, supported=e.supported, refit_noise=e.refit_noise))
     return pd.DataFrame(rows)
 
 
 def show(df, title, fmt="{:+.3f}"):
     print(f"\n### {title}\n")
-    print("| panel | model | contrast | from | to | Δ | 95% CI | supported | floor |")
+    print("| panel | model | contrast | from | to | Δ | 95% CI | supported | refit noise |")
     print("| --- | --- | --- | ---: | ---: | ---: | :---: | :---: | ---: |")
     for _, r in df.iterrows():
         print(f"| {r.panel} | {r.model} | {r.contrast} | {r.mean_a:.4g} | {r.mean_b:.4g} | "
               f"{fmt.format(r.delta)} | {fmt.format(r.lo)} to {fmt.format(r.hi)} | "
-              f"{'yes' if r.supported else 'no'} | {r.floor:.4g} |")
+              f"{'yes' if r.supported else 'no'} | {r.refit_noise:.4g} |")
 
 
 sp = contrasts("spearman")

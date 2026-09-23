@@ -234,7 +234,7 @@ Three things this adds to §5.1.
 right.** Δ Spearman from adding the label, 95% bootstrap CI, 20 replications a cell,
 `ValendinLSTM`:
 
-| panel | Δ | 95% CI | supported | refit floor |
+| panel | Δ | 95% CI | supported | refit noise |
 | --- | ---: | :---: | :---: | ---: |
 | electronics | **+0.283** | +0.265 to +0.302 | yes | 0.0105 |
 | multichannel | **+0.182** | +0.162 to +0.199 | yes | 0.0152 |

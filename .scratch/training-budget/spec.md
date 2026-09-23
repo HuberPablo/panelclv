@@ -57,7 +57,7 @@ measures one thing.
   already the direction the pre-launch probes point (`issues/01`).
 
 Bias is **not** a deciding metric here: `docs/benchmarks-real-panels.md` measures a refit
-noise floor of 8.9 points of sd on electronics, and the differences at stake are smaller
+refit noise of 8.9 points of sd on electronics, and the differences at stake are smaller
 than that.
 
 ## Evidence this rests on

@@ -10,8 +10,8 @@ Blocked by: 03
 Spearman 0.032; Pareto/NBD bias −63.0, MAPE 65.7, Spearman 0.297.
 
 Judge on **MAPE and per-customer Spearman**. Bias is not a deciding metric: the refit
-noise floor on electronics is 8.9 points of sd (`docs/benchmarks-real-panels.md`, "The
-refit noise floor, and the stopping epoch").
+noise on electronics is 8.9 points of sd (`docs/benchmarks-real-panels.md`, "The
+refit noise, and the stopping epoch").
 
 ## Then decide, in order
 

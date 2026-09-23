@@ -80,7 +80,7 @@ are claims it downgraded from the stronger form they were first stated in.
 customer-level discrimination. Aggregate MAPE is the primary metric for claims about
 level accuracy. Bias is a secondary calibration diagnostic, used as \|bias\| when comparing
 calibration accuracy. A directional claim — that a condition over- or under-forecasts — needs
-the 95% CI of its mean bias to exclude zero, like every other claim; the bias refit floor is
+the 95% CI of its mean bias to exclude zero, like every other claim; the bias refit noise is
 printed beside it for magnitude and is large, so most bias movements are small. RMSE is reported for completeness and supports no ranking
 claim: under these panels' sparsity every arm sits within 0.004 of the all-zero forecast.
 
@@ -91,10 +91,10 @@ interval excludes zero.** That is the whole criterion; a p-value may appear as
 supplementary colour but is not the test. One implementation computes every effect in this
 document: `.scratch/training-budget/effects.py`.
 
-**The refit floor is a magnitude reference, not a second threshold.** Refit the same
+**The refit noise is a magnitude reference, not a second threshold.** Refit the same
 checkpoint a second time, change nothing else, and the forecast still moves. Measured over
 the 80 archived family-N winners paired with their re-scored refits
-(`.scratch/training-budget/refit_floor.py`):
+(`.scratch/training-budget/refit_noise.py`):
 
 | panel | MAPE | bias % | Spearman | RMSE |
 | --- | ---: | ---: | ---: | ---: |
@@ -105,10 +105,10 @@ the 80 archived family-N winners paired with their re-scored refits
 
 This is printed beside every effect so a reader can see whether Δ is large or small
 relative to what an unseeded refit moves on its own. It never adds a significance hurdle:
-an effect whose interval excludes zero but whose Δ sits under the floor is supported and
+an effect whose interval excludes zero but whose Δ sits under the refit noise is supported and
 small, and is described that way.
 
-**Equivalence needs a margin, named first.** The refit floor is the natural one, since an
+**Equivalence needs a margin, named first.** The refit noise is the natural one, since an
 equivalence margin is by definition a practical-magnitude reference. The claim is made
 when the 95% CI of Δ lies entirely inside ±margin, and is always worded as "no difference
 larger than ±m is detectable at n = 20" — never "no difference". Using the 95% interval
@@ -192,7 +192,7 @@ number that decided how long every model trained is the 7 in `patience`.
 This extends two things `docs/benchmarks-real-panels.md` already reports. Its section
 "Optuna's validation loss cannot see which runs forecast badly" notes that very early
 stopping is common on multichannel — the best trial stopped at epoch 3 or earlier in 55%
-of ValendinLSTM runs there — and its section "The refit noise floor, and the stopping
+of ValendinLSTM runs there — and its section "The refit noise, and the stopping
 epoch" finds that within a study, the stopping epoch's rank correlation with holdout
 Spearman averages +0.48 on CDNOW and gift: trials that trained longer rank better. Both
 treat the stopping epoch as something observed. This document asks what sets it.
@@ -251,9 +251,9 @@ patience-7 run.
 > where §9's are independent. Its direction held; its magnitudes moved.
 
 **Read MAPE and Spearman here, not bias.** `docs/benchmarks-real-panels.md` measures a
-refit noise floor on electronics of 8.9 points of sd — refitting one checkpoint twice
+refit noise on electronics of 8.9 points of sd — refitting one checkpoint twice
 moves aggregate bias by that much with everything else held fixed. The bias difference
-above (+31.0 → +9.9, five replications) sits inside that floor and is not a result. The
+above (+31.0 → +9.9, five replications) sits inside that noise and is not a result. The
 MAPE difference of 14 points and the sevenfold Spearman difference are outside it.
 
 The patience-7 rows reproduce the archived electronics benchmark
@@ -437,7 +437,7 @@ replications on electronics, 100 trials for the searched arms, 200 Monte Carlo p
 | **`floor50`** | **+0.3 ± 18.2** | **50.1** | 0.074 ± 0.049 | 0.19 |
 
 Each arm against `archive`, as Δ of condition means with a 95% bootstrap CI, 20
-independent replications each. Electronics' refit floor is 3.63 MAPE and 0.0105 Spearman.
+independent replications each. Electronics' refit noise is 3.63 MAPE and 0.0105 Spearman.
 
 | model | arm | Δ MAPE | 95% CI | Δ Spearman | 95% CI |
 | --- | --- | ---: | :---: | ---: | :---: |
@@ -451,7 +451,7 @@ independent replications each. Electronics' refit floor is 3.63 MAPE and 0.0105 
 Bold rows are the supported ones — interval excludes zero. Two readings the earlier
 p-value version of this table obscured: **the LSTM's level gain under `paper90` is not
 supported** (−4.5, interval spanning zero), and **the LSTM's discrimination gain under
-`floor50`, though supported, is +0.043 against a refit floor of 0.0105** — real, and four
+`floor50`, though supported, is +0.043 against a refit noise of 0.0105** — real, and four
 times the noise rather than fourteen times it as for the benchmark.
 
 **Three things follow, and the first is the one to remember.**
@@ -491,7 +491,7 @@ RMSE separates nothing, as everywhere on these panels: every arm sits between 0.
 0.3774 against the all-zero forecast's 0.3775.
 
 Bias moves a lot and means less: `paper90`'s −5.7 ± 27.0 is a better centre than
-`archive`'s +39.8 ± 20.4, but the across-replication spread grows and the refit noise floor
+`archive`'s +39.8 ± 20.4, but the across-replication spread grows and the refit noise
 on this panel is 8.9 points of sd (§3). Read MAPE and Spearman.
 
 ## 10. Why the paper's rule keeps epoch 1 here: the split, not the panel
@@ -895,7 +895,7 @@ Per-customer Spearman, mean over 20 replications:
 
 **Every contrast the 2×2 supports, under the standard** — Δ of condition means with a 95%
 bootstrap CI, 20 independent replications a cell, beside that panel's Spearman refit
-floor. `label alone` and `floor alone` are measured against `archive / no_cluster`;
+noise. `label alone` and `floor alone` are measured against `archive / no_cluster`;
 `+label` and `+floor` are measured against the other lever already applied.
 
 | panel | model | label alone | floor alone | +floor (on label) | +label (on floor) |
@@ -928,9 +928,9 @@ multichannel, **negative and supported on gift**, and not supported on cdnow.
 
 **Crossing them adds little, and how little is now bounded.** Δ from adding the floor on
 top of the label, 95% bootstrap CI, 20 replications a cell, beside that panel's Spearman
-refit floor:
+refit noise:
 
-| panel | model | Δ | 95% CI | supported | refit floor |
+| panel | model | Δ | 95% CI | supported | refit noise |
 | --- | --- | ---: | :---: | :---: | ---: |
 | cdnow | ValendinLSTM | +0.003 | −0.024 to +0.033 | no | 0.0159 |
 | | LSTM | +0.004 | −0.014 to +0.024 | no | |
@@ -952,7 +952,7 @@ hundredths.
 **On its own the floor is a large effect on two panels, nothing on one, and negative on
 another** — Δ Spearman from adding the floor with no label, ValendinLSTM:
 
-| panel | Δ | 95% CI | supported | refit floor |
+| panel | Δ | 95% CI | supported | refit noise |
 | --- | ---: | :---: | :---: | ---: |
 | electronics | **+0.157** | +0.119 to +0.193 | yes | 0.0105 |
 | multichannel | **+0.123** | +0.099 to +0.148 | yes | 0.0152 |
@@ -992,19 +992,19 @@ Aggregate MAPE, same cells:
 
 Δ MAPE from the floored arm against `archive`, no cluster label, 95% bootstrap CI:
 
-| panel | model | archive | floored | Δ | 95% CI | supported | refit floor |
+| panel | model | archive | floored | Δ | 95% CI | supported | refit noise |
 | --- | --- | ---: | ---: | ---: | :---: | :---: | ---: |
 | multichannel | LSTM | 140.9 | **52.8** | **−88.1** | −112.3 to −66.3 | yes | 7.71 |
 | multichannel | ValendinLSTM | 84.9 | **56.0** | **−28.9** | −37.9 to −20.1 | yes | 7.71 |
 | electronics | ValendinLSTM | 69.1 | **46.3** | **−22.8** | −28.2 to −17.2 | yes | 3.63 |
 | electronics | LSTM | 56.9 | 51.7 | −5.2 | −12.4 to +2.5 | no | 3.63 |
-| gift | ValendinLSTM | 32.2 | 28.9 | −3.3 | −7.0 to −0.1 | yes (below floor) | 5.89 |
+| gift | ValendinLSTM | 32.2 | 28.9 | −3.3 | −7.0 to −0.1 | yes (below refit noise) | 5.89 |
 | gift | LSTM | 30.3 | 29.9 | −0.5 | −4.1 to +3.2 | no | 5.89 |
 | cdnow | ValendinLSTM | 51.7 | 56.5 | +4.8 | −20.8 to +30.8 | no | 5.83 |
 | **cdnow** | **LSTM** | **57.7** | **183.9** | **+126.2** | +78.6 to +174.0 | yes (**worse**) | 5.83 |
 
-Gift/ValendinLSTM is the case the floor column exists for: the interval excludes zero, so
-the effect is supported, but Δ = −3.3 sits under that panel's 5.89 refit floor. Supported
+Gift/ValendinLSTM is the case the refit-noise column exists for: the interval excludes zero, so
+the effect is supported, but Δ = −3.3 sits under that panel's 5.89 refit noise. Supported
 and small.
 
 **Something in the floored arm triples CDNOW's LSTM error** (Δ +126.2, +78.6 to +174.0).
@@ -1110,7 +1110,7 @@ top carries the resulting status of each claim.
 | ---: | --- | --- | --- |
 | E1 | CDNOW `archive` / `paper` / `floor50` — the floor as the **only** change against the control | §15.2 attributes CDNOW's MAPE blow-up to the epoch floor, but family U's `floored` arm also changed the batch size, the weight decay, the learning rate, the search and the epoch budget. The claim is **not identified** by that design. | running |
 | E2 | Recompute `kmeans_8` from calibration periods **before** the validation window, re-run the electronics `archive/kmeans_8` cell, 20 replications | The label is read at the last calibration period (`cluster_features.py:97`) and broadcast to every calibration row (`panel_dataset.py:961`), so a model training on period 5 sees a summary of periods 1–104. Holdout scoring is clean — the statistic is available at the forecast origin — but validation-based selection and early stopping see a label that has seen the window they score. | to do |
-| E3 | The Spearman refit floor | ✔ done — 0.0105 to 0.0159 depending on panel, now in "How claims are made" | done |
+| E3 | The Spearman refit noise | ✔ done — 0.0105 to 0.0159 depending on panel, now in "How claims are made" | done |
 | E4 | A stopping criterion that suits a flat curve — relative threshold, smoothed curve, step budget, or no early stopping at all (§13.3 B5–B8) | The floor is a patch. §13.2 says the mechanism is an absolute 10⁻⁴ threshold against a curve gaining 5.4×10⁻⁵ an epoch; none of the principled alternatives has been tried. | to do |
 | E5 | Whether the epoch floor should scale with calibration length rather than be fixed | `paper90` fixes 90 epochs whether the window is 39 weeks (cdnow) or 104 (electronics, gift, multichannel). If E1 confirms harm on cdnow, a fixed epoch count is the likely culprit. | blocked on E1 |
 
