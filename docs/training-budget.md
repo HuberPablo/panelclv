@@ -120,12 +120,19 @@ result is stated for the panel it was measured on. Where panels disagree — and
 mostly disagreement — that is reported as heterogeneity to be explained, never averaged
 into a claim about panels as a class. The panels differ in ways that plausibly matter:
 
-| panel | customers | T_CAL / T_HOLD | zero cells (holdout) | calibration tx | holdout tx | holdout/calibration rate | collapses? |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: |
-| cdnow | 2,357 | 39 / 39 | 98.0% | 4,796 | 1,895 | 0.40 | no |
-| electronics | 829 | 104 / 52 | 98.6% | 4,684 | 1,467 | 0.63 | **yes** |
-| gift | 2,062 | 104 / 52 | 99.0% | 4,207 | 1,146 | 0.54 | no |
-| multichannel | 1,402 | 104 / 52 | 99.7% | 2,016 | 228 | 0.23 | **yes** |
+| panel | customers | T_CAL / T_HOLD | zero cells (holdout) | calibration tx | holdout tx | holdout/calibration rate | forecast CV, median (range) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cdnow | 2,357 | 39 / 39 | 98.0% | 4,796 | 1,895 | 0.40 | 1.32 (0.83–2.02) |
+| electronics | 829 | 104 / 52 | 98.6% | 4,684 | 1,467 | 0.63 | **0.05** (0.05–0.06) |
+| gift | 2,062 | 104 / 52 | 99.0% | 4,207 | 1,146 | 0.54 | 0.65 (0.34–0.75) |
+| multichannel | 1,402 | 104 / 52 | 99.7% | 2,016 | 228 | 0.23 | **0.09** (0.07–0.12) |
+
+Forecast CV is how much the frozen ValendinLSTM's forecast varies between customers under
+the archive recipe: `std / mean` of per-customer predicted holdout totals, over the 20
+`real_panel_benchmarks` replications of each panel. A forecast that gives every customer
+the same number scores 0. That is what this document calls a collapse, and electronics
+and multichannel (bold) are the panels where it happens — an order of magnitude below the
+other two, with no overlap between their ranges.
 
 How much each customer buys. Transactions per customer are over the whole window, not per
 week. The top 10% are the customers with the most calibration transactions, so their
@@ -143,8 +150,8 @@ windows" counts calibration and holdout together. Counts are the target channel 
 models read, so a week's count is already capped at the panel's top class.
 
 **No measured characteristic yet predicts which panels collapse.** Electronics is *less*
-sparse than gift and has the most holdout transactions per customer, and it collapses
-while gift does not. A reader may form hypotheses from this table; this document does not
+sparse than gift and has the most holdout transactions per customer, yet its forecast CV
+is 0.05 against gift's 0.65. A reader may form hypotheses from this table; this document does not
 assert one.
 
 **Seeding protocol**, because "independent replications" is the load-bearing assumption
