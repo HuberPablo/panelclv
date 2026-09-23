@@ -13,8 +13,8 @@ epochs, roughly 2,300 gradient updates, and our benchmark winners receive about 
 that comparison, and the rest of the document is the evidence that it matters.
 
 **Tested, §9.** On electronics, 20 independent replications per arm: training the frozen
-benchmark for the paper's own 90 epochs moves MAPE by −22.3 (95% CI −27.0 to −17.7) and
-per-customer Spearman by +0.150 (95% CI +0.114 to +0.186). Copying the paper's *settings*
+benchmark for the paper's own 90 epochs moves MAPE by −22.3 (95% CI −28.2 to −16.2) and
+per-customer Spearman by +0.150 (95% CI +0.108 to +0.191). Copying the paper's *settings*
 without the epochs moves neither. **The electronics collapse reported in
 `docs/benchmarks-real-panels.md` is substantially a training artefact** — that row is
 ours, not a published result of Valendin et al.
@@ -44,7 +44,7 @@ on; none generalises.
 | ---: | --- | --- | --- | --- | --- | ---: |
 | 1 | Patience, not the epoch budget, ends every archived run | descriptive | all four | — | established | 1 |
 | 2 | With early stopping off, validation CE keeps falling to epoch 88–247 | mechanism | cdnow, electronics, multichannel (n=3) | val CE | established | 2 |
-| 3 | The reference notebook's training recipe differs from ours on five settings | descriptive | — | — | established | 4 |
+| 3 | The reference notebook's training recipe differs from ours in optimizer, weight decay, learning-rate selection, batch size, patience and epoch budget | descriptive | — | — | established | 4 |
 | 4 | Under patience 7 the search prefers the batch size that trains least | descriptive | electronics | val CE | established | 5 |
 | 5 | Training to the paper's epoch count improves level and discrimination | superiority | electronics | MAPE, Spearman | established | 9 |
 | 6 | The paper's settings without the floor change nothing | bounded | electronics | MAPE, Spearman | bounded | 9 |
@@ -72,15 +72,16 @@ on; none generalises.
 
 ## How claims are made
 
-The standard the rest of this document is held to. It was written after §15, which is why
-several rows above are `bounded` rather than `established`: they were stated more strongly
-before there was a standard to state them against.
+The standard the whole document is held to. It was written after §15 and then applied
+back to every section, including those written before it; the rows above marked `bounded`
+are claims it downgraded from the stronger form they were first stated in.
 
 **One metric per claim.** Per-customer Spearman is the primary metric for claims about
 customer-level discrimination. Aggregate MAPE is the primary metric for claims about
 level accuracy. Bias is a secondary calibration diagnostic, used as \|bias\| when comparing
-calibration accuracy, and it supports a directional claim only when the effect clearly
-exceeds its refit variability. RMSE is reported for completeness and supports no ranking
+calibration accuracy. A directional claim — that a condition over- or under-forecasts — needs
+the 95% CI of its mean bias to exclude zero, like every other claim; the bias refit floor is
+printed beside it for magnitude and is large, so most bias movements are small. RMSE is reported for completeness and supports no ranking
 claim: under these panels' sparsity every arm sits within 0.004 of the all-zero forecast.
 
 **Effects are differences, reported with an interval.** Run *n* independent replications
@@ -275,7 +276,9 @@ from it layer for layer. The *training recipe* in the same notebook was not.
 | epoch budget | 150 | 100 |
 | epochs actually trained | ~90–100 | median best epoch 7–14 (§1) |
 
-The last row is the notebook's own claim: *"This example takes about 100 epochs in total"*
+The first four rows are settings; the last is what they produce, not a setting of its own
+(Keras's Adam also uses epsilon 1e-7 against torch's 1e-8, left out as immaterial). The
+notebook's figure there is its own claim: *"This example takes about 100 epochs in total"*
 and *"the final validation loss should end up around 0.44 after ±90 epochs with the
 default parameters"* (cells 15 and 16).
 
