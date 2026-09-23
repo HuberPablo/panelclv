@@ -193,6 +193,20 @@ epochs_run = best_epoch + 1 + patience      (capped at n_epochs)
 and `best_epoch`, the value stored in every trial's `user_attrs`, is the epoch whose
 weights were kept — not the epoch training ended at.
 
+The formula is ours, derived from `fit_model`'s stopping rule; it is not in Valendin et
+al.'s code or paper. Trials store only `best_epoch`, so "epochs run" below is computed from
+it, not recorded. It holds only when two conditions are met:
+
+- **`min_epochs = 0`.** A training floor holds the break until the floor, so a floored run
+  trains at least `min_epochs` epochs whatever its best epoch was. Every trial in the table
+  below has no floor: it is the archive before the `training_budget`, `factorial` and
+  `selection_rescore` families, which are the only ones that set one.
+- **The trial completed.** A trial Optuna pruned stopped for another reason. Only
+  `COMPLETE` trials are counted.
+
+Where these do not hold, or wherever a comparison can be made on `best_epoch` directly,
+this document uses `best_epoch`.
+
 Across every archived study on the four real panels (407,950 trials, of which 163,363
 completed; `patience = 7`, `n_epochs = 100` in all but 308 of them):
 
