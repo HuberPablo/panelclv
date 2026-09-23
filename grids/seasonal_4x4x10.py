@@ -126,7 +126,7 @@ LSTM = ModelSpec(
     model_type="lstm",
     n_trials=100,
     search_space={
-        "batch_size":       {64, 128, 256},
+        "batch_size":       {32, 64, 128, 256},
         "learning_rate":    (1e-4, 1e-2, "log"),
         "embedding_dim":    {64, 128, 256},
         "lstm_hidden_size": {32, 64, 128},
@@ -148,7 +148,7 @@ TRANSFORMER = ModelSpec(
     model_type="transformer",
     n_trials=100,
     search_space={
-        "batch_size":         {64, 128, 256},
+        "batch_size":         {32, 64, 128, 256},
         "d_model":            {32, 64, 128},
         "nhead":              {2, 4, 8},
         "num_encoder_layers": (1, 3, "int"),
