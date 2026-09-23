@@ -83,6 +83,12 @@ calibration accuracy. A directional claim — that a condition over- or under-fo
 the 95% CI of its mean bias to exclude zero, like every other claim; the bias refit noise is
 printed beside it for magnitude and is large, so most bias movements are small. RMSE is reported for completeness and supports no ranking
 claim: under these panels' sparsity every arm sits within 0.004 of the all-zero forecast.
+Forecast CV — `std / mean` of per-customer predicted holdout totals — is reported beside
+Spearman wherever forecasts are compared, and is descriptive too. Spearman is rank-based,
+so it says whether a forecast orders customers correctly but not whether it separates them
+at all: a forecast varying by a few percent can still rank well. CV near 0 is what this
+document calls a collapse — every customer given nearly the same number. Collapse belongs
+to a model under a configuration, not to a panel, so CV lives in the comparison tables.
 
 **Effects are differences, reported with an interval.** Run *n* independent replications
 per condition (*n* = 20 throughout). Report Δ = M̄_B − M̄_A with a **95% bootstrap
@@ -120,19 +126,12 @@ result is stated for the panel it was measured on. Where panels disagree — and
 mostly disagreement — that is reported as heterogeneity to be explained, never averaged
 into a claim about panels as a class. The panels differ in ways that plausibly matter:
 
-| panel | customers | T_CAL / T_HOLD | zero cells (holdout) | calibration tx | holdout tx | holdout/calibration rate | forecast CV, median (range) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| cdnow | 2,357 | 39 / 39 | 98.0% | 4,796 | 1,895 | 0.40 | 1.32 (0.83–2.02) |
-| electronics | 829 | 104 / 52 | 98.6% | 4,684 | 1,467 | 0.63 | **0.05** (0.05–0.06) |
-| gift | 2,062 | 104 / 52 | 99.0% | 4,207 | 1,146 | 0.54 | 0.65 (0.34–0.75) |
-| multichannel | 1,402 | 104 / 52 | 99.7% | 2,016 | 228 | 0.23 | **0.09** (0.07–0.12) |
-
-Forecast CV is how much the frozen ValendinLSTM's forecast varies between customers under
-the archive recipe: `std / mean` of per-customer predicted holdout totals, over the 20
-`real_panel_benchmarks` replications of each panel. A forecast that gives every customer
-the same number scores 0. That is what this document calls a collapse, and electronics
-and multichannel (bold) are the panels where it happens — an order of magnitude below the
-other two, with no overlap between their ranges.
+| panel | customers | T_CAL / T_HOLD | zero cells (holdout) | calibration tx | holdout tx | holdout/calibration rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cdnow | 2,357 | 39 / 39 | 98.0% | 4,796 | 1,895 | 0.40 |
+| electronics | 829 | 104 / 52 | 98.6% | 4,684 | 1,467 | 0.63 |
+| gift | 2,062 | 104 / 52 | 99.0% | 4,207 | 1,146 | 0.54 |
+| multichannel | 1,402 | 104 / 52 | 99.7% | 2,016 | 228 | 0.23 |
 
 How much each customer buys. Transactions per customer are over the whole window, not per
 week. The top 10% are the customers with the most calibration transactions, so their
@@ -149,9 +148,10 @@ holdout column shows how much the heaviest known buyers keep buying.
 windows" counts calibration and holdout together. Counts are the target channel the
 models read, so a week's count is already capped at the panel's top class.
 
-**No measured characteristic yet predicts which panels collapse.** Electronics is *less*
-sparse than gift and has the most holdout transactions per customer, yet its forecast CV
-is 0.05 against gift's 0.65. A reader may form hypotheses from this table; this document does not
+**No measured panel characteristic yet predicts where a model collapses.** Under the
+archive recipe with no cluster label, both LSTMs collapse on electronics and multichannel
+(forecast CV 0.08–0.15, §15.1) and not on cdnow or gift (0.54–1.18). Yet electronics is
+*less* sparse than gift and has the most holdout transactions per customer. A reader may form hypotheses from this table; this document does not
 assert one.
 
 **Seeding protocol**, because "independent replications" is the load-bearing assumption
@@ -270,7 +270,9 @@ patience-7 run.
 > **Superseded by §9**, which runs the same comparison at n = 20 with the standard's Δ and
 > intervals. Read this section as the pilot that motivated it, not as evidence: five
 > replications, no interval, and the arms here are RNG-coupled (§7), so they are paired
-> where §9's are independent. Its direction held; its magnitudes moved.
+> where §9's are independent. Its direction held; its magnitudes moved. Its last column is the
+> raw sd of per-customer predicted totals rather than forecast CV, because the pilot did
+> not store its forecasts.
 
 **Read MAPE and Spearman here, not bias.** `docs/benchmarks-real-panels.md` measures a
 refit noise on electronics of 8.9 points of sd — refitting one checkpoint twice
@@ -442,21 +444,21 @@ replications on electronics, 100 trials for the searched arms, 200 Monte Carlo p
 
 ### ValendinLSTM (the frozen benchmark)
 
-| arm | bias % | MAPE | Spearman | sd of predicted totals |
+| arm | bias % | MAPE | Spearman | forecast CV |
 | --- | ---: | ---: | ---: | ---: |
-| `archive` | +39.8 ± 20.4 | 69.1 | 0.027 ± 0.043 | 0.21 |
-| `paper` | +28.7 ± 11.1 | 68.5 | 0.016 ± 0.029 | 0.19 |
-| **`paper90`** | **−5.7 ± 27.0** | **46.8** | **0.177 ± 0.089** | **0.49** |
-| `floor50` | +4.7 ± 29.3 | 47.9 | 0.168 ± 0.084 | 0.44 |
+| `archive` | +39.8 ± 20.4 | 69.1 | 0.027 ± 0.043 | 0.09 ± 0.03 |
+| `paper` | +28.7 ± 11.1 | 68.5 | 0.016 ± 0.029 | 0.08 ± 0.00 |
+| **`paper90`** | **−5.7 ± 27.0** | **46.8** | **0.177 ± 0.089** | **0.31 ± 0.18** |
+| `floor50` | +4.7 ± 29.3 | 47.9 | 0.168 ± 0.084 | 0.24 ± 0.14 |
 
 ### LSTM, `no_ar-no_cluster-valendin`
 
-| arm | bias % | MAPE | Spearman | sd of predicted totals |
+| arm | bias % | MAPE | Spearman | forecast CV |
 | --- | ---: | ---: | ---: | ---: |
-| `archive` | +30.4 ± 16.7 | 59.3 | 0.030 ± 0.044 | 0.19 |
-| `paper` | +34.5 ± 15.7 | 63.5 | 0.020 ± 0.029 | 0.19 |
-| `paper90` | +31.1 ± 31.7 | 54.7 | 0.174 ± 0.075 | 0.56 |
-| **`floor50`** | **+0.3 ± 18.2** | **50.1** | 0.074 ± 0.049 | 0.19 |
+| `archive` | +30.4 ± 16.7 | 59.3 | 0.030 ± 0.044 | 0.08 ± 0.01 |
+| `paper` | +34.5 ± 15.7 | 63.5 | 0.020 ± 0.029 | 0.08 ± 0.01 |
+| `paper90` | +31.1 ± 31.7 | 54.7 | 0.174 ± 0.075 | 0.24 ± 0.14 |
+| **`floor50`** | **+0.3 ± 18.2** | **50.1** | 0.074 ± 0.049 | 0.11 ± 0.04 |
 
 Each arm against `archive`, as Δ of condition means with a 95% bootstrap CI, 20
 independent replications each. Electronics' refit noise is 3.63 MAPE and 0.0105 Spearman.
@@ -914,6 +916,24 @@ Per-customer Spearman, mean over 20 replications:
 | | LSTM | 0.326 | 0.356 | 0.263 | **0.359** | |
 | multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.189 |
 | | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
+
+Forecast CV of the same forecasts, mean over 20 replications:
+
+| panel | model | archive / no_cluster | archive / kmeans_8 | floored / no_cluster | floored / kmeans_8 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| cdnow | ValendinLSTM | 1.18 | 2.30 | 1.03 | 2.29 |
+| | LSTM | 0.85 | 1.94 | 0.36 | 1.85 |
+| electronics | ValendinLSTM | **0.08** | 1.30 | 0.30 | 1.35 |
+| | LSTM | **0.09** | 1.14 | 0.25 | 1.38 |
+| gift | ValendinLSTM | 0.57 | 1.35 | 0.42 | 1.38 |
+| | LSTM | 0.54 | 1.43 | 0.48 | 1.35 |
+| multichannel | ValendinLSTM | **0.15** | 1.92 | 0.47 | 2.16 |
+| | LSTM | **0.13** | 1.85 | 0.39 | 2.10 |
+
+The collapsed cells (bold) are the ones with near-zero Spearman above, and each lever
+lifts them out: the floor by a factor of three, the label by an order of magnitude. The two
+measures do not always move together — cdnow's floored LSTM without a label has CV 0.36,
+flatter than any other cdnow cell, yet ranks at 0.352.
 
 **Every contrast the 2×2 supports, under the standard** — Δ of condition means with a 95%
 bootstrap CI, 20 independent replications a cell, beside that panel's Spearman refit
