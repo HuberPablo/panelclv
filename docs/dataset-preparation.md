@@ -3,6 +3,10 @@
 How five pipelines turn transactions into weekly per-customer counts. Written for the
 gift retailer, because it is the one dataset all of them touch.
 
+The panels built from the complete raw sources in `Datasets/Datasets_full/` (seven
+datasets, acquisition cohorts, 2y and 3y calibrations) are documented in
+`docs/datasets.md`.
+
 | Pipeline | Where it lives |
 |---|---|
 | **Valendin et al.** | `Original_paper_model/banking_transactions_demo.ipynb` — the reference notebook, run on Czech bank data |
