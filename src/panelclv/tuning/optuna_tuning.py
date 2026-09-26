@@ -79,7 +79,7 @@ from panelclv.training.loop import fit_model
 # curve. The search-space half of the same question belongs to the registry entry,
 # which declares what each model searches.
 TRAINING_CONTROLS: frozenset[str] = frozenset({
-    "n_epochs", "patience", "min_epochs",   # training control (scalar, or a search spec)
+    "n_epochs", "patience", "min_epochs", "select_from_epoch",  # training control
     "checkpoint_dir", "verbose",     # bookkeeping
     "loss_type", "class_weights", "focal_gamma", "emd_weight",  # loss configuration
     "grad_clip", "log_wandb", "seed",   # optimiser / logging / Optuna sampler seed
@@ -347,6 +347,7 @@ def objective(
         n_epochs=suggest_param(trial, "n_epochs", training.get("n_epochs", 50)),
         patience=suggest_param(trial, "patience", training.get("patience", 5)),
         min_epochs=suggest_param(trial, "min_epochs", training.get("min_epochs", 0)),
+        select_from_epoch=training.get("select_from_epoch", 0),
         learning_rate=params["learning_rate"],
         weight_decay=params["weight_decay"],
         grad_clip=training.get("grad_clip", 1.0),
@@ -409,6 +410,7 @@ def run_optuna_study(
     `(lo, hi, "log"|"int")` tuple a range, a scalar is pinned); anything left out
     keeps the entry's own range, and a key the model does not have raises. `training`
     carries what is not searched — `n_epochs`, `patience`, `min_epochs`,
+    `select_from_epoch` (a scalar: the first epoch whose weights may be kept),
     `checkpoint_dir`, `verbose`, `loss_type`, `class_weights`, `focal_gamma`,
     `emd_weight`, `grad_clip`, `log_wandb`,
     `seed`. The first three sit there because they are training control, but
@@ -495,8 +497,10 @@ def run_optuna_study(
         # gets a pruner that waits exactly as long as its training loop does.
         # `min_epochs` may itself be a search spec, so take the largest floor any
         # trial could draw.
+        # `select_from_epoch` holds a trial back the same way, so it counts too.
         spec = training.get("min_epochs", 0)
         floors = spec if isinstance(spec, (set, frozenset, tuple, list)) else [spec]
+        floors = [*floors, training.get("select_from_epoch", 0)]
         warmup = max([3] + [int(f) for f in floors if isinstance(f, (int, float))])
         pruner = optuna.pruners.MedianPruner(n_warmup_steps=warmup)
     elif pruner is False:

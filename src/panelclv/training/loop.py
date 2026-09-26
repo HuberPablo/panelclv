@@ -204,6 +204,7 @@ def fit_model(
     n_epochs: int = 50,
     patience: int = 5,
     min_epochs: int = 0,
+    select_from_epoch: int = 0,
     learning_rate: float = 1e-3,
     weight_decay: float = 0.0,
     grad_clip: float | None = 1.0,
@@ -252,6 +253,12 @@ def fit_model(
     returned are still the best-by-validation ones. 0 (default) is the historical
     behaviour. A caller that sets it should widen the Optuna pruner's warm-up to match,
     or trials are pruned before the floor can pay (`tuning.run_optuna_study` does this).
+
+    `select_from_epoch` changes what is selected, where `min_epochs` does not: epochs
+    before it (1-based) are trained but are not candidates, so the weights returned come
+    from that epoch or later, and patience only starts counting there. It exists to test
+    whether weights trained longer forecast better than the early best-by-validation
+    ones (`docs/benchmarks-real-panels.md`). 0 (default) makes every epoch a candidate.
 
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.
@@ -340,15 +347,17 @@ def fit_model(
                 f"val_f1={record['val_f1']:.4f}"
             )
 
-        # Best-by-loss tracking (primary objective).
-        improved = (val_metrics["loss"] + 1e-4) < best_val_loss
+        # Best-by-loss tracking (primary objective). An epoch before `select_from_epoch`
+        # is neither a candidate nor a step towards patience.
+        eligible = epoch + 1 >= select_from_epoch
+        improved = eligible and (val_metrics["loss"] + 1e-4) < best_val_loss
         if improved:
             best_val_loss = val_metrics["loss"]
             best_val_f1 = val_metrics.get("f1_weighted", best_val_f1)
             best_epoch = epoch
             best_state = copy.deepcopy(model.state_dict())
             patience_counter = 0
-        else:
+        elif eligible:
             patience_counter += 1
 
         # Optuna pruning hook.

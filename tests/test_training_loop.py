@@ -42,7 +42,7 @@ def _loader(target_class: int) -> DataLoader:
     return DataLoader(TensorDataset(samples, targets), batch_size=4, shuffle=False)
 
 
-def _fit_past_the_best_epoch(tmp_path, min_epochs: int = 0):
+def _fit_past_the_best_epoch(tmp_path, min_epochs: int = 0, select_from_epoch: int = 0):
     """Train on one class while validating on another, so validation only worsens.
 
     Every gradient step makes the model more certain of the training class, which is
@@ -70,6 +70,7 @@ def _fit_past_the_best_epoch(tmp_path, min_epochs: int = 0):
         n_epochs=12,
         patience=2,
         min_epochs=min_epochs,
+        select_from_epoch=select_from_epoch,
         learning_rate=0.1,     # large enough that one epoch moves the weights visibly
         device="cpu",
         checkpoint_dir=str(tmp_path),
@@ -149,3 +150,25 @@ def test_min_epochs_does_not_change_which_epoch_is_selected(tmp_path):
     _, floored = _fit_past_the_best_epoch(tmp_path, min_epochs=10)
 
     assert floored.best_epoch == 0
+
+
+def test_select_from_epoch_keeps_weights_no_earlier_than_it(tmp_path):
+    """`select_from_epoch=5` returns epoch 5's weights although epoch 1 was better.
+
+    Validation only worsens here, so the unrestricted winner is epoch 0 (1-based: 1).
+    With the restriction the first eligible epoch, 1-based 5, is the best candidate.
+    """
+    _, result = _fit_past_the_best_epoch(tmp_path, select_from_epoch=5)
+
+    assert result.best_epoch == 4          # 0-based index of the 5th epoch
+
+
+def test_select_from_epoch_counts_patience_only_from_there(tmp_path):
+    """Epochs before the first eligible one do not use up patience.
+
+    The run trains the 4 ineligible epochs, the 5th (selected), then `patience` = 2
+    more before stopping: 7 in all, not the 3 an unrestricted run takes.
+    """
+    _, result = _fit_past_the_best_epoch(tmp_path, select_from_epoch=5)
+
+    assert len(result.history) == 7
