@@ -100,7 +100,7 @@ def test_built_panel_feeds_prepare_dataset(name, cal, csv_path, json_path):
     assert not panel.isna().any().any()
     out = prepare_dataset(panel, config, verbose=False)
     assert out["T_HOLD"] == 52
-    assert out["T_CAL"] == {"2y": 104, "3y": 156}[cal]
+    assert out["T_CAL"] == 52 * bfp.CAL_YEARS[cal]
     # The cohort is chosen at build time, so the calibration-activity filter drops
     # nobody.
     assert out["N"] == panel["Id"].nunique()

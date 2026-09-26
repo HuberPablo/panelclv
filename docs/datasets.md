@@ -22,8 +22,8 @@ Each dataset gets one panel per calibration it can hold:
 
 | File | Content |
 |---|---|
-| `<name>_<2y\|3y>_customer_week_panel.csv` | `Id, year, week, Transactions`, then the static covariates |
-| `<name>_<2y\|3y>_customer_week_panel.config.json` | `PanelConfig.to_dict()`: window dates, `static` role, embedding declarations |
+| `<name>_<2y\|3y\|5y>_customer_week_panel.csv` | `Id, year, week, Transactions`, then the static covariates |
+| `<name>_<2y\|3y\|5y>_customer_week_panel.config.json` | `PanelConfig.to_dict()`: window dates, `static` role, embedding declarations |
 
 The CSV is dense: every customer has every week, with zeros filled in, in the layout
 `prepare_dataset` reads. The sidecar means nothing needs restating:
@@ -74,6 +74,10 @@ is always the last calibration year (ADR-0001).
 |---|---|---|---|---|
 | `2y` | year 1 | year 2 | year 3 | 156 weeks |
 | `3y` | years 1–2 | year 3 | year 4 | 208 weeks |
+| `5y` | years 1–4 | year 5 | year 6 | 312 weeks |
+
+`5y` exists for electronics only. It is the split Valendin et al. use for that dataset
+(260 calibration weeks, one-year holdout).
 
 The panel ends at the end of the holdout. A calibration the data cannot cover raises
 an error instead of being trimmed, which is why VoD has no `3y` panel.
@@ -105,7 +109,7 @@ from that simulated history (`docs/feature_engineering.md`). Behaviour covariate
 
 | Dataset | Transaction | Cohort (first purchase) | Customers | Calibrations | Holdout transactions 2y / 3y | Customers active in holdout 2y / 3y |
 |---|---|---|---|---|---|---|
-| electronics | household-day, purchase types, price > 0 | 1998-12-02 .. 1999-11-30 | 3,755 | 2y, 3y | 2,625 / 2,598 | 34.3% / 32.5% |
+| electronics | household-day, purchase types, price > 0 | 1998-12-02 .. 1999-11-30 | 3,755 | 2y, 3y, 5y | 2,625 / 2,598 | 34.3% / 32.5% |
 | gift | customer-day with an order | 2001-03-01 .. 2001-05-31, acquired ≥ 2001-03 | 918 | 2y, 3y | 416 / 391 | 22.4% / 22.2% |
 | multichannel | customer-day with a priced order line | 2005-01-01 .. 2005-03-31 | 1,379 | 2y, 3y | 220 / 160 | 11.2% / 9.3% |
 | books | customer-day with a priced line | 2008-01-01 .. 2008-03-31 | 1,218 | 2y, 3y | 2,264 / 2,152 | 70.0% / 65.3% |
@@ -140,6 +144,23 @@ outside the panel, leaving **3,755**.
 |---|---|---|---|
 | `2y` | 1998-12-02 .. 1999-12-01 | .. 2000-11-30 | 2000-12-01 .. 2001-12-01 |
 | `3y` | 1998-12-02 .. 2000-11-30 | .. 2001-12-01 | 2001-12-02 .. 2002-12-01 |
+| `5y` | 1998-12-02 .. 2002-12-01 | .. 2003-12-01 | 2003-12-02 .. 2004-11-30 |
+
+**The `5y` panel reproduces the paper's split.** Valendin et al. (Table 3) calibrate
+on 260 weeks and hold out the final year, ending on the last day of data. On the
+`5y` panel:
+
+| Statistic | Paper | `5y` panel |
+|---|---|---|
+| Cohort | 3,782 | 3,755 |
+| Calibration mean transactions | 4.5 | 4.55 |
+| Calibration non-repeaters | 23% | 23% |
+| Holdout weeks | 53 | 52 |
+| Holdout mean transactions | 0.6 | 0.57 (2,153 in total) |
+| Holdout inactive | 72% | 73% |
+
+The holdout is 52 buckets rather than 53 weeks because week 51 absorbs the year's
+last days (ADR-0009).
 
 **Counts.** Weekly counts reach 5.
 

@@ -8,9 +8,9 @@ source, the rules below, the codes and the resulting counts.
 For each dataset and each calibration it can hold, this writes two files to
 `Datasets/Dataset_full_clean/`:
 
-- `<name>_<2y|3y>_customer_week_panel.csv`, with columns
+- `<name>_<cal>_customer_week_panel.csv` (`cal` is `2y`, `3y` or `5y`), with columns
   `Id, year, week, Transactions, <static covariates>`;
-- `<name>_<2y|3y>_customer_week_panel.config.json`, a `PanelConfig.to_dict()` holding
+- `<name>_<cal>_customer_week_panel.config.json`, a `PanelConfig.to_dict()` holding
   the window dates, the static role and the embedding declarations. A study loads it
   with `PanelConfig.from_dict` rather than restating the dates.
 
@@ -30,6 +30,8 @@ panel's first week, and one year later means the same week index one calendar ye
 
 - `2y` trains on year 1, validates on year 2 and forecasts year 3.
 - `3y` trains on years 1-2, validates on year 3 and forecasts year 4.
+- `5y` trains on years 1-4, validates on year 5 and forecasts year 6. Only electronics
+  has it: it is Valendin et al.'s 260-week calibration and one-year holdout.
 
 The panel runs exactly from the start of training to the end of the holdout. A
 calibration the data cannot cover raises an error rather than being trimmed.
@@ -68,7 +70,7 @@ RAW = REPO_ROOT / "Datasets" / "Datasets_full"
 OUT = REPO_ROOT / "Datasets" / "Dataset_full_clean"
 
 # Calibration name -> number of calibration years (the last one is validation).
-CAL_YEARS = {"2y": 2, "3y": 3}
+CAL_YEARS = {"2y": 2, "3y": 3, "5y": 5}
 
 
 @dataclass(frozen=True)
@@ -467,11 +469,13 @@ _ts = pd.Timestamp
 SPECS: dict[str, DatasetSpec] = {
     # The paper's cohort is first purchase 1998-12-01..1999-11-30. The data open on
     # Dec 1, midway through 1998 week 47, so the panel starts at week 48 (Dec 2).
-    # Households whose first purchase was on Dec 1 fall outside it.
+    # Households whose first purchase was on Dec 1 fall outside it. The 5y
+    # calibration is the paper's split (260 calibration weeks, one-year holdout) and
+    # ends exactly on the last day of data.
     "electronics": DatasetSpec(
         panel_start=_ts("1998-12-02"), cohort_start=_ts("1998-12-02"),
         cohort_end=_ts("1999-11-30"), data_end=_ts("2004-11-30"),
-        calibrations=("2y", "3y"),
+        calibrations=("2y", "3y", "5y"),
         categorical={"income": 10, "gender": 3, "age_band": 6, "children": 3},
         numeric=("first_spend",),
     ),

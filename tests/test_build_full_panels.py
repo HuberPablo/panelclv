@@ -265,6 +265,11 @@ def test_windows_mid_year_start_keep_the_same_week_index():
     for key, year in [("validation_start", 2000), ("holdout_start", 2001)]:
         ts = pd.Timestamp(w[key])
         assert (ts.year, week_of_year(pd.Series([ts])).iat[0]) == (year, 48)
+    # Valendin et al.'s electronics split: 260 calibration weeks, then a one-year
+    # holdout ending on the last day of data.
+    w = bfp.windows(spec, "5y")
+    assert _n_weeks(w["training_start"], w["training_end"]) == 5 * 52
+    assert w["holdout_end"] == "2004-11-30"
 
 
 def test_calibration_longer_than_the_data_raises():
