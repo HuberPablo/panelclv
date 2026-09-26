@@ -867,6 +867,41 @@ Reading:
   3,755 customers through 260 weeks in one batch (a 9.84 GiB allocation). They were
   rerun on 16 GB cards; every study that finished ran on one.
 
+### Training the kept weights longer
+
+`scripts/run_epoch_floor_5y.py`, 2026-09-26: the least-biased searched study's settings
+pinned (r13: learning rate 0.002195, batch 32, weight decay 0), one trial, and the kept
+weights restricted to epoch 20 or later (`from20`) or 30 or later (`from30`) with
+`select_from_epoch`; otherwise the family above (patience 7 from the first eligible
+epoch, the ADR-0008 refit, 500 paths, seeds `BASE_SEED + r`). 20 replications per arm.
+The restriction held: the kept epoch was 20–27 in `from20` and 30–37 in `from30`
+(1-based).
+
+| (20 studies each, mean ± sd) | RMSE (customer total) | bias % | MAPE | Spearman |
+| --- | ---: | ---: | ---: | ---: |
+| searched, early epochs (above) | 1.163 ± 0.011 | +13.8 ± 11.1 | 20.5 ± 6.9 | 0.405 |
+| **`from20`** | **1.159 ± 0.012** | **+10.2 ± 7.4** | **17.8 ± 3.2** | 0.403 |
+| `from30` | 1.157 ± 0.014 | +12.7 ± 7.3 | 19.4 ± 3.4 | 0.402 |
+| Valendin et al., Base LSTM (one model) | 1.18 | +2.7 | 16.9 | — |
+
+Reading:
+
+- **Longer training mostly tightens the spread.** From the searched family to `from20`
+  the sd of bias falls from 11.1 to 7.4 points and of MAPE from 6.9 to 3.2; the worst
+  study goes from +37.4% to +23.9%. The means move less: bias +13.8 → +10.2, MAPE
+  20.5 → 17.8, now close to the published 16.9.
+- **Thirty is not better than twenty.** `from30` is worse than `from20` on bias and MAPE,
+  and within it a later kept epoch goes with *more* bias (Spearman +0.43). Training
+  longer stabilises the forecast; it does not remove the over-forecast.
+- **What remains is a systematic over-forecast of about 10%.** It appears in nearly
+  every study; 4 of 20 per arm are within ±5%. The published +2.7% is a single model and
+  could be a draw from a spread like this one.
+- **Two things changed at once** against the searched family: the hyperparameters were
+  pinned and the kept epoch was moved. The gain cannot be split between them from these
+  runs.
+- **Next:** `scripts/run_epoch_floor_features_5y.py` repeats both arms with
+  `ar_bounded_52` or `kmeans_8` added, on our LSTM in the benchmark's shape.
+
 ## A few bad runs, or bad throughout?
 
 The tables above report mean ± sd, and several SDs are large. So the question is whether a
