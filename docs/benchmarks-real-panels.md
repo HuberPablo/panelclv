@@ -778,6 +778,51 @@ Reading:
 - **What is still missing**: ValendinLSTM on these windows, which would say whether the
   neural benchmark also moves up with the setting or only the AR-fed arms do.
 
+## Pareto/NBD on the paper's electronics split
+
+`scripts/run_real_panel_benchmarks.py --calibration 5y --pareto`, 2026-09-26: one MCMC fit
+on the split Valendin et al. (2022) use for electronics, so the row can be set beside
+their Table 4. Suite `real_panel_benchmarks_cal5y__ParetoNBD__electronics`.
+
+The panel is not the 829-household line-item panel of the tables above. It is
+`Dataset_full_clean/electronics_5y_customer_week_panel.csv` (`docs/datasets.md`): the
+paper's cohort (households whose first purchase is in Dec 1998 – Nov 1999), one
+transaction per purchase day, 260 calibration weeks from 1998-12-02 (the last 52 are
+validation, which Pareto/NBD does not use) and a holdout from 2003-12-02 to 2004-11-30, the
+last day of data. Its descriptive statistics match the paper's Table 3: 4.55 calibration
+transactions per household against 4.5, 23% non-repeaters against 23%, 73% inactive in
+the holdout against 72%.
+
+| | cohort | holdout weeks | RMSE (customer total) | bias % | MAPE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Valendin et al., Table 4 — Pareto/NBD | 3,782 | 53 | 1.26 | −14.8 | 32.2 |
+| **this package — Pareto/NBD** | 3,755 | 52 | **1.23** | **−15.6** | **27.7** |
+| Valendin et al., Table 4 — Base LSTM | 3,782 | 53 | 1.18 | +2.7 | 16.9 |
+| all-zero forecast, this panel | 3,755 | 52 | 1.56 | −100.0 | 100.0 |
+
+The paper's RMSE is on each customer's holdout total, so it is compared with
+`rmse_customer_total`; the per-cell `rmse` of this fit is 0.1115 (all-zero: 0.1131).
+Spearman of per-customer totals is 0.394. The holdout holds 2,153 transactions.
+
+Reading:
+
+- **The benchmark reproduces.** Bias is within 0.8 points of the published figure and
+  customer-level RMSE within 0.03, on a cohort 27 households smaller (those whose first
+  purchase fell on 1 Dec 1998, before the first complete week). A single fit on electronics
+  moves bias by about ±0.35 points across seeds (`docs/p-slstm.md` §10), so 0.8 is close to
+  that noise.
+- **MAPE is 4.5 points lower than published.** MAPE is computed on the weekly aggregate,
+  so it depends on how weeks are cut. This panel uses `dayofyear // 7` capped at 51
+  (ADR-0009), which gives 52 holdout buckets with week 51 absorbing the year's last days;
+  the paper has 53 weeks. The difference in week cutting is the likely cause, but it has
+  not been measured.
+- **The published gap to the LSTM stands.** On this split Pareto/NBD under-forecasts by
+  about 15% while the paper's Base LSTM sits at +2.7% with half the MAPE. A ValendinLSTM
+  run on the same windows (`--calibration 5y --worker`) has not been done.
+- **Why the `2y` electronics rows read −63%.** The −63.0 / −65.0 biases in the tables above
+  are the line-item panel's unit mismatch. On trip-level data and the paper's cohort the
+  same model gives −15.6, as published.
+
 ## A few bad runs, or bad throughout?
 
 The tables above report mean ± sd, and several SDs are large. So the question is whether a

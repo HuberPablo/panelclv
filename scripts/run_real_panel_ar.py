@@ -180,7 +180,7 @@ def check_arm_depth(data: dict) -> None:
 
 
 def build_data(encoding: str, panel: str, cal: str) -> dict:
-    path = benchmarks.CLEAN / f"{panel}_customer_week_panel.csv"
+    path = benchmarks.panel_path(panel, cal)
     if not path.exists():
         raise FileNotFoundError(f"{path} not found — push the panels to this box (Rules.md §3)")
     data = panel_dataset.prepare_dataset(

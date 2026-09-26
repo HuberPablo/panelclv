@@ -43,6 +43,12 @@ windows are the only thing that differs, and the suites carry a `_cal3y` tag so 
 runs read back untouched. `WINDOWS_3Y` lives here and `run_real_panel_ar.py` reads it from
 here, so the benchmark and the developed model cannot drift onto different windows.
 
+**`--calibration 5y`** is electronics on the split of Valendin et al. (2022), Table 3:
+260 calibration weeks (four years to fit, the fifth to validate) and the final year as
+holdout. It reads the trip-level panel `scripts/build_full_panels.py` writes to
+`Dataset_full_clean/`, whose cohort is the paper's, not the 829-household line-item panel
+the other calibrations read, so its numbers can be set beside the paper's Table 4.
+
 Usage:
     # gate the launch — builds every panel, trains each tiny, costs nothing
     python scripts/run_real_panel_benchmarks.py --preflight
@@ -60,6 +66,9 @@ Usage:
     # the same, on the three-year calibration
     python scripts/run_real_panel_benchmarks.py --calibration 3y --pareto
     python scripts/run_real_panel_benchmarks.py --calibration 3y --worker 3/20
+
+    # Valendin et al.'s own electronics split, on the trip-level panel
+    python scripts/run_real_panel_benchmarks.py --calibration 5y --pareto
 """
 
 from __future__ import annotations
@@ -88,6 +97,7 @@ from panelclv.studies import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STUDIES_BASE = REPO_ROOT / "Studies"
 CLEAN = REPO_ROOT / "Datasets" / "Dataset_clean"
+FULL_CLEAN = REPO_ROOT / "Datasets" / "Dataset_full_clean"
 
 EXPERIMENT = "real_panel_benchmarks"
 
@@ -170,10 +180,25 @@ WINDOWS_3Y: dict[str, dict[str, object]] = {
     ),
 }
 
+# Valendin et al.'s electronics split: 260 calibration weeks, the last 52 of them the
+# validation window, then the final year of data. The dates are those of the panel's own
+# config sidecar; the head is sized from the data (weekly counts reach 5).
+WINDOWS_5Y: dict[str, dict[str, object]] = {
+    "electronics": dict(
+        training_start="1998-12-02",     # 1998 week 48, the panel's first week
+        validation_start="2002-12-02",   # 2002 week 48
+        training_end="2003-12-01",       # end of 2003 week 47 — 260 calibration weeks
+        holdout_start="2003-12-02",      # 2003 week 48
+        holdout_end="2004-11-30",        # the last day of data
+    ),
+}
+
 # `--calibration` -> the windows it reads and the panels it covers. `run_real_panel_ar.py`
 # reads this same table, so a benchmark and a developed model on the same calibration are
 # scored on the same weeks by construction.
-CALIBRATIONS: dict[str, dict[str, dict[str, object]]] = {"2y": WINDOWS, "3y": WINDOWS_3Y}
+CALIBRATIONS: dict[str, dict[str, dict[str, object]]] = {
+    "2y": WINDOWS, "3y": WINDOWS_3Y, "5y": WINDOWS_5Y,
+}
 
 
 def calibration_tag(cal: str) -> str:
@@ -198,9 +223,21 @@ def panel_config(panel: str, cal: str) -> PanelConfig:
     )
 
 
+def panel_path(panel: str, cal: str) -> Path:
+    """The panel CSV calibration `cal` reads.
+
+    `5y` reads the trip-level panel on the paper's cohort; every other calibration reads
+    the panels the archived suites were trained on. `run_real_panel_ar.py` asks here too,
+    so a developed model cannot put the 5y windows on the wrong panel.
+    """
+    if cal == "5y":
+        return FULL_CLEAN / f"{panel}_5y_customer_week_panel.csv"
+    return CLEAN / f"{panel}_customer_week_panel.csv"
+
+
 def build_data(panel: str, cal: str) -> dict:
     """`prepare_dataset` for one panel, on the windows of calibration `cal`."""
-    path = CLEAN / f"{panel}_customer_week_panel.csv"
+    path = panel_path(panel, cal)
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. Datasets/ is not in git, so a rented worker needs the "
@@ -411,7 +448,8 @@ def score(model_dir: Path, actual: np.ndarray, ref_ids: np.ndarray) -> dict[str,
             "spearman": spearman(values.sum(axis=1), actual.sum(axis=1))}
 
 
-METRICS = ("bias_percent", "mape_aggregate", "rmse", "spearman")
+# `rmse_customer_total` is the "individual-level RMSE" of Valendin et al., Table 4.
+METRICS = ("bias_percent", "mape_aggregate", "rmse", "rmse_customer_total", "spearman")
 
 
 def report(cal: str) -> None:
@@ -453,7 +491,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--calibration", choices=sorted(CALIBRATIONS), default="2y",
-                        help="2y: the published windows; 3y: fit two years, validate one")
+                        help="2y: the published windows; 3y: fit two years, validate one; "
+                             "5y: the paper's electronics split")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--worker", metavar="I/N", help="train this worker's stride")
     mode.add_argument("--pareto", action="store_true", help="fit Pareto/NBD on every panel")
