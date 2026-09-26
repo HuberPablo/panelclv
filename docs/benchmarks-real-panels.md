@@ -823,6 +823,50 @@ Reading:
   are the line-item panel's unit mismatch. On trip-level data and the paper's cohort the
   same model gives −15.6, as published.
 
+### ValendinLSTM on the same split
+
+`scripts/run_real_panel_benchmarks.py --calibration 5y --worker I/20`, 2026-09-26: 20
+replications of the family-N budget (100 Optuna trials over learning rate and batch size,
+patience 7, the ADR-0008 refit, 500 paths), one study per rented box. Suites
+`real_panel_benchmarks_cal5y__ValendinLSTM__electronics__r00` … `r19`. The week input is
+the published one, checked against the reference notebook before launch: `dayofyear // 7`
+capped at 51, embedded as `Embedding(52, 8)` (sqrt(n)+1); the count is `Embedding(6, 3)`.
+
+| | RMSE (customer total) | bias % | MAPE |
+| --- | ---: | ---: | ---: |
+| Valendin et al., Table 4 — Base LSTM (one model) | 1.18 | +2.7 | 16.9 |
+| **ValendinLSTM, 20 studies: mean ± sd** | **1.163 ± 0.011** | **+13.8 ± 11.1** | **20.5 ± 6.9** |
+| median | 1.161 | +13.1 | 18.1 |
+| min … max | 1.148 … 1.193 | −7.9 … +37.4 | 14.3 … 38.5 |
+| Pareto/NBD, this package | 1.230 | −15.6 | 27.7 |
+| Valendin et al., Table 4 — Pareto/NBD | 1.26 | −14.8 | 32.2 |
+
+Spearman of per-customer totals: 0.405 ± 0.003 (Pareto/NBD 0.394). Per-cell `rmse`:
+0.1111 ± 0.0001 (all-zero 0.1131).
+
+Reading:
+
+- **RMSE and ranking reproduce, and beat the benchmark in every study.** Every one of the
+  20 has a lower customer-level RMSE than Pareto/NBD (max 1.193 against 1.230), and the
+  mean, 1.163, sits just under the paper's 1.18.
+- **MAPE is close in the median, bias is not.** The median MAPE, 18.1, is near the
+  published 16.9, but the mean bias is +13.8% against +2.7%, with an sd of 11 points. The
+  paper reports one model; three of these 20 (−2.0, +3.6, +3.8) land in its range and
+  two (+37.3, +37.4) over-forecast by more than a third.
+- **The search does not choose the bias.** 18 of 20 winners picked batch 32 and learning
+  rates between 0.0011 and 0.0030; every winning validation loss lies in
+  0.05721–0.05732. Learning rate and batch size barely rank with bias (Spearman +0.15
+  and −0.14). The least and most biased studies were trained with practically the same
+  settings, so the spread is the unseeded training, not the hyperparameters.
+- **The one weak signal is the epoch the weights come from.** The selected epoch is
+  early (median 14, range 8–40) and a later one goes with a lower bias (Spearman −0.30).
+  That is weak over 20 studies. It is tested directly by
+  `scripts/run_epoch_floor_5y.py`, which pins the least-biased study's hyperparameters
+  and keeps only weights from epoch 20 or 30 onward.
+- **Two boxes ran out of GPU memory** in the Monte Carlo warm-up, which pushes all
+  3,755 customers through 260 weeks in one batch (a 9.84 GiB allocation). They were
+  rerun on 16 GB cards; every study that finished ran on one.
+
 ## A few bad runs, or bad throughout?
 
 The tables above report mean ± sd, and several SDs are large. So the question is whether a
