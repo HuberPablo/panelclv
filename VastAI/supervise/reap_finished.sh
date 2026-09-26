@@ -158,7 +158,7 @@ for i in d:
     fi
   done
 
-  live=$(vastai show instances --raw 2>/dev/null | python -c \
+  live=$(vastai show instances --raw 2>/dev/null | python3 -c \
     "import json,sys; d=json.load(sys.stdin); print(len(d), round(sum(i.get('dph_total') or 0 for i in d),4))" 2>/dev/null)
   n_live=${live%% *}
 

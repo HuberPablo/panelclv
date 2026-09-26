@@ -18,7 +18,7 @@ SSH=(ssh -n -i "$HOME/.ssh/id_ed25519" -o StrictHostKeyChecking=accept-new
      -o UserKnownHostsFile="$HOME/.ssh/known_hosts_vast" -o BatchMode=yes -o ConnectTimeout=15)
 
 for cycle in $(seq 1 200); do
-  mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python -c "
+  mapfile -t rows < <(vastai show instances --raw 2>/dev/null | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin)
 except Exception: raise SystemExit

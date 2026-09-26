@@ -43,7 +43,7 @@ while true; do
   # 23:49 and $0.05 at 00:05. Charges are posted in batches stamped at the boundary,
   # so the honest figure is "all charge rows since the run began". -c excludes credits,
   # which otherwise make the sum negative.
-  INVOICED=$(vastai show invoices --raw -c -s 2026-08-01 2>/dev/null | python -c "
+  INVOICED=$(vastai show invoices --raw -c -s 2026-08-01 2>/dev/null | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin)
 except Exception: print('?'); raise SystemExit
@@ -57,7 +57,7 @@ for r in rows:
         try: t += float(r.get('amount') or r.get('total') or 0)
         except Exception: pass
 print(f'{t:.2f}')" 2>/dev/null)
-  summary=$(echo "$raw" | python -c "
+  summary=$(echo "$raw" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
 tot=sum(i.get('dph_total') or 0 for i in d)
@@ -65,7 +65,7 @@ st={}
 for i in d: st[i.get('actual_status') or '?']=st.get(i.get('actual_status') or '?',0)+1
 print(f\"{len(d)} box | {' '.join(f'{k}:{v}' for k,v in sorted(st.items()))} | \${tot:.3f}/hr\")
 ")
-  mapfile -t rows < <(echo "$raw" | python -c "
+  mapfile -t rows < <(echo "$raw" | python3 -c "
 import json,sys
 for i in json.load(sys.stdin):
     ip=(i.get('public_ipaddr') or '').strip(); p=(i.get('ports') or {}).get('22/tcp') or []
