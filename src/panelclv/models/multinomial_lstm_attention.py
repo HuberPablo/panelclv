@@ -59,6 +59,11 @@ from torch import nn
 from .embedders import Embedder
 
 
+# Customers per piece when the backbone reads a window with no state; bounds the GPU
+# memory of the rollout's first call without changing its result.
+_WARMUP_CHUNK = 512
+
+
 class _LSTMAttentionBackbone(nn.Module):
     """Embedder + LSTM + causal attention over past outputs + dense head -> logits."""
 
@@ -90,6 +95,16 @@ class _LSTMAttentionBackbone(nn.Module):
         self.output_layer = nn.Linear(dense_units, self.num_target_classes)
 
     def forward(self, x: torch.Tensor, state=None):
+        if state is None and x.shape[0] > _WARMUP_CHUNK:
+            # The rollout's first call reads the whole calibration window for every
+            # customer, and the LSTM's workspace for that alone can outgrow a 16 GB GPU
+            # after training has fragmented its memory. Customers are independent, so
+            # the window is read in customer chunks and the pieces concatenated.
+            parts = [self.forward(x[i:i + _WARMUP_CHUNK])
+                     for i in range(0, x.shape[0], _WARMUP_CHUNK)]
+            (h, c) = (torch.cat([p[1][0][k] for p in parts], dim=1) for k in (0, 1))
+            memory = torch.cat([p[1][1] for p in parts])
+            return torch.cat([p[0] for p in parts]), ((h, c), memory)
         lstm_state, memory = state if state is not None else (None, None)
 
         # h: (B, T, H), the LSTM outputs of this call's steps.

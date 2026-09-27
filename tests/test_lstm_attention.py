@@ -73,6 +73,20 @@ def test_stepping_with_state_reproduces_the_full_forward_pass():
     assert torch.allclose(torch.cat(stepped, dim=1), full, atol=1e-5)
 
 
+def test_a_first_call_read_in_customer_chunks_is_the_same(monkeypatch):
+    import panelclv.models.multinomial_lstm_attention as mla
+
+    model, x = _model(), _inputs()
+    with torch.no_grad():
+        whole, (whole_lstm, whole_mem) = model.backbone(x)
+        monkeypatch.setattr(mla, "_WARMUP_CHUNK", 2)           # B = 3 -> 2 + 1
+        chunked, (chunk_lstm, chunk_mem) = model.backbone(x)
+    assert torch.allclose(whole, chunked, atol=1e-6)
+    assert torch.allclose(whole_mem, chunk_mem, atol=1e-6)
+    for a, b in zip(whole_lstm, chunk_lstm):
+        assert torch.allclose(a, b, atol=1e-6)
+
+
 def test_rollout_samples_a_class_and_threads_state():
     rollout = _model().to_rollout()
     sample, state = rollout(_inputs())
