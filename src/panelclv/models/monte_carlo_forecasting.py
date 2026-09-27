@@ -20,11 +20,12 @@ carry history in fundamentally different ways:
 
     simulate_attention_path    (attention / Transformer)
         The Transformer keeps no recurrent summary: to predict a period it must
-        attend over the ACTUAL tokens seen so far. So we keep an explicit
-        context window that starts as the calibration window and GROWS by one
-        period after every step, re-feeding it each time (O(t) work per step).
-        This is what keeps the positional encoding consistent with training —
-        calibration sits at positions 0..T_CAL-1 and holdout step t at T_CAL+t.
+        attend over the ACTUAL tokens seen so far. Its rollout model carries those
+        tokens' attention keys and values as its state, so each step processes the
+        new period only and attends over everything cached (O(1) work per step,
+        with the logits of re-reading the whole growing context). Positions
+        continue from the cache, so calibration sits at 0..T_CAL-1 and holdout
+        step t at T_CAL+t, as in training.
 
 Both rollouts treat the AR target-derived features identically (recomputed from
 the SAMPLED target history via `ARFeatureState`, never read from the holdout) and
@@ -216,8 +217,11 @@ def simulate_attention_path(
     T_CAL+t, matching training; this is exactly why a single-step feed (which
     would reset the position to 0 and drop all history) is wrong for this model.
 
-    The model is called with `only_last=True` so just the final-position logits
-    are materialised, and its returned state is ignored (the Transformer has none).
+    The rollout model returns the sample at the last input position and a
+    key/value cache of every position seen so far. The context is therefore never
+    re-fed: the calibration window is read once, and each later call passes only the
+    new period together with the cache, which yields the same logits as re-reading
+    the whole context (`tests/test_transformer_cache.py`).
 
     `target_idx` is the count channel's position on the feature axis, handed down from
     the dataset that recorded it rather than worked out here — so the channel this
@@ -255,13 +259,14 @@ def simulate_attention_path(
     ar_norm = {n: (covariate_stats or {}).get(n, (0.0, 1.0)) for n in ar_features}
 
     with torch.inference_mode():
-        # Growing context window. Starts as the full calibration; each iteration
-        # appends one reconstructed holdout-input row.
-        context = calib_tensor
+        # The context grows by one reconstructed holdout row per step. It is held as
+        # the model's key/value cache: `x_in` is only what the cache has not seen yet
+        # — the whole calibration first, then one row at a time.
+        x_in, cache = calib_tensor, None
         for t in range(T_HOLD):
-            # Re-feed the whole context; read the distribution at the last
-            # position only — that is the forecast for holdout step t.
-            out, _ = model(context, only_last=True)
+            # The distribution at the context's last position is the forecast for
+            # holdout step t.
+            out, cache = model(x_in, state=cache)
             sample = out[:, -1, 0]                             # (N,)
             sampled_path[:, t] = sample
 
@@ -280,7 +285,7 @@ def simulate_attention_path(
                         (feats[name] - mean) / std,
                         dtype=x_next.dtype, device=x_next.device,
                     )
-            context = torch.cat([context, x_next], dim=1)     # grow by one period
+            x_in = x_next                                     # grow by one period
 
     return sampled_path.cpu().numpy()
 
@@ -511,9 +516,9 @@ def forecast_attention(
     """Monte Carlo holdout forecast for an attention (Transformer) rollout model.
 
     Identical contract to `forecast_recurrent`, but uses the growing-window
-    `simulate_attention_path` rollout because the Transformer is stateless. The
-    rollout model must be a `RolloutMultinomialTransformerModel` (its `forward`
-    accepts `only_last=` and ignores `state`). Returns the same dict
+    `simulate_attention_path` rollout, whose state is the Transformer's key/value
+    cache. The rollout model must be a `RolloutMultinomialTransformerModel`.
+    Returns the same dict
     described in `forecast_recurrent`, and accepts the same opt-in
     per-customer prediction-dump arguments (`save_predictions`, `output_dir`,
     `file_name`, `run_name`); the subfolder tag defaults to "transformer".

@@ -54,6 +54,7 @@ import numpy as np
 import torch
 import torch.distributions as dist
 from torch import nn
+import torch.nn.functional as F
 
 from .embedders import Embedder
 
@@ -84,6 +85,11 @@ class SinePositionalEncoding(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.dropout(x + self.pe[:, : x.size(1)])
+
+
+# Customers per piece when `forward_cached` reads the calibration window; bounds the
+# GPU memory of that first call without changing its result.
+_WARMUP_CHUNK = 512
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +198,74 @@ class _MultinomialTransformerBackbone(nn.Module):
 
         return logits
 
+    def forward_cached(self, x: torch.Tensor, cache: dict | None = None):
+        """The same computation as `forward` in eval mode, one call per new period.
+
+        Returns the logits at the LAST position of `x` — (B, 1, K) — and a cache that
+        lets the next call process only its own periods. The cache holds, per encoder
+        layer, the attention keys and values of every position seen so far, (B, H, P,
+        d_model // H), plus the count P. A position's keys and values depend only on
+        positions at or before it (the mask is causal), so they never change once
+        computed, and attending from the new positions over cached plus new keys is
+        exactly what the full causal forward pass computes for those positions.
+
+        This turns the rollout's re-read of the whole growing context at every holdout
+        step (O(t) per step) into one step's work (O(1) per step), with the same
+        logits. It re-states `nn.TransformerEncoderLayer`'s pre-LN forward (norm_first,
+        GELU, dropout inactive in eval) from that layer's own modules, so it holds only
+        for the layer this backbone builds; `tests/test_transformer_cache.py` pins the
+        equality.
+
+        x : (B, T_new, F) — the whole calibration window on the first call, then one
+            period at a time.
+        """
+        if cache is None and x.shape[0] > _WARMUP_CHUNK:
+            # The first call reads the whole calibration window, whose attention
+            # scores for every customer at once can outgrow the GPU although the cache
+            # they leave behind fits easily. Customers never attend to each other, so
+            # the window is read in customer chunks and the pieces concatenated.
+            parts = [self.forward_cached(x[i:i + _WARMUP_CHUNK])
+                     for i in range(0, x.shape[0], _WARMUP_CHUNK)]
+            layers = range(len(parts[0][1]["k"]))
+            return torch.cat([p[0] for p in parts]), {
+                "pos": parts[0][1]["pos"],
+                "k": [torch.cat([p[1]["k"][i] for p in parts]) for i in layers],
+                "v": [torch.cat([p[1]["v"][i] for p in parts]) for i in layers],
+            }
+        past = 0 if cache is None else cache["pos"]
+        h = self.input_projection(self.embedder(x))            # (B, T_new, d_model)
+        # Positions continue from where the cache stopped, as in the full sequence.
+        h = self.positional_encoding.dropout(
+            h + self.positional_encoding.pe[:, past: past + h.shape[1]]
+        )
+        B, T, D = h.shape
+        # New position i sits at absolute position past + i and may attend to
+        # positions 0 .. past + i (True = attend). A single new period sees them all.
+        mask = (
+            torch.ones(T, past + T, dtype=torch.bool, device=h.device).tril(past)
+            if T > 1 else None
+        )
+        keys, values = [], []
+        for i, layer in enumerate(self.transformer_encoder.layers):
+            attn = layer.self_attn
+            heads = attn.num_heads
+            # Pre-LN self-attention block: h + out_proj(attention(norm1(h))).
+            q, k, v = F.linear(layer.norm1(h), attn.in_proj_weight,
+                               attn.in_proj_bias).chunk(3, dim=-1)
+            q, k, v = (t.view(B, T, heads, D // heads).transpose(1, 2) for t in (q, k, v))
+            if cache is not None:
+                k = torch.cat([cache["k"][i], k], dim=2)       # (B, H, past + T, dh)
+                v = torch.cat([cache["v"][i], v], dim=2)
+            keys.append(k)
+            values.append(v)
+            a = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+            h = h + layer.dropout1(attn.out_proj(a.transpose(1, 2).reshape(B, T, D)))
+            # Pre-LN feed-forward block: h + linear2(activation(linear1(norm2(h)))).
+            h = h + layer.dropout2(layer.linear2(layer.dropout(
+                layer.activation(layer.linear1(layer.norm2(h))))))
+        logits = self.output_linear(self.norm(h[:, -1:, :]))
+        return logits, {"pos": past + T, "k": keys, "v": values}
+
 
 # ---------------------------------------------------------------------------
 # Training-time wrapper
@@ -271,13 +345,13 @@ class MultinomialTransformerModel(nn.Module):
 
 
 class RolloutMultinomialTransformerModel(nn.Module):
-    """Rollout-mode Transformer. Returns (sample, None):
+    """Rollout-mode Transformer. Returns (sample, state):
 
-        sample : (B, T, 1) float — a count class drawn from
-                 Categorical(softmax(logits)) at each step.
-        None   : the Transformer is stateless across calls (no hidden state to
-                 thread), so the second tuple element is always None — kept for
-                 call-signature parity with the rollout LSTM.
+        sample : (B, 1, 1) float — a count class drawn from Categorical(softmax(logits))
+                 at the last position of the input.
+        state  : the attention key/value cache of every position seen so far
+                 (`_MultinomialTransformerBackbone.forward_cached`). Pass it back with
+                 the next period to continue the sequence without re-reading it.
 
     Sampling is the only rollout behaviour the forecast needs, so it is
     hardcoded here (no mode switch).
@@ -294,13 +368,8 @@ class RolloutMultinomialTransformerModel(nn.Module):
         self.target_col: str = backbone.target_col
         self.num_target_classes: int = backbone.num_target_classes
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        state=None,  # unused; kept for API parity with the LSTM rollout model
-        only_last: bool = False,
-    ):
-        logits = self.backbone(x, mask=None, only_last=only_last)
+    def forward(self, x: torch.Tensor, state=None):
+        logits, state = self.backbone.forward_cached(x, state)
         probs = torch.softmax(logits, dim=-1)
         sample = dist.Categorical(probs=probs).sample().unsqueeze(-1).float()
-        return sample, None
+        return sample, state
