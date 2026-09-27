@@ -896,45 +896,60 @@ Reading:
 - **What remains is a systematic over-forecast of about 10%.** It appears in nearly
   every study; 4 of 20 per arm are within ±5%. The published +2.7% is a single model and
   could be a draw from a spread like this one.
-- **Two things changed at once** against the searched family: the hyperparameters were
-  pinned and the kept epoch was moved. The gain cannot be split between them from these
-  runs.
-- **Next:** `scripts/run_epoch_floor_features_5y.py` repeats both arms with
-  `ar_bounded_52` or `kmeans_8` added, on our LSTM in the benchmark's shape.
+- **The gain is the floor, not the pinning.** The `nofloor` control below — the same
+  pinned settings with every epoch a candidate — reproduces the searched family
+  (+13.2 ± 16.7 bias, 21.5 ± 11.7 MAPE), so what `from20` gains is the floor.
 
-### Adding bounded flags or a cluster label
+### Adding bounded flags or a cluster label, with and without the floor
 
-`scripts/run_epoch_floor_features_5y.py`, 2026-09-26/27: both arms of the run above
-repeated with one input added, on `models.MultinomialLSTMModel` built in the frozen
-benchmark's shape (`valendin` embedder, LSTM 128, dense 128, dropout 0 — the same
-parameter shapes and forward pass, so each cell differs from its no-feature cell in the
+`scripts/run_epoch_floor_features_5y.py` and `scripts/run_epoch_floor_5y.py`: every arm of
+the run above — now with a `nofloor` control (the same pinned settings, every epoch a
+candidate) — with one input added, on `models.MultinomialLSTMModel` built in the frozen
+benchmark's shape (`valendin` embedder, LSTM 128, dense 128, dropout 0: the same
+parameter shapes and forward pass, so each cell differs from its ValendinLSTM cell in the
 input only). The embedded week is kept. `ar_bounded_52` is the flags
 active_in_last_{2,4,8,16,32,52}_periods plus has_transacted_before, recomputed from the
 sampled path in the holdout; `kmeans_8` is a static k-means label (K=8) on (t_x, x, T).
-20 replications per cell, 80 in all.
+20 replications per cell.
 
-| cell (20 studies, mean ± sd) | RMSE (customer total) | bias % | MAPE | Spearman |
+| cell (20 studies, mean ± sd [min, max]) | RMSE (customer total) | bias % | MAPE | Spearman |
 | --- | ---: | ---: | ---: | ---: |
-| no feature (ValendinLSTM), `from20` | 1.159 ± 0.012 | +10.2 ± 7.4 | 17.8 ± 3.2 | 0.403 |
-| `ar_bounded_52`, `from20` | 1.154 ± 0.015 | +14.0 ± 7.5 | 19.8 ± 4.2 | 0.401 |
-| `kmeans_8`, `from20` | 1.264 ± 0.027 | +12.4 ± 8.5 | 18.8 ± 4.1 | 0.359 |
-| no feature (ValendinLSTM), `from30` | 1.157 ± 0.014 | +12.7 ± 7.3 | 19.4 ± 3.4 | 0.402 |
-| **`ar_bounded_52`, `from30`** | **1.146 ± 0.017** | **+10.7 ± 5.4** | **18.3 ± 2.5** | 0.401 |
-| `kmeans_8`, `from30` | 1.266 ± 0.023 | +14.0 ± 9.0 | 19.8 ± 4.9 | 0.355 |
+| ValendinLSTM, searched (above) | 1.163 ± 0.011 | +13.8 ± 11.1 [−7.9, 37.4] | 20.5 ± 6.9 | 0.405 |
+| ValendinLSTM, `nofloor` | 1.178 ± 0.040 | +13.2 ± 16.7 [−14.0, 66.7] | 21.5 ± 11.7 | 0.402 |
+| `ar_bounded_52`, `nofloor` | 1.183 ± 0.022 | +8.7 ± 8.2 [−10.2, 20.9] | 17.5 ± 2.4 | 0.399 |
+| `kmeans_8`, `nofloor` | 1.279 ± 0.025 | +9.0 ± 10.1 [−1.4, 31.3] | 18.5 ± 5.3 | 0.358 |
+| ValendinLSTM, `from20` | 1.159 ± 0.012 | +10.2 ± 7.4 [−4.6, 23.9] | 17.8 ± 3.2 | 0.403 |
+| `ar_bounded_52`, `from20` | 1.154 ± 0.017 | +13.5 ± 7.3 [1.3, 27.2] | 19.5 ± 4.0 | 0.401 |
+| `kmeans_8`, `from20` | 1.270 ± 0.022 | +12.4 ± 8.0 [0.3, 25.9] | 18.7 ± 4.2 | 0.354 |
+| ValendinLSTM, `from30` | 1.157 ± 0.014 | +12.7 ± 7.3 [−0.6, 23.9] | 19.4 ± 3.4 | 0.402 |
+| `ar_bounded_52`, `from30` | 1.157 ± 0.019 | +10.0 ± 7.1 [−0.6, 27.2] | 18.4 ± 3.2 | 0.400 |
+| `kmeans_8`, `from30` | 1.266 ± 0.022 | +11.5 ± 9.4 [−4.1, 33.2] | 18.3 ± 5.7 | 0.351 |
 
 Reading:
 
-- **Neither input removes the ~10% over-forecast.** It is present in every cell. Under
-  `ar_bounded_52` it is one-sided: the least biased study is +1.3% (`from20`) and +3.7%
-  (`from30`).
-- **The flags help slightly, at 30 epochs only.** `ar_bounded_52` / `from30` has the
-  lowest customer-level RMSE recorded on this split (1.146) and the tightest bias and
-  MAPE spread. At 20 epochs the same input raises the bias to +14.0%. Ranking is
-  unchanged throughout.
-- **The cluster label hurts.** `kmeans_8` raises the customer-level RMSE to 1.26 — worse
-  than Pareto/NBD's 1.230 — and lowers Spearman from 0.40 to 0.36, at both floors. This
-  is the opposite of its effect in the CDNOW cluster ablation
-  (`docs/insights-cluster-ablation.md`), and it has not been investigated.
+- **Pinning the hyperparameters alone does nothing.** ValendinLSTM `nofloor` matches the
+  searched family (+13.2 vs +13.8) with a wider spread (one study at +66.7%). What
+  `from20` gains over the searched family is therefore the floor, and it is mostly a
+  tighter spread.
+- **No input or floor removes the ~10% over-forecast.** No cell's mean comes near the
+  published +2.7%.
+- **The flags steady the forecast without the floor.** `ar_bounded_52` / `nofloor` has
+  the lowest mean bias (+8.7) and the tightest MAPE (±2.4), at a worse customer-level RMSE
+  (1.183). Under a floor they make no clear difference.
+- **The cluster label hurts under every floor.** `kmeans_8` raises the customer-level RMSE
+  to 1.27 — worse than Pareto/NBD's 1.230 — and lowers Spearman to 0.35–0.36. This is the
+  opposite of its effect in the CDNOW cluster ablation
+  (`docs/insights-cluster-ablation.md`) and has not been investigated.
+
+**Replication noise, measured by accident.** The four floored feature cells were trained
+twice: on 2026-09-26/27, and again on 2026-09-27 when the `nofloor` workers, started
+without the finished suites on their disks, retrained every cell and their results
+replaced the first set on the orchestrator. The first set's forecasts are lost; its
+summaries were: `ar_bounded_52` `from20` 1.154 / +14.0 ± 7.5 / 19.8, `from30` 1.146 /
++10.7 ± 5.4 / 18.3; `kmeans_8` `from20` 1.264 / +12.4 ± 8.5 / 18.8, `from30` 1.266 /
++14.0 ± 9.0 / 19.8 (RMSE / bias / MAPE). Two draws of 20 studies with identical settings
+differ by up to 0.011 in customer-level RMSE and 4 points in mean bias, so differences
+between cells smaller than that are not results.
 
 ## A few bad runs, or bad throughout?
 
