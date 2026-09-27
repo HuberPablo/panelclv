@@ -1,0 +1,16 @@
+{
+  "LSTMAttention": {
+    "from_replication": 17,
+    "bias_percent": -0.2259163386558294,
+    "n_searched": 20,
+    "params": {
+      "embedder": "valendin",
+      "lstm_hidden_size": 64,
+      "dense_units": 64,
+      "dropout": 0.006869260466486269,
+      "learning_rate": 0.0024978406021182935,
+      "weight_decay": 0.0,
+      "batch_size": 32
+    }
+  }
+}

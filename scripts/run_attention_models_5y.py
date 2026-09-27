@@ -184,10 +184,18 @@ def run_worker(phase: str, models: list[str], index: int, total: int) -> int:
     return 0
 
 
-def pin() -> int:
-    """Write each model's least-biased `searched` study's parameters to PINNED_FILE."""
+def pin(models: list[str]) -> int:
+    """Write each model's least-biased `searched` study's parameters to PINNED_FILE.
+
+    A model is pinned only once all its `searched` suites are finished: pinning from
+    a partial phase would pick from fewer candidates than the procedure declares.
+    """
     out = {}
-    for model in MODELS:
+    for model in models:
+        missing = [i for i in work_list("searched", [model]) if not finished(i)]
+        if missing:
+            print(f"{model}: {len(missing)} searched suites unfinished, not pinned")
+            continue
         rows = []
         for item in work_list("searched", [model]):
             if finished(item):
@@ -196,9 +204,6 @@ def pin() -> int:
                     "study_*/study_*_best.json")).read_text())
                 rows.append((abs(res.bias_percent), res.bias_percent, item[3],
                              best["best_params"]))
-        if not rows:
-            print(f"{model}: no searched study finished, not pinned")
-            continue
         _, bias, rep, params = min(rows, key=lambda r: r[0])
         out[model] = {"from_replication": rep, "bias_percent": float(bias),
                       "n_searched": len(rows),
@@ -282,7 +287,7 @@ def main() -> None:
         index, total = (int(x) for x in args.worker.split("/"))
         sys.exit(run_worker(args.phase, models, index, total))
     if args.pin:
-        sys.exit(pin())
+        sys.exit(pin(models))
     if args.preflight:
         sys.exit(preflight(models))
     if args.check_complete:
