@@ -13,10 +13,12 @@ combined".
 
 ## 1. Roles
 
-**Orchestrator** — the local QEMU/KVM Ubuntu VM. It generates the grid, holds the
-split specification, rents the workers, pushes data to them, polls them, pulls the
-results back and aggregates. It is the only machine that holds a complete copy of
-anything. Claude Code runs here.
+**Orchestrator** — the workstation. It generates the grid, holds the split
+specification, rents the workers, pushes data to them, polls them, pulls the results
+back and aggregates. It is the only machine that holds a complete copy of anything, so
+results land beside the canonical data with no copy step. Claude Code runs here. (The
+QEMU/KVM VM `thesis-agent` drove the early grids up to 2026-09-08; it is no longer
+used.)
 
 **Workers** — rented vast.ai instances. Disposable by design: a worker holds one
 model's shard of the grid and nothing that is not reproducible from the repo plus
@@ -430,7 +432,7 @@ re-run on one machine.
 
 ## 10. Prerequisites on the orchestrator
 
-Before a run can be driven from the QEMU VM, that machine needs:
+Before a run can be driven from the workstation, it needs:
 
 - `vastai` CLI and an API key at `~/.config/vastai/vast_api_key`
 - an SSH keypair at `~/.ssh/id_ed25519` (+ `.pub`) — `vast_launch.sh` attaches the
@@ -438,9 +440,10 @@ Before a run can be driven from the QEMU VM, that machine needs:
 - `rsync` (both ends need it; `vast_onstart.sh` installs it on the worker)
 - the repo cloned, and a Python environment with the package importable
 
-These currently live on the workstation, not on the QEMU VM. **Moving the
-orchestrator means moving the vast API key and the SSH key with it**, or
-generating a new keypair and registering it with vast.
+The workstation has all of them. **Moving the orchestrator means moving the vast API
+key and the SSH key with it**, or generating a new keypair and registering it with
+vast. The fleet scripts call `python3`, not `python`, because the workstation has no
+bare `python`.
 
 ---
 
