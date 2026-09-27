@@ -902,6 +902,40 @@ Reading:
 - **Next:** `scripts/run_epoch_floor_features_5y.py` repeats both arms with
   `ar_bounded_52` or `kmeans_8` added, on our LSTM in the benchmark's shape.
 
+### Adding bounded flags or a cluster label
+
+`scripts/run_epoch_floor_features_5y.py`, 2026-09-26/27: both arms of the run above
+repeated with one input added, on `models.MultinomialLSTMModel` built in the frozen
+benchmark's shape (`valendin` embedder, LSTM 128, dense 128, dropout 0 — the same
+parameter shapes and forward pass, so each cell differs from its no-feature cell in the
+input only). The embedded week is kept. `ar_bounded_52` is the flags
+active_in_last_{2,4,8,16,32,52}_periods plus has_transacted_before, recomputed from the
+sampled path in the holdout; `kmeans_8` is a static k-means label (K=8) on (t_x, x, T).
+20 replications per cell, 80 in all.
+
+| cell (20 studies, mean ± sd) | RMSE (customer total) | bias % | MAPE | Spearman |
+| --- | ---: | ---: | ---: | ---: |
+| no feature (ValendinLSTM), `from20` | 1.159 ± 0.012 | +10.2 ± 7.4 | 17.8 ± 3.2 | 0.403 |
+| `ar_bounded_52`, `from20` | 1.154 ± 0.015 | +14.0 ± 7.5 | 19.8 ± 4.2 | 0.401 |
+| `kmeans_8`, `from20` | 1.264 ± 0.027 | +12.4 ± 8.5 | 18.8 ± 4.1 | 0.359 |
+| no feature (ValendinLSTM), `from30` | 1.157 ± 0.014 | +12.7 ± 7.3 | 19.4 ± 3.4 | 0.402 |
+| **`ar_bounded_52`, `from30`** | **1.146 ± 0.017** | **+10.7 ± 5.4** | **18.3 ± 2.5** | 0.401 |
+| `kmeans_8`, `from30` | 1.266 ± 0.023 | +14.0 ± 9.0 | 19.8 ± 4.9 | 0.355 |
+
+Reading:
+
+- **Neither input removes the ~10% over-forecast.** It is present in every cell. Under
+  `ar_bounded_52` it is one-sided: the least biased study is +1.3% (`from20`) and +3.7%
+  (`from30`).
+- **The flags help slightly, at 30 epochs only.** `ar_bounded_52` / `from30` has the
+  lowest customer-level RMSE recorded on this split (1.146) and the tightest bias and
+  MAPE spread. At 20 epochs the same input raises the bias to +14.0%. Ranking is
+  unchanged throughout.
+- **The cluster label hurts.** `kmeans_8` raises the customer-level RMSE to 1.26 — worse
+  than Pareto/NBD's 1.230 — and lowers Spearman from 0.40 to 0.36, at both floors. This
+  is the opposite of its effect in the CDNOW cluster ablation
+  (`docs/insights-cluster-ablation.md`), and it has not been investigated.
+
 ## A few bad runs, or bad throughout?
 
 The tables above report mean ± sd, and several SDs are large. So the question is whether a
