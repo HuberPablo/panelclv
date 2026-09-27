@@ -16,6 +16,8 @@ Both pin the hyperparameters of the least-biased study of that family (r13: bias
 learning rate 0.002195, batch 32, weight decay 0) and run one trial, so nothing is
 selected by Optuna and the arms differ only in how long the kept weights trained.
 
+`nofloor`  every epoch a candidate (`select_from_epoch=0`): the control, which separates
+           pinning the hyperparameters from moving the kept epoch.
 `from20`   weights from epoch 20 or later: `select_from_epoch=20`.
 `from30`   weights from epoch 30 or later: `select_from_epoch=30`.
 
@@ -25,7 +27,7 @@ the family's, unchanged.
 
 Budget
 ------
-2 arms x 20 replications = 40 suites, one per work item. Replication r seeds the
+3 arms x 20 replications = 60 suites, one per work item. Replication r seeds the
 forecast from `BASE_SEED + r`, as the benchmark family does, so replication r of each
 arm is paired with replication r there. Training is unseeded (CLAUDE.md priority 3).
 
@@ -71,7 +73,9 @@ BASE_SEED = benchmarks.BASE_SEED
 # search space is pinned by the registry's spec mini-language.
 PINNED = {"learning_rate": 0.002195217471728685, "weight_decay": 0.0, "batch_size": 32}
 TRAINING = {"n_epochs": 100, "patience": 7, "verbose": False, "loss_type": "cross_entropy"}
-ARMS: dict[str, int] = {"from20": 20, "from30": 30}      # arm -> select_from_epoch
+# arm -> select_from_epoch. `nofloor` (0) is the control: the same pinned settings with
+# every epoch a candidate, as in the searched family.
+ARMS: dict[str, int] = {"nofloor": 0, "from20": 20, "from30": 30}
 
 
 def suite_name(arm: str, replication: int) -> str:

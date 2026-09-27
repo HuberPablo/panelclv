@@ -3,7 +3,7 @@
 The companion of `scripts/run_epoch_floor_5y.py`, which trains the frozen ValendinLSTM
 on the 5y electronics split with the least-biased study's hyperparameters pinned and
 the kept weights taken from epoch 20 (`from20`) or 30 (`from30`) onward. This runner
-repeats both arms with one input added.
+repeats its arms with one input added.
 
 The model
 ---------
@@ -27,7 +27,7 @@ Both keep the embedded calendar week, as the benchmark does.
 
 Budget
 ------
-2 features x 2 arms x 20 replications = 80 suites. Replication r seeds the forecast from
+2 features x 3 arms (`nofloor`, `from20`, `from30`) x 20 replications = 120 suites. Replication r seeds the forecast from
 `BASE_SEED + r`, as in the companion run, so cells pair by replication.
 
 Usage:
