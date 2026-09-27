@@ -12,5 +12,20 @@
       "weight_decay": 0.0,
       "batch_size": 32
     }
+  },
+  "Transformer": {
+    "from_replication": 8,
+    "bias_percent": 20.07933216171856,
+    "n_searched": 20,
+    "params": {
+      "d_model": 64,
+      "nhead": 4,
+      "embedder": "valendin",
+      "num_encoder_layers": 3,
+      "dropout": 0.14520674159944988,
+      "learning_rate": 0.002724611319669838,
+      "weight_decay": 0.0,
+      "batch_size": 32
+    }
   }
 }
