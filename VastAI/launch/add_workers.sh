@@ -27,7 +27,9 @@ TOTAL="${TOTAL:-10}"
 DATA_SRC="${DATA_SRC:-Datasets/Dataset_clean}"
 DATA_DST="${DATA_DST:-Datasets/Dataset_clean}"
 LOG=VastAI/state/add_workers.log
-REPLACE=VastAI/state/needs_replacement.txt
+# A driver running beside another names its own list, so neither re-rents the other's
+# workers with the wrong runner.
+REPLACE="${REPLACE_FILE:-VastAI/state/needs_replacement.txt}"
 mkdir -p VastAI/state/worker_logs VastAI/state/started
 
 say() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }

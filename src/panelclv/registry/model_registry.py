@@ -43,6 +43,7 @@ from panelclv.models.monte_carlo_forecasting import (
     forecast_attention,
 )
 from panelclv.models.multinomial_lstm import MultinomialLSTMModel
+from panelclv.models.multinomial_lstm_attention import MultinomialLSTMAttentionModel
 from panelclv.models.multinomial_transformer import MultinomialTransformerModel
 
 
@@ -256,6 +257,19 @@ def _build_lstm(
     )
 
 
+def _build_lstm_attention(
+    params: dict[str, Any], recipe: dict[str, Any]
+) -> MultinomialLSTMAttentionModel:
+    return MultinomialLSTMAttentionModel(
+        embedder=_make_embedder(
+            params["embedder"], recipe, params.get("embedding_dim")
+        ),
+        lstm_hidden_size=params["lstm_hidden_size"],
+        dense_units=params["dense_units"],
+        dropout=params["dropout"],
+    )
+
+
 def _build_transformer(
     params: dict[str, Any], recipe: dict[str, Any]
 ) -> MultinomialTransformerModel:
@@ -346,6 +360,24 @@ MODEL_REGISTRY: dict[str, ModelEntry] = {
         },
         suggest=_suggest_lstm_params,
         build=_build_lstm,
+        rollout=forecast_recurrent,
+    ),
+    # The LSTM with causal attention over its own past outputs. Same space as the
+    # LSTM (the attention adds no width of its own), and the same recurrent rollout:
+    # its state carries the outputs seen so far, so it steps one period at a time.
+    "lstm_attention": ModelEntry(
+        search_space={
+            "embedder":        "valendin",
+            "embedding_dim":   {64, 128, 256},
+            "lstm_hidden_size": {32, 64, 128},
+            "dense_units":     {32, 64, 128},
+            "dropout":         (0.0, 0.4),
+            "learning_rate":   (1e-4, 3e-3, "log"),
+            "weight_decay":    0.0,
+            "batch_size":      {32, 64, 128, 256},
+        },
+        suggest=_suggest_lstm_params,
+        build=_build_lstm_attention,
         rollout=forecast_recurrent,
     ),
     "transformer": ModelEntry(

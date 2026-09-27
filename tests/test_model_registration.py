@@ -37,6 +37,7 @@ from panelclv.tuning import optuna_tuning as tuning  # noqa: E402
 # for.
 EXPECTED_CLASS = {
     "lstm": "MultinomialLSTMModel",
+    "lstm_attention": "MultinomialLSTMAttentionModel",
     "transformer": "MultinomialTransformerModel",
     "valendin_lstm": "ValendinLSTMModel",
 }

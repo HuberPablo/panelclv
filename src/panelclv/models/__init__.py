@@ -31,6 +31,10 @@ from .multinomial_lstm import (
     MultinomialLSTMModel,
     RolloutMultinomialLSTMModel,
 )
+from .multinomial_lstm_attention import (
+    MultinomialLSTMAttentionModel,
+    RolloutMultinomialLSTMAttentionModel,
+)
 from .multinomial_transformer import (
     MultinomialTransformerModel,
     RolloutMultinomialTransformerModel,
@@ -68,6 +72,8 @@ __all__ = [
     # Trained model + the rollout model it hands over, both families
     "MultinomialLSTMModel",
     "RolloutMultinomialLSTMModel",
+    "MultinomialLSTMAttentionModel",
+    "RolloutMultinomialLSTMAttentionModel",
     "MultinomialTransformerModel",
     "RolloutMultinomialTransformerModel",
     # Forecasting (autoregressive Monte Carlo simulator + its metrics)
