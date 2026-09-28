@@ -80,6 +80,12 @@ scoring authority — `rmse`, `bias_percent`, `mape_aggregate`, on per-customer
 per-period arrays. Plots, tables and study results all delegate to it so they agree
 to the last decimal.
 
+**Claims.** Every comparative claim follows `docs/statistical-protocol.md`: Δ of means
+with a 95% percentile-bootstrap interval, supported when it excludes zero, resampled
+independently or paired according to how the experiment was built.
+`evaluation.effects.effect` is the only implementation; read the protocol before
+writing a result.
+
 **`scripts/`.** A script there is either a live entry point, a benchmark gate, or a
 documented tool. A one-off check goes in the commit that needed it and is deleted with
 it.

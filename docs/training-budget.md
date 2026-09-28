@@ -76,26 +76,20 @@ The standard the whole document is held to. It was written after §15 and then a
 back to every section, including those written before it; the rows above marked `bounded`
 are claims it downgraded from the stronger form they were first stated in.
 
-**One metric per claim.** Per-customer Spearman is the primary metric for claims about
-customer-level discrimination. Aggregate MAPE is the primary metric for claims about
-level accuracy. Bias is a secondary calibration diagnostic, used as \|bias\| when comparing
-calibration accuracy. A directional claim — that a condition over- or under-forecasts — needs
-the 95% CI of its mean bias to exclude zero, like every other claim; the bias refit noise is
-printed beside it for magnitude and is large, so most bias movements are small. RMSE is reported for completeness and supports no ranking
-claim: under these panels' sparsity every arm sits within 0.004 of the all-zero forecast.
-Forecast CV — `std / mean` of per-customer predicted holdout totals — is reported beside
-Spearman wherever forecasts are compared, and is descriptive too. Spearman is rank-based,
-so it says whether a forecast orders customers correctly but not whether it separates them
-at all: a forecast varying by a few percent can still rank well. CV near 0 is what this
-document calls a collapse — every customer given nearly the same number. Collapse belongs
-to a model under a configuration, not to a panel, so CV lives in the comparison tables.
+**The rules are `docs/statistical-protocol.md`.** Every effect below is Δ = M̄_B − M̄_A
+with a 95% percentile-bootstrap interval, supported when it excludes zero, computed by
+`panelclv.evaluation.effects.effect`. Replications of a real-panel condition are
+independent searches, so they are resampled separately; criteria scored on the same
+studies are paired. The metric roles, the reading of refit noise as magnitude only, the
+equivalence rule and the one-panel-at-a-time rule are all stated there. What this section
+keeps is what is specific to this document: the refit-noise values, the panels, and the
+seeding protocol that makes the replications independent.
 
-**Effects are differences, reported with an interval.** Run *n* independent replications
-per condition (*n* = 20 throughout). Report Δ = M̄_B − M̄_A with a **95% bootstrap
-confidence interval** for that difference. **A result is statistically supported when the
-interval excludes zero.** That is the whole criterion; a p-value may appear as
-supplementary colour but is not the test. One implementation computes every effect in this
-document: `.scratch/training-budget/effects.py`.
+Forecast CV (`std / mean` of per-customer predicted holdout totals) is reported beside
+Spearman wherever forecasts are compared. Spearman is rank-based: a forecast varying by a
+few percent can still rank well, and CV near 0 is what this document calls a collapse.
+Collapse belongs to a model under a configuration, not to a panel, so CV lives in the
+comparison tables.
 
 **The refit noise is a magnitude reference, not a second threshold.** Refit the same
 checkpoint a second time, change nothing else, and the forecast still moves. Measured over
@@ -109,22 +103,8 @@ the 80 archived family-N winners paired with their re-scored refits
 | gift | 5.89 | 14.99 | 0.0116 | 0.00009 |
 | multichannel | 7.71 | 12.56 | 0.0152 | 0.00003 |
 
-This is printed beside every effect so a reader can see whether Δ is large or small
-relative to what an unseeded refit moves on its own. It never adds a significance hurdle:
-an effect whose interval excludes zero but whose Δ sits under the refit noise is supported and
-small, and is described that way.
-
-**Equivalence needs a margin, named first.** The refit noise is the natural one, since an
-equivalence margin is by definition a practical-magnitude reference. The claim is made
-when the 95% CI of Δ lies entirely inside ±margin, and is always worded as "no difference
-larger than ±m is detectable at n = 20" — never "no difference". Using the 95% interval
-rather than the conventional 90% TOST interval is deliberately conservative and keeps one
-convention in the document.
-
-**Generalisation is not claimed; disagreement between panels is heterogeneity.** Every
-result is stated for the panel it was measured on. Where panels disagree — and §15.1 is
-mostly disagreement — that is reported as heterogeneity to be explained, never averaged
-into a claim about panels as a class. The panels differ in ways that plausibly matter:
+**The panels.** Every result is stated for the panel it was measured on, and where panels
+disagree that is heterogeneity to be explained. The panels differ in ways that plausibly matter:
 
 | panel | customers | T_CAL / T_HOLD | zero cells (holdout) | calibration tx | holdout tx | holdout/calibration rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |

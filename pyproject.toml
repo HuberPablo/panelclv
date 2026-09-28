@@ -41,6 +41,7 @@ dependencies = [
     "numpy",
     "pandas",
     "scikit-learn",
+    "scipy",
     "optuna",
     "matplotlib",
 ]

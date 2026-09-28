@@ -15,12 +15,17 @@ over before squaring: a customer-week cell, and a customer's whole holdout total
 The one number it does not return is ``aggregate_bias`` (raw-count bias), which the
 per-group table needs because percentage bias is uninformative for a group whose
 actual total is near zero.
+
+``effects`` is the same kind of authority one level up: the only implementation of a
+comparative claim (delta of means, 95% percentile bootstrap, independent or paired), as
+``docs/statistical-protocol.md`` defines it.
 """
 
 from .plots import (
     plot_weekly_aggregated,
     metrics_table,
 )
+from .effects import Effect, effect, table as effects_table
 from .segment_analysis import (
     CUSTOMER_GROUPS,
     assign_customer_groups,
@@ -29,6 +34,9 @@ from .segment_analysis import (
 )
 
 __all__ = [
+    "Effect",
+    "effect",
+    "effects_table",
     "plot_weekly_aggregated",
     "metrics_table",
     "CUSTOMER_GROUPS",
