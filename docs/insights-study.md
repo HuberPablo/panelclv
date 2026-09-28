@@ -11,6 +11,23 @@ here comes from the literature.** Every number below was recomputed from the
 grid declarations in `grids/`. Where a claim rests on someone else's measurement
 rather than an archived one, it says so.
 
+**Revised under the statistical protocol (2026-09-28).** §4.1, §5.4 and §8 now follow
+`docs/statistical-protocol.md`: a difference of means with its 95% percentile-bootstrap
+interval (`evaluation.effects.effect`), paired only where the two sides share a unit, one
+panel and one model at a time. The numbers are printed by
+`.scratch/statistical-protocol/grid_insights_study_effects.py`. Wilcoxon tests, median
+differences and p-values are gone. Verdicts that moved:
+
+- §4.1: P-sLSTM "worse on all three forecast metrics" → no clear difference from the LSTM
+  on MAPE, |bias| or RMSE at n = 8 (paired by seed). Its validation-CE advantage is not
+  re-tested: the per-seed values were never stored.
+- §5.4: the selection result is now reported per model rather than pooled over 80 studies,
+  matching `docs/training-budget.md` §14; "rollout beats CE in 66 of 80 studies,
+  p = 6×10⁻⁸" becomes a paired interval per model (supported for both on holdout MAPE).
+- §8: `kmeans_8` under `ar_bounded` goes from "no evidence of a direction" to a supported
+  |bias| improvement on electronics (−12.8 points) with no clear difference on CDNOW; the
+  synthetic-grid summary it quotes is now per cell.
+
 ## Contents
 
 1. [The question and the short answer](#1-the-question-and-the-short-answer)
@@ -34,8 +51,9 @@ P-LSTM, and each is a candidate.
 **The archived results say architecture is not the binding constraint.** Every one of
 those papers improves the *conditional distribution over the next period*, and this
 repo already contains a direct measurement that such an improvement does not survive
-the rollout: P-sLSTM won validation cross-entropy in all eight seeds and lost the
-forecast, at roughly fourteen times the training cost (§4.1).
+the rollout: P-sLSTM won validation cross-entropy in every seed whose value was recorded
+and bought no clear forecast improvement — its means were worse on all three forecast
+metrics, though not clearly so at n = 8 — at roughly fourteen times the training cost (§4.1).
 
 What the results do point at is structural, and it is visible on one axis of the
 seasonal grid: **the neural models have no way to represent a customer who has stopped
@@ -206,14 +224,30 @@ Spearman was computed:
 | P-sLSTM | **0.0967** (0.0963–0.0968) | 0.3815 ± 0.0018 | +11.87 ± 27.81 | 56.93 ± 6.37 |
 | Pareto/NBD | — | 0.3758 | −63.70 ± 0.35 | 66.18 ± 0.28 |
 
-P-sLSTM is lower on validation cross-entropy in **every** seed, by a consistent ~0.004,
-and converges in fewer epochs. It is worse on all three forecast metrics and costs
-~14× as much to train (102–146s per seed against 7–8s).
+P-sLSTM is lower on validation cross-entropy in every seed whose value was captured (six
+of the eight; seeds 3 and 4 scrolled out of the run log), by a consistent ~0.004, and
+converges in fewer epochs. Because the per-seed values were never stored, that advantage
+is **not re-tested under the statistical protocol**; the two ranges above do not overlap.
+
+On the forecast, run *k* of both models was driven by the same seed *k* (`compare.py` sets
+`torch.manual_seed(k)` before each model's training and passes *k* to its Monte Carlo
+forecast), so the runs are paired by seed. P-sLSTM minus LSTM, 95% bootstrap interval,
+n = 8:
+
+| metric | LSTM | P-sLSTM | Δ | 95% CI | supported |
+| --- | ---: | ---: | ---: | :---: | :---: |
+| MAPE | 54.14 | 56.93 | +2.79 | −3.13 to +8.38 | no |
+| \|bias\| | 19.80 | 26.62 | +6.82 | −3.00 to +17.12 | no |
+| RMSE (descriptive) | 0.3807 | 0.3815 | +0.0009 | −0.0007 to +0.0023 | no |
+
+Every mean is worse for P-sLSTM, but none of the differences is clear at n = 8: **no clear
+difference in the forecast**, which is not the same as equal. It costs ~14× as much to
+train (102–146s per seed against 7–8s).
 
 This is the single most decision-relevant measurement in the repo for the "which
 architecture next" question, because every candidate in the paper folder is offering the
 same thing P-sLSTM offered: a better next-period density. One has already been bought
-and it did not pay.
+and no forecast gain was detectable at n = 8.
 
 ### 4.2 ADR-0003's retirement left the failure mode unguarded
 
@@ -347,20 +381,29 @@ the least-bad drifter.
 > **Measured, 21 September 2026 — and the ordering above was right.**
 > `docs/training-budget.md` §14 built exactly this and scored 2,813 electronics trials
 > both ways: a leak-free rollout over the validation window against the holdout the trial
-> actually produces. Two results.
+> actually produces. One study (one Optuna search) is one replication and gives one rank
+> correlation per criterion; LSTM and ValendinLSTM are separate conditions, 40 studies
+> each. Two results.
 >
-> Validation cross-entropy is not weak on that panel, it is **wrong-signed** — rank
-> correlation −0.141 with holdout MAPE and −0.264 with holdout |bias| over 80 studies, so
-> taking a study's lowest-loss trial is worse than taking one at random. A validation
-> rollout beats it in 66 of 80 studies (p = 6×10⁻⁸) **and lands on zero**: the largest
-> correlation anywhere in the test is +0.128. Restoring rollout selection removes a
-> harmful signal rather than supplying a useful one.
+> Validation cross-entropy is not weak on that panel, it is **wrong-signed** on level for
+> both models — mean rank correlation with holdout MAPE −0.181 (95% CI −0.247 to −0.112)
+> for the LSTM and −0.101 (−0.162 to −0.038) for ValendinLSTM, and with holdout |bias|
+> −0.266 and −0.261, all intervals excluding 0. A validation rollout scored on MAPE ranks
+> trials better than CE does on both models, paired by study: Δ +0.140 (+0.068 to +0.213)
+> for the LSTM and +0.208 (+0.138 to +0.281) for ValendinLSTM. (It is the higher
+> correlation in 31 and 35 of 40 studies, a count given as description only.) **For the
+> LSTM it lands on zero** — its own correlation, −0.041 (−0.112 to +0.032), shows no clear
+> signal — so there restoring rollout selection removes a harmful signal rather than
+> supplying a useful one; for ValendinLSTM it adds a weak one (+0.107, +0.046 to +0.168).
+> The largest correlation anywhere in the test is +0.202, the LSTM's validation rollout
+> Spearman against holdout Spearman.
 >
 > §15.3 then found why, and it sharpens this section's premise: cross-entropy selects
-> well where a study's trials genuinely differ (CDNOW, ρ = +0.472 against holdout
-> Spearman) and badly where they do not (electronics, where every trial lands in the same
-> narrow band). Better selection cannot help on a panel whose trials are
-> indistinguishable — which is §5.2's argument, arrived at from the selection side.
+> well where a study's trials genuinely differ (CDNOW, mean ρ with holdout Spearman +0.367
+> for the LSTM and +0.577 for ValendinLSTM, 5 studies each, both supported) and badly where
+> they do not (electronics, where every trial lands in the same narrow band). Better
+> selection cannot help on a panel whose trials are indistinguishable — which is §5.2's
+> argument, arrived at from the selection side.
 
 ### 5.5 Skip the architecture papers, or spend one on a negative result
 
@@ -532,12 +575,16 @@ is only half true:
 
 Same panel, same channels, same out-of-range hazard — and the attention model largely
 absorbs what wrecks the recurrence. Electronics shows the same asymmetry (LSTM +196.7%
-against the Transformer's +56.4%). This is a genuine finding and it is **not** what the
+against the Transformer's +56.4%). Tested on the per-study |bias| (20 vs 20 independent
+studies, 95% bootstrap interval of the difference of means), the Transformer is clearly
+closer to the truth in all four panel × cluster cells: Δ −127.5 (−288.7 to −15.0) and
+−241.6 (−473.7 to −59.7) on CDNOW, −138.3 (−243.5 to −52.2) and −110.5 (−229.6 to −14.4)
+on electronics. This is a genuine finding and it is **not** what the
 AR encoding ablation concluded, because that ablation only ever ran the LSTM
 (`run_ar_encoding_ablation.py` declares one `ModelSpec`). The encoding is dangerous; the
 recurrence is what makes it catastrophic.
 
-### Clusters: no evidence here, and good evidence against elsewhere
+### Clusters: one real panel for, and the synthetic grid against
 
 An earlier draft of this section claimed clusters help on real panels, on the grounds
 that `kmeans_8` is in the best electronics arm (`ar_bounded-kmeans_8`, −1.6%) and the
@@ -549,23 +596,30 @@ half the data.** Held to the same feature cell, the two panels disagree:
 | electronics | 20.6 | **7.8** |
 | CDNOW | **15.2** | 18.7 |
 
-Clusters help on one panel and hurt on the other, at n=20 per arm with no paired test —
-which is no evidence of a direction at all.
+Tested per panel (20 vs 20 independent studies, Δ of mean |bias| with its 95% bootstrap
+interval), the label clearly helps on electronics (−12.8, −24.3 to −3.4) and shows no
+clear difference on CDNOW (+3.4, −3.2 to +10.6). One panel is not a direction for the
+family, and this run is superseded (see the note at the top of this section).
 
-`docs/insights-arm-sweep.md` §4 settles it on far stronger evidence: a paired Wilcoxon
-over the same 160 synthetic panels finds `kmeans_8` **hurts** in five of six contrasts,
-significantly, and it gives the mechanism — a label assigned from calibration behaviour
-cannot update when the simulated customer goes quiet, so it keeps asserting the customer
-is who they used to be. That is the `ar_unbounded` failure in a different costume.
+`docs/insights-arm-sweep.md` §4 asks the same question on the synthetic grid, where the
+same generated panels are on both sides and the process is known. Tested inside each rate
+× churn cell (paired, 10 panels), `kmeans_8` added to a usable AR encoding (`no_ar` or
+`ar_bounded`) raises |bias| in 20 cells and lowers it in 3 across the four model × encoding
+contrasts, and it gives the mechanism — a label assigned from calibration behaviour cannot
+update when the simulated customer goes quiet, so it keeps asserting the customer is who
+they used to be. That is the `ar_unbounded` failure in a different costume.
 
-The one place it reverses there is under `ar_unbounded` itself (median |bias| 261 → 133,
-p = 7×10⁻⁵), read as the clusters *displacing* the broken counters rather than
-contributing: a bounded categorical summary of the same history, so less of the
-prediction rests on channels that drift out of range. Both rescued arms remain worse
-than `ar_bounded`, which reaches the same place by construction.
+The one place it mostly reverses there is under `ar_unbounded` itself: |bias| falls in 8
+cells for the Transformer (rises in 1) and in 5 for the LSTM, though for the LSTM it also
+rises in 2 rate-0.01 cells by more than 1,000 points. That is read as the clusters
+*displacing* the broken counters rather than contributing: a bounded categorical summary
+of the same history, so less of the prediction rests on channels that drift out of range.
+Both rescued arms remain worse than `ar_bounded`, which reaches the same place by
+construction.
 
-**Read together: drop the cluster axis.** It improves exactly one arm, and that is the
-arm to drop anyway.
+**Read together: drop the cluster axis.** On the grid it helps the level mostly where it
+covers for the broken counters, the arm to drop anyway; the one real-panel gain here
+(electronics, superseded run) is not reproduced on CDNOW.
 
 ### The tracking plot, which the tables hide
 
