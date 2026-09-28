@@ -3,9 +3,27 @@
 What the training loss has to satisfy in this package, what the five selectable
 `loss_type` values actually compute, and which changes to the loss could plausibly
 improve a *forecast* — as opposed to improving a *classification* — on the two panels
-this project runs on. Two of the changes it proposed have since been run and are
-falsified on CDNOW; the Measured blocks in §6 record that, and the recommendations are
+this project runs on. Two of the changes it proposed have since been run on CDNOW: R1
+is falsified there, and R2 shows no clear difference from the baseline while its search
+drives λ toward zero; the Measured blocks in §6 record that, and the recommendations are
 kept as written so the prediction and the outcome sit side by side.
+
+> **Revised under the statistical protocol (2026-09-28).** The CDNOW loss-ablation claims
+> in §6 now rest on Δ with a 95% percentile-bootstrap interval from
+> `panelclv.evaluation.effects.effect` (`.scratch/statistical-protocol/small_docs_effects.py`),
+> not on per-seed sign counts. The arms are compared as **independent** replications
+> (n = 10 / 10): the shared seed `base_seed + j` drives only the Optuna sampler and the
+> Monte Carlo forecast, training is unseeded, and the arms optimise different objectives,
+> so seed j is not a unit both arms were measured on. Verdicts:
+>
+> - R1, `emd` worse than cross-entropy on MAPE ("9 of 10 seeds") → **still supported**
+>   (Δ +82.3, CI +57.2 to +106.5).
+> - R2, `ce + λ·emd` worse than cross-entropy on MAPE ("8 of 10 seeds, 17.7 points") →
+>   **no clear difference at n = 10** (Δ +17.7, CI −12.8 to +51.4).
+> - The "~20 points of bias is not detectable at N_STUDIES=3" sizing rule (an SD
+>   heuristic) is withdrawn in favour of reporting the interval at whatever n was run.
+> - Per-customer Spearman, the protocol's other primary metric, cannot be computed for
+>   this ablation: it ran on the pre-ADR-0009 CDNOW window.
 
 Read `CLAUDE.md` for the model contract and `CONTEXT.md` for the vocabulary first.
 The short version, because everything below hangs off it: these models are
@@ -793,16 +811,18 @@ Each is stated as (a) the concrete change, (b) the expected effect and its sign,
 to test it. The testing pattern throughout is the one in
 `scripts/run_cdnow_embedding_ablation.py`: arms differing in exactly one pinned thing,
 one shared `prepare_dataset` object, identical remaining search space and trial budget,
-paired seeds (`base_seed + j` for study `j`), read back with
-`study_metrics(root, panel_path, standard_deviation=True)`.
+seeds `base_seed + j` for study `j` in every arm, read back with
+`study_metrics(root, panel_path, standard_deviation=True)`. The shared seed drives only
+the Optuna sampler and the Monte Carlo forecast; training is unseeded, so the arms are
+**independent** replications, not pairs.
 
-**A sizing constraint that binds every arm below.** The across-studies SD of
-`bias_percent` in the archived electronics suite is **27.5 (LSTM)** and **16.2
-(Transformer)** on 10 studies. With `N_STUDIES = 3` — the CDNOW ablation's setting — the
-standard error of an arm's mean bias is ~16 and ~9 points. **A loss effect smaller than
-about 20 points of bias is not detectable at N_STUDIES=3.** Budget 10 studies per arm, or
-report the paired per-seed difference between arms rather than the difference of means.
-Do not report RMSE as the discriminating metric (§4.1).
+**How every arm below is read.** By `docs/statistical-protocol.md`: Δ of the arm means on
+aggregate MAPE (and Spearman where the window allows it), with its 95% bootstrap interval
+from `effects.effect(..., paired=False)`, supported iff the interval excludes 0. The
+across-studies spread is large — the archived electronics suite's `bias_percent` SD is
+27.5 (LSTM) and 16.2 (Transformer) over 10 studies — so budget 10 studies per arm rather
+than 3; a small n shows up as a wide interval, which is then reported as "no clear
+difference at n = …". Do not report RMSE as the discriminating metric (§4.1).
 
 ---
 
@@ -850,7 +870,7 @@ on different scales, so only the forecast metrics are comparable across arms, ne
 |---|---|
 | arms | three, differing only in `loss_type`: `LSTM_ce`, `LSTM_emd`, `LSTM_ce_emd` |
 | features | `seq_cols = [Transactions, period_since_last_transaction, has_transacted_before]` — an AR pair matching no token in `docs/studies-run.md` §3; no cluster, no calendar |
-| budget | **10 studies × 20 Optuna trials × 300 Monte Carlo paths** per arm, paired seeds 43–52 |
+| budget | **10 studies × 20 Optuna trials × 300 Monte Carlo paths** per arm, seeds 43–52 in every arm (sampler and forecast only — independent replications) |
 | embedder | `valendin` (from `param_embedder`) |
 | windows | calibration 1997-01-01 → 1997-09-30, validation from 1997-08-06, holdout 1997-10-01 → 1998-06-30 — **39 / 38 weeks**, the pre-ADR-0009 CDNOW window; 2,357 customers, `clip_target_upper=4` → 5 classes |
 | metrics | `bias_percent`, `mape_aggregate`, `rmse` from `results.csv`. No per-customer Spearman: the pre-ADR-0009 window blocks recomputation (`docs/studies-run.md` §7). |
@@ -867,16 +887,20 @@ Across studies, mean ± SD:
 looks like the best of the three. It is an artefact of averaging a bimodal distribution
 whose two modes are −100% and +150%: six of its ten studies collapse to a forecast of
 essentially zero (`bias_percent ≤ −99.9`) and the other four overshoot by +126% to +184%.
-Nothing lands in between, and the signed mean cancels the halves against each other.
+Nothing lands in between, and the signed mean cancels the halves against each other —
+the signed-bias difference from cross-entropy is not supported (Δ +20.6, 95% CI −58.5 to
++104.5, n = 10 / 10), and no arm's mean bias is clearly different from 0.
 `mape_aggregate`, which cannot cancel, is the honest column — 123.5 against
 cross-entropy's 41.2.
 
-Paired per-seed, which is what the SD above makes necessary, `emd` is worse than
-cross-entropy on `mape_aggregate` in **9 of 10 seeds**, by 82.3 points on average. `rmse`
-separates nothing (0.149 vs 0.154), exactly as §4.1 predicts it cannot.
+Under the statistical protocol (independent arms, n = 10 / 10), `emd` raises
+`mape_aggregate` by **Δ +82.3 (95% CI +57.2 to +106.5)** and `|bias_percent|` by Δ +88.8
+(CI +65.5 to +112.9); both supported. Descriptively, `emd`'s MAPE is above
+cross-entropy's in 9 of the 10 seed slots. `rmse` is descriptive and separates nothing
+(0.149 vs 0.154), exactly as §4.1 predicts it cannot.
 
 **Verdict: R1 is falsified on CDNOW.** The prediction was a reduction in `|bias_percent|`
-and in `mape_aggregate`; the measurement is a large increase in both, from a training run
+and in `mape_aggregate`; the measurement is a large, supported increase in both, from a training run
 that collapses to the zero forecast more often than not. The risk this section itself
 flagged — "RPS is a quadratic rule and under-weights small probabilities, so it may
 under-fit classes 2+ on the 97%-zero head and *lower* the forecast" — is precisely the
@@ -911,9 +935,12 @@ selected λ across studies: if the search consistently picks λ≈0 that is itse
 result, and it retires the whole line of enquiry cleanly.
 
 **Measured — CDNOW, 2026-08-31.** The third arm of the same ablation. `mape_aggregate`
-58.9 ± 48.0 against cross-entropy's 41.2 ± 25.6, and worse on the paired per-seed
-comparison in **8 of 10 seeds**, by 17.7 points on average. It lands where the argument
-said it would — between plain `emd` and plain CE — but on the wrong side of the baseline.
+58.9 ± 48.0 against cross-entropy's 41.2 ± 25.6: **no clear difference at n = 10 / 10**
+(Δ +17.7, 95% CI −12.8 to +51.4; `|bias_percent|` Δ +12.6, CI −13.3 to +42.9).
+Descriptively its MAPE is above cross-entropy's in 8 of the 10 seed slots, and its mean
+lands between plain `emd` and plain CE, on the wrong side of the baseline — but the
+interval does not separate it from cross-entropy, so the arm is neither shown to help
+nor shown to hurt.
 
 **The λ distribution is the cleaner result, and it is the one this test named as
 decisive.** Searched over `[0, 10]`, the selected λ across the ten studies runs
@@ -923,11 +950,11 @@ called out above: "if the search consistently picks λ≈0 that is itself the re
 retires the whole line of enquiry cleanly." On CDNOW it does.
 
 One honest qualification. λ=0 is inside the range and recovers the baseline exactly, so
-in principle the arm cannot lose except through search noise — yet it did lose, by 17.7
-points. With 20 trials over a six-dimensional space the search does not reliably find
-λ≈0, so the gap measures the cost of spending a search dimension on λ, not a defect in
-the loss. That is still a cost, and it is the argument for retiring the line rather than
-re-running it wider.
+in principle the arm cannot lose except through search noise — and at n = 10 it is not
+shown to lose: the 17.7-point mean gap has an interval that contains 0. If a gap is
+real, the likely source is that 20 trials over a six-dimensional space do not reliably
+find λ≈0, i.e. the cost of spending a search dimension on λ rather than a defect in the
+loss. The λ distribution, not the MAPE gap, is what retires the line.
 
 ---
 
@@ -1011,8 +1038,8 @@ Measurement gaps first, then reading gaps.
   what a finite LSTM/Transformer trained by AdamW on 63k–70k cells converges to. The
   direction of each effect is established; the magnitude in a real study is not. No
   training run was performed for this document as first written. **R1 and R2 have since
-  been run on CDNOW** (2026-08-31) and are falsified there — see the Measured blocks in
-  §6. R3's argument remains unrun by design and R4 is untested, and no recommendation has
+  been run on CDNOW** (2026-08-31): R1 is falsified there and R2 shows no clear
+  difference from cross-entropy at n = 10 — see the Measured blocks in §6. R3's argument remains unrun by design and R4 is untested, and no recommendation has
   been run on electronics at all.
 - **The exposure-bias mechanism of §4.3.** The *literature* is verified (Bengio et al.,
   Huszár, Wen et al.); the claim that the compounding runs *upward on this data* is

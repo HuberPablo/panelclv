@@ -7,6 +7,22 @@ different panels, or the same behaviour described by two different metrics.
 **It is the second.** The published 1.35% and an aggregate bias of −11% are both
 correct, are both about the Pareto/NBD on CDNOW, and are not the same quantity.
 
+> **Revised under the statistical protocol (2026-09-28).** The §7 estimator comparison
+> and the §9(b) window-shift claims now carry Δ with a 95% percentile-bootstrap interval
+> from `panelclv.evaluation.effects.effect`
+> (`.scratch/statistical-protocol/small_docs_effects.py`). The window shift is paired on
+> seed (both arms run the same seeded MCMC chain on the same cohort), n = 3. Verdicts:
+>
+> - `T_cal + 0.5` ("worth a third of a point, does not hold its sign") → **no clear
+>   difference at n = 3** in bias (Δ +0.36, CI −2.65 to +3.15), Spearman or MAPE —
+>   unchanged in substance, now stated as an interval.
+> - The whole-week shift ("1.6× the seed spread", an SD heuristic) → **supported**:
+>   bias Δ −7.05 (CI −7.74 to −6.06), MAPE Δ +3.6.
+> - The occasion collapse's +5.7-point lift → **supported** (CI +5.44 to +6.34), and it
+>   also costs a small, supported 0.013 of Spearman.
+> - §7, A against D ("1.5 points apart, inside A's seed spread") → **no clear difference
+>   at n = 5** against D's single deterministic fit (Δ +1.46, CI −0.32 to +3.05).
+
 Read `CONTEXT.md` first for the vocabulary (*calibration*, *holdout*, *aggregate
 bias*, *benchmark*). Unlike `docs/hurdle-models-vs-pareto-nbd.md`, which is a reading
 exercise, everything here was **run**: one script, `.scratch/pnbd-cdnow-replication/replicate.py`,
@@ -219,10 +235,13 @@ Three readings.
 
 **The port is fine.** A at −11.05% and D at −12.51% are two different estimators —
 hierarchical-Bayes Gibbs against maximum likelihood — on the same data under the same
-metric, 1.5 points apart, with A's seed spread alone covering 5.5 points. Nothing in
-the gap between 1.35% and this table is attributable to `benchmarks/pareto_nbd.py`.
+metric, and there is no clear difference between them at n = 5 (A's five seeded fits
+against D's one deterministic fit as a fixed reference: Δ +1.46, 95% CI −0.32 to +3.05).
+That is not a proof that they agree, but nothing in the gap between 1.35% and this table
+is attributable to `benchmarks/pareto_nbd.py`.
 
-**Pareto/NBD under-predicts CDNOW by 11–14%.** Directionally the same as electronics,
+**Pareto/NBD under-predicts CDNOW by 11–14%.** Config A's bias is clearly below 0 (Δ
+−11.05, 95% CI −12.83 to −9.46, n = 5). Directionally the same as electronics,
 where the archived runs put it at −53% and −64%, but roughly a fifth the size. The
 "Pareto/NBD under-predicts" claim survives the move to CDNOW; the *magnitude* does not
 travel, and quoting the electronics figure as though it characterised the model would
@@ -331,8 +350,9 @@ first purchase carries its real timestamp. Against that reference, bucketing to 
 shortens each customer's life by however far into its week the first purchase fell —
 **half a week in expectation**.
 
-That is measurable and it measures as nothing. On CDNOW, adding 0.5 periods to `T_cal`
-(the daily-resolution equivalent), paired on seeds 42–44
+That is measurable and no effect is found. On CDNOW, adding 0.5 periods to `T_cal`
+(the daily-resolution equivalent), paired on seeds 42–44 — each seed drives the same
+MCMC chain in both arms, so the seed is a shared unit
 (`.scratch/pnbd-cdnow-replication/measure_window_shift.py`; the baseline arm reproduces
 the archived `results.csv` to every digit):
 
@@ -343,20 +363,27 @@ the archived `results.csv` to every digit):
 | 44 | −11.50 | −10.91 | +0.59 |
 | **mean** | **−14.18** | **−13.82** | **+0.36** |
 
-The correction is worth a third of a point and does not hold its sign across seeds.
-Spearman is untouched (0.449 → 0.446). Even the whole-week version — the wrong convention
-applied deliberately, as a sensitivity bound — moves the mean only to −21.23, which is
-1.6× the seed spread the baseline already has.
+Under the statistical protocol (paired on seed, n = 3): **no clear difference in bias**
+(Δ +0.36, 95% CI −2.65 to +3.15), nor in Spearman (0.449 → 0.446, Δ −0.003, CI −0.019
+to +0.015) or MAPE (Δ +0.15, CI −0.83 to +1.33). At n = 3 that is an absence of
+evidence, not a demonstration that the half-week is worth nothing. The whole-week
+version — the wrong convention applied deliberately, as a sensitivity bound — does move
+the level: bias −14.18 → −21.23 (Δ −7.05, CI −7.74 to −6.06) and MAPE Δ +3.6 (CI +3.2 to
++4.1), with no clear difference in Spearman (Δ −0.007, CI −0.020 to +0.002). A full
+week is a supported, level-only effect; the half-week that actually applies is not
+distinguishable from zero at this n.
 
 **Which is the finding that survives**: the baseline alone spans 4.5 points over three
-seeds (−11.50 to −15.97), so §7's warning generalises — a single Pareto/NBD fit on CDNOW
+seeds (−11.50 to −15.97, descriptive), so §7's warning generalises — a single Pareto/NBD fit on CDNOW
 is not a reportable number, and every CDNOW Pareto/NBD row in the docs is `n = 1` at seed
 42, the most pessimistic of the three. That is a reporting problem, not a `_build_cbs`
 problem.
 
 The occasion collapse — the *first* of the two choices above — is separate and was measured
 in the same run: counting transactions rather than active periods lifts the CDNOW level by
-5.7 points (−14.18 → −8.44) and diverges on electronics exactly as the docstring warns. It
+5.7 points (−14.18 → −8.44; paired on seed, n = 3: Δ +5.74, 95% CI +5.44 to +6.34,
+supported), costs a small but supported 0.013 of Spearman (CI −0.023 to −0.005), and
+diverges on electronics exactly as the docstring warns. It
 remains a documented modelling choice.
 
 `.scratch/pnbd-cdnow-replication/issues/01-pareto-weekly-discretisation-convention.md`
@@ -441,8 +468,8 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 1. ~~**Isolate §9(b).**~~ **Done, 2026-09-17, and it came back negative** — see §9(b).
    The `cal_end` reading was not an off-by-one: `t_x` and `T_cal` are both differences of
    week labels, so the anchor cancels and the arithmetic is exact under the end-of-week
-   convention. What remains is a discretisation choice worth +0.36 points of bias on
-   CDNOW, which does not hold its sign across three seeds. Closed `wontfix`:
+   convention. What remains is a discretisation choice whose effect on CDNOW bias is not
+   distinguishable from zero at n = 3 (Δ +0.36, 95% CI −2.65 to +3.15). Closed `wontfix`:
    `.scratch/pnbd-cdnow-replication/issues/01-pareto-weekly-discretisation-convention.md`.
 
 2. **Report CDNOW Pareto/NBD as a seed distribution, not one fit.** Raised by the above

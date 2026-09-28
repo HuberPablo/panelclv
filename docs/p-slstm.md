@@ -8,7 +8,25 @@ in August 2026 and not adopted: it does not beat the LSTM on the forecast and co
 ~14× more to train. Nothing under `src/panelclv/` mentions it. This document exists
 because the negative result is worth keeping — it is a measured answer about a
 current architecture, not a dead end to forget — and because understanding *why* it
-loses says something about what this forecasting problem actually rewards.
+does not win says something about what this forecasting problem actually rewards.
+
+> **Revised under the statistical protocol (2026-09-28).** §10–§11's comparisons now
+> carry Δ with a 95% percentile-bootstrap interval from
+> `panelclv.evaluation.effects.effect`
+> (`.scratch/statistical-protocol/small_docs_effects.py`). The LSTM and P-sLSTM runs are
+> compared as **independent** (n = 8 / 8): each seed j seeds both, but two architectures
+> consume the same random stream differently, so seed j is not a unit both were
+> measured on. Verdicts:
+>
+> - Run 1, P-sLSTM beats the class prior ("8.7% ± 0.3, reproducibly") → **supported**
+>   (8.67% below the prior, CI +8.51 to +8.98, n = 3).
+> - Run 2, "P-sLSTM is worse on all three metrics" → **no clear difference at n = 8** on
+>   MAPE (Δ +2.8, CI −3.0 to +8.2) or |bias| (Δ +6.8, CI −3.8 to +17.7); RMSE is
+>   descriptive. The verdict "does not beat the LSTM" stands; "loses" does not.
+> - Run 2, "validation CE lower in every seed … not noise" → **not re-tested under the
+>   statistical protocol**: the per-seed CE values were only in a run log that is gone.
+> - "The neural models are unbiased on average" → **no clear bias at n = 8** (not a
+>   demonstration of zero bias); Pareto/NBD's under-prediction is supported.
 
 Read `CONTEXT.md` first for the vocabulary (*calibration*, *holdout*, *rollout*,
 *trial*). This document assumes it, and assumes the categorical-head contract
@@ -301,7 +319,9 @@ training-window class prior.
 | Class prior (baseline) | 0.12618 |
 | P-sLSTM, best, mean of 3 seeds | **0.11524** ± 0.00028 |
 
-**Answer: yes — 8.7% ± 0.3 better than the prior, reproducibly.** Training CE
+**Answer: yes — 8.7% below the prior's cross-entropy** (per seed 9.0 / 8.5 / 8.5%;
+against the prior as a fixed reference, paired, n = 3: Δ CE −0.0109, 95% CI −0.0113 to
+−0.0107; gain 8.67%, CI +8.51 to +8.98, supported). Training CE
 plateaus by epoch 3 and val CE bottoms out around epoch 6–11, so the model is neither
 overfitting nor holding much more in reserve at this size.
 
@@ -332,7 +352,25 @@ channel. Per-customer Spearman was not computed for either run.
 | P-sLSTM (n=8) | 0.3815 ± 0.0018 | +11.87 ± 27.81 | 56.93 ± 6.37 | 26.6 |
 | Pareto/NBD (n=3) | 0.3758 ± 0.0000 | −63.70 ± 0.35 | 66.18 ± 0.28 | 63.7 |
 
-And the one-step-ahead density quality, from the six seeds captured in the run log:
+Under the statistical protocol (independent, n = 8 / 8; Pareto/NBD n = 3 seeded fits):
+
+| comparison | metric | Δ (B − A) | 95% CI | supported |
+|---|---|---:|---:|:---:|
+| P-sLSTM vs LSTM | aggregate MAPE | +2.79 | −3.01 to +8.21 | no |
+| P-sLSTM vs LSTM | \|bias\| | +6.82 | −3.84 to +17.66 | no |
+| P-sLSTM vs LSTM | signed bias | +9.46 | −14.93 to +32.30 | no |
+| Pareto/NBD vs LSTM | aggregate MAPE | +12.04 | +8.01 to +15.71 | yes |
+| Pareto/NBD vs P-sLSTM | aggregate MAPE | +9.25 | +5.29 to +13.47 | yes |
+| Pareto/NBD vs LSTM | \|bias\| | +43.90 | +36.38 to +52.33 | yes |
+| Pareto/NBD vs P-sLSTM | \|bias\| | +37.08 | +30.43 to +44.81 | yes |
+
+Signed bias against 0: LSTM +2.41 (CI −13.43 to +18.30) and P-sLSTM +11.87 (CI −7.22 to
++27.99), neither clearly biased at n = 8; Pareto/NBD −63.70 (CI −64.10 to −63.43),
+supported. RMSE is descriptive and carries no claim.
+
+And the one-step-ahead density quality, from the six seeds captured in the run log (the
+per-seed values were not stored, so this comparison is **not re-tested under the
+statistical protocol** and the table is description only):
 
 | | LSTM | P-sLSTM |
 |---|---|---|
@@ -345,27 +383,35 @@ GPU, P-sLSTM on the vanilla backend.
 
 ## 11. The verdict, and what it rests on
 
-**P-sLSTM wins one step ahead and loses the forecast.** Its validation cross-entropy
-is lower than the LSTM's in every seed by ~0.004 — consistent, not noise — and it
-converges in fewer epochs. It is genuinely the better density model over the next
-period. That advantage does not survive 52 autoregressive steps: errors compound, and
-every aggregate metric comes out slightly worse.
+**P-sLSTM looks better one step ahead and does not beat the LSTM on the forecast.** Its
+validation cross-entropy was lower than the LSTM's in each of the six seeds whose values
+survive in the run log, by ~0.004, and it converges in fewer epochs. That comparison is
+**not re-tested under the statistical protocol** — the per-seed values were never
+stored — so "the better density model over the next period" is a description, not a
+supported claim. Whatever the one-step advantage is, it does not show up after 52
+autoregressive steps: every aggregate metric's mean comes out slightly worse, but none
+of the differences is clear at n = 8 (MAPE Δ +2.8, 95% CI −3.0 to +8.2; |bias| Δ +6.8,
+CI −3.8 to +17.7).
 
 Three things in that table deserve to be read carefully, because two of them are traps.
 
 **RMSE separates nothing, and should not decide this.** All three models sit in
-0.376–0.382 — a spread narrower than the seed-to-seed noise of either neural model.
+0.376–0.382; RMSE is descriptive under the statistical protocol.
 On a target that is ~97% zeros, per-customer per-period RMSE is dominated by getting
 the zeros right. Pareto/NBD "wins" RMSE while under-predicting the total number of
 transactions by 64%.
 
-**Pareto/NBD is stable and badly wrong; the neural models are unbiased on average and
-unstable per run.** The LSTM's mean bias of +2.4% is an artefact of averaging a −26%
+**Pareto/NBD is stable and badly wrong; the neural models show no clear bias on average
+and are unstable per run.** Pareto/NBD's −63.7% is clearly below 0 and its MAPE is
+clearly worse than either neural model's (vs LSTM Δ +12.0, 95% CI +8.0 to +15.7); neither
+neural model's mean bias is clearly different from 0 at n = 8. The LSTM's mean bias of +2.4% is an artefact of averaging a −26%
 run with a +34% one, std 24. That is exactly why the study-suite design reports
 distributions across many studies rather than a single number.
 
-**P-sLSTM is worse on all three metrics and noisier on all three.** Not dramatically —
-but it is worse, not better, and it costs 14×.
+**P-sLSTM is not better on any metric, and it costs 14×.** Its means are slightly worse
+on all three and its runs are more spread out, but at n = 8 none of the differences from
+the LSTM is clear (the intervals above all contain 0). The case against adopting it
+rests on the absence of any gain plus the cost, not on a demonstrated loss.
 
 ### What this does not establish
 

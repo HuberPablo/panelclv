@@ -13,16 +13,37 @@ capped by the calibration window and drifts out of range during the holdout. An
 absorbing state is the first proposal in this package that answers both at once, and
 the one place where "add a class to the softmax" is *not* vacuous.
 
+> **Revised under the statistical protocol (2026-09-28).** Every comparison below now
+> carries Δ with its 95% percentile-bootstrap interval from
+> `panelclv.evaluation.effects.effect`, computed by
+> `.scratch/statistical-protocol/small_docs_effects.py`; the 2×2 and the latch are paired
+> on study (the same weights read several ways, n = 8). Verdicts that changed:
+>
+> - *Feedback inflates bias* ("measurably false", "flat to ~1pp") → **no clear
+>   difference at n = 8** (Δ −0.24 points, CI −3.0 to +2.0). Not shown to be absent.
+> - *MAPE untouched across the 2×2* → **supported and small**: the true-history readouts
+>   lower MAPE by 1.0–1.4 points.
+> - *Latch gain "reliable, 8/8"* → supported by its interval; the sign count stays only
+>   as description.
+> - *Unbounded arm's bias is worse teacher-forced than rolled out* → **no clear
+>   difference at n = 8** (Δ +236, CI −38 to +756); the "shielding" account is now a
+>   hypothesis.
+> - The comparisons against Pareto/NBD's 0.310 rest on one archived fit (n = 1), so they
+>   are tested against that number as a fixed reference and say nothing about Pareto/NBD's
+>   own refit spread.
+
 **The verdict, up front.** The idea is sound, the obvious implementation cannot train,
 and the motivation usually given for it — that simulated paths *resurrect* dead
-customers and inflate the forecast — is measurably false. What §4 measures instead is
-sharper. The fitted conditional ranks customers at Spearman ρ = 0.816 against their true
+customers and inflate the forecast — finds no support: handing the model the true
+history moves bias by −0.24 points (95% CI −3.0 to +2.0, n = 8). What §4 measures
+instead is sharper. The fitted conditional ranks customers at Spearman ρ = 0.816 against their true
 holdout totals; Pareto/NBD manages 0.310 and an oracle recency lookup tops out at 0.321.
 **The model is not short of information about who is alive.** Roll it out 52 steps on
 its own samples and 0.816 becomes 0.240, and **86–93% of that loss runs through one
 channel: the recency encoding, corrupted by purchases the model sampled and the customer
-never made.** Bias, MAPE and cell-RMSE are untouched throughout — the level error and the
-ranking error are independent problems.
+never made.** The level barely notices: no clear difference in bias, cell-RMSE moving in
+the fourth decimal, and MAPE improving by a supported but small 1.4 points — the level
+error and the ranking error are largely independent problems.
 
 That reframes the proposal twice over. An absorbing state is not worth building to teach
 the model who is gone; it already knows. It is worth building, if at all, to stop a
@@ -288,6 +309,16 @@ three times — so it has no spread to report):
 **A single integer per customer — weeks since last purchase — recovers 0.296 of the
 0.321 that recency can possibly buy, and the neural models recover none of it.**
 
+Under the statistical protocol (n = 3 replications per neural model; the Pareto/NBD fit is
+n = 1, so it enters as a fixed reference and its own refit spread is not in the
+interval): the LSTM's ρ shows no clear difference from 0 (Δ −0.0001, 95% CI −0.012 to
++0.015), nor does the Transformer's (Δ +0.024, CI −0.008 to +0.050). Both sit below the
+Pareto/NBD fit's 0.310 (LSTM Δ −0.310, CI −0.321 to −0.295; Transformer Δ −0.286, CI
+−0.318 to −0.260). "No clear difference from 0 at n = 3" is what "≈ 0" means here — not
+that the ranking is shown to be zero. The superseding note below is the stronger
+evidence on how much recency these models can recover; the recency-lookup rows are
+single deterministic numbers and are descriptive.
+
 > **Superseded in part, 21 September 2026.** The ρ ≈ 0 above is real, but it is a property
 > of how those archived models were *trained*, not only of what they were given.
 > `docs/training-budget.md` §15 re-runs the same configuration —
@@ -387,13 +418,18 @@ of `compute_forecast_metrics`'s outputs.
 
 **The fitted conditional ranks customers at ρ = 0.816.** Pareto/NBD manages 0.310 on the
 archived study (§3.3) and the oracle recency lookup tops out at 0.321. The model is not
-short of information about who is alive — it is markedly better than the benchmark. The
-rollout delivers 0.240, below Pareto/NBD.
+short of information about who is alive — the teacher-forced readout sits above the
+archived Pareto/NBD fit by Δ +0.506 (95% CI +0.498 to +0.514, n = 8 against that single
+fit as a fixed reference). The rollout delivers 0.240, below it (Δ −0.070, CI −0.100 to
+−0.048). Both rows compare against one Pareto/NBD fit from a different study, so they
+rank the readouts against that number, not against Pareto/NBD as a replicated condition.
 
-**The damage is confined to one axis.** Bias, MAPE and cell-RMSE are flat across all
-four cells — the level error and the ranking error are independent problems, now
-confirmed in a full factorial rather than inferred. Only `rmse_customer_total` tracks
-the ranking collapse, 3.43 → 2.90.
+**The damage is concentrated on one axis.** Paired on study (n = 8), teacher against
+rollout moves ρ by +0.576 (95% CI +0.549 to +0.612) but shows no clear difference in bias
+(Δ −0.24, CI −3.0 to +2.0); MAPE improves by a supported but small 1.39 points (CI −2.15
+to −0.78), and cell-RMSE moves in the fourth decimal (RMSE is descriptive here). The
+level error and the ranking error are largely separate problems. Only
+`rmse_customer_total` tracks the ranking collapse, 3.43 → 2.90.
 
 ### 4.3 It is the silence counter, not the counts
 
@@ -404,18 +440,19 @@ As main effects over the 2×2:
 | **target sampled** | 0.240 (`rollout`) | 0.775 (`ar_true`) |
 | **target true** | 0.322 (`tgt_true`) | 0.816 (`teacher`) |
 
-Fixing the AR columns is worth **+0.535** (at sampled target) and **+0.494** (at true
-target). Fixing the target channel is worth +0.082 and +0.041. The rows agree, the
-interaction is ~0.09, and the AR columns carry **86–93% of the 0.576 gap whichever way
-the square is walked**.
+Paired on study (n = 8), fixing the AR columns is worth **+0.535** (95% CI +0.512 to
++0.570) at sampled target and **+0.494** (CI +0.434 to +0.549) at true target. Fixing the
+target channel is worth +0.082 (CI +0.045 to +0.126) and +0.041 (CI +0.031 to +0.053) —
+all four supported. The rows agree, the interaction is ~0.09, and the AR columns carry
+**86–93% of the 0.576 gap whichever way the square is walked**.
 
 The sharpest cell is `tgt_true`: hand the model the true purchase counts at every step
 but let it rebuild recency from its own samples, and ranking moves only 0.240 → 0.322.
 **A customer's identity travels through the rollout in the recency encoding and almost
-nowhere else.** The variances say the same thing — the true-AR cells are stable across
-unseeded replications (sd 0.013–0.014) while the sampled-AR cells are not (0.041,
-0.083), which is a plausible account of why the archived suites show near-zero ρ with
-wide spread.
+nowhere else.** Descriptively, the spreads point the same way — the true-AR cells vary
+little across unseeded replications (sd 0.013–0.014) while the sampled-AR cells vary
+more (0.041, 0.083), a plausible account of why the archived suites show near-zero ρ
+with wide spread. That is a description of spread, not a tested claim.
 
 The two other arms, for contrast:
 
@@ -426,19 +463,26 @@ The two other arms, for contrast:
 | `ar_unbounded` | 0.173 | 0.072 | 0.142 | **+413** |
 
 The unbounded arm fails for an unrelated reason and is kept only as a warning: teacher
-forcing rescues nothing there, because that model is wrong **before** any rollout
-happens. Its bias is *worse* teacher-forced than rolled out, which has a mechanical
-explanation worth keeping — in the rollout, spurious sampled purchases keep resetting
-the recency counter and accidentally hold it inside the fitted range. **The rollout's
-own errors were partly shielding that model from its encoding defect.** "Exposure bias"
-is the right diagnosis for a bounded arm and the wrong one for that arm.
+forcing rescues nothing there — no clear difference in ρ between teacher and rollout at
+n = 8 (Δ −0.031, 95% CI −0.194 to +0.129) — because that model is wrong **before** any
+rollout happens. Its mean bias is higher teacher-forced (+413%) than rolled out (+177%),
+but the paired interval contains 0 (Δ +236, CI −38 to +756, n = 8), so "worse
+teacher-forced" is not supported at this n. The mechanical explanation first offered for
+it — in the rollout, spurious sampled purchases keep resetting the recency counter and
+accidentally hold it inside the fitted range, so **the rollout's own errors partly shield
+that model from its encoding defect** — is therefore a hypothesis, not a measured
+result. "Exposure bias" is the right diagnosis for a bounded arm and the wrong one for
+that arm, on the ρ evidence alone.
 
 ### 4.4 What this retracts, and what it restores
 
 Splitting the original "resurrection" story into its separable claims:
 
-- *Simulated paths resurrect dead customers, inflating the forecast level.* **Still
-  false, now measured directly.** Bias is flat to ~1pp across every cell of the 2×2.
+- *Simulated paths resurrect dead customers, inflating the forecast level.* **Not
+  supported, now measured directly.** Feeding the true history shows no clear difference
+  in bias at n = 8 (teacher vs rollout Δ −0.24, 95% CI −3.0 to +2.0; `ar_true` vs rollout
+  Δ −0.94, CI −3.8 to +1.4). That is an absence of evidence at this n, not a
+  demonstration that the effect is zero.
 - *A spurious sampled purchase resets the recency encoding inside the path, and that
   compounds.* **True, and dominant** — it is 86–93% of the ranking loss. §4 of the first
   version scored this as second-order, from the wrong arm's bias numbers.
@@ -454,27 +498,31 @@ counter is **seeded from each customer's calibration-end recency**, so a custome
 arrives already quiet for a year latches at once; this is a death model, not a horizon
 truncation. It is absorbing for free, since forced zeros keep the counter climbing.
 
-Electronics `ar_bounded_32`, 8 replications, same weights within each replication:
+Electronics `ar_bounded_32`, 8 replications, same weights within each replication, so
+every Δ is paired on study (n = 8):
 
-| readout | ρ | paired gain vs `rollout` | bias % | MAPE agg | RMSE cust. total |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `rollout` | 0.230 ± 0.026 | — | −16.4 | 43.54 | **3.429** |
-| `latch_52` | 0.325 ± 0.005 | +0.095 ± 0.028 (8/8) | −69.9 | 71.09 | 3.552 |
-| `latch_26` | **0.342** ± 0.004 | **+0.112 ± 0.029 (8/8)** | −83.4 | 83.61 | 3.672 |
-| `latch_8` | 0.298 ± 0.002 | +0.068 ± 0.027 (8/8) | −94.1 | 94.11 | 3.827 |
-| `teacher` | 0.812 ± 0.011 | — | −15.5 | 42.46 | 2.884 |
+| readout | ρ | Δρ vs `rollout` (95% CI) | bias % | MAPE agg | Δ MAPE vs `rollout` (95% CI) | RMSE cust. total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `rollout` | 0.230 ± 0.026 | — | −16.4 | 43.54 | — | **3.429** |
+| `latch_52` | 0.325 ± 0.005 | +0.095 (+0.076 to +0.113) | −69.9 | 71.09 | +27.6 (+25.9 to +28.8) | 3.552 |
+| `latch_26` | **0.342** ± 0.004 | **+0.112 (+0.094 to +0.131)** | −83.4 | 83.61 | +40.1 (+37.9 to +41.8) | 3.672 |
+| `latch_8` | 0.298 ± 0.002 | +0.068 (+0.051 to +0.085) | −94.1 | 94.11 | +50.6 (+48.8 to +52.4) | 3.827 |
+| `teacher` | 0.812 ± 0.011 | — | −15.5 | 42.46 | — | 2.884 |
 
 Two readings, and both matter.
 
-**The mechanism is real.** The gain is reliable (8/8 replications at every `L`) and ρ is
+**The mechanism is real.** The ρ gain is supported at every `L` (every interval above
+excludes 0; descriptively, it is positive in all 8 replications) and ρ is
 scale-invariant, so shrinking the forecast cannot produce it — the latch changes the
-*ordering*. And ρ is non-monotonic in `L`, peaking at an interior 26: a rule that merely
-suppressed volume would improve monotonically as `L` fell. It is picking up something
-about *when* customers stop.
+*ordering*. And ρ is non-monotonic in `L`, peaking at an interior 26: `latch_26` beats
+`latch_52` by +0.018 (CI +0.017 to +0.019) and `latch_8` by +0.044 (CI +0.043 to +0.046),
+while a rule that merely suppressed volume would improve monotonically as `L` fell. It is
+picking up something about *when* customers stop.
 
-**And the crude version is a strictly worse forecast.** On every metric the package
-actually scores it loses: bias −16% → −83%, MAPE 43.5 → 83.6, `rmse_customer_total`
-3.429 → 3.672. Declaring death *with certainty* after `L` silent weeks kills a great
+**And the crude version is a strictly worse forecast.** On both primary level metrics it
+loses, with every interval excluding 0: MAPE 43.5 → 83.6 at `L = 26` (Δ +40.1, CI +37.9 to
++41.8) and bias −16% → −83% (Δ −67.0, CI −72.0 to −62.0); `rmse_customer_total`
+3.429 → 3.672 descriptively. Declaring death *with certainty* after `L` silent weeks kills a great
 many customers who were merely quiet. That is precisely the argument for a learned,
 probabilistic hazard — one that kills with probability `h` rather than certainty, so the
 level survives while the ordering gain is kept — and it is now an empirical argument
@@ -633,8 +681,8 @@ and step 1 alone can close the question.
    (§5) fitted as the competitor it has to beat.
 
 Steps 1 and 2 are scored on `rmse_customer_total`, bias and MAPE as well as ρ. §4.5 is
-the cautionary case: a change can lift rank correlation reliably, 8 replications out of
-8, and still be worse on every metric `compute_forecast_metrics` returns.
+the cautionary case: a change can lift rank correlation with an interval well clear of
+0 and still be worse on every metric `compute_forecast_metrics` returns.
 
 ## 9. Sources
 
