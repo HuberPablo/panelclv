@@ -13,18 +13,54 @@ badly", "Does the search select the best trial?") and `docs/insights-study.md` (
 Three analyses are new here, all run on 24 September 2026 on the existing selection
 rescore (no new training): a per-panel re-check with bootstrap intervals, the holdout
 score of each criterion's pick against a random trial, and an offline test of two-stage
-selection. Scripts in `.scratch/model-selection/`.
+selection. Scripts in `.scratch/model-selection/`; the per-study correlations come from
+`.scratch/training-budget/selection_analysis.py`.
 
-**Standard.** The one `docs/training-budget.md` defines under "How claims are made": an
-effect is a mean or a paired difference with a 95% bootstrap interval, supported when the
-interval excludes zero, stated per panel and never generalised across panels. The refit
-noise (next table) is printed as a magnitude reference, not a second threshold. It is the
-mean |difference| between two unseeded refits of the same winner, over 20 archived
-ValendinLSTM winners per panel (`.scratch/training-budget/refit_noise.py`), so where it is
-set beside LSTM trials below it is a borrowed yardstick, not a measurement of them.
-A non-significant difference is reported as "not distinguishable", never as "no worse"
-or "no effect": an interval that includes zero is not evidence of equivalence. A table
-without intervals is descriptive and supports no claim on its own.
+> **Revised under the statistical protocol (2026-09-28).** Every interval is now
+> `panelclv.evaluation.effects.effect` — 95% percentile bootstrap, 10,000 resamples,
+> paired over studies. The rescore's electronics studies pooled two models (40 LSTM + 40
+> ValendinLSTM) and CDNOW's pooled 5 + 5; each model is now its own condition, so every
+> claim is stated per panel *and* model, with n = 40 or n = 5. Verdicts that flipped:
+> - §3, electronics, CE against holdout Spearman: not supported → supported and weakly
+>   right-signed for the LSTM (+0.092); still not supported for ValendinLSTM.
+> - §3/§5, CDNOW, CE against holdout MAPE: supported → supported for the LSTM only; against
+>   |bias|: not supported → **supported for the LSTM** (+0.356), so "nowhere is CE shown to
+>   select for bias" no longer holds.
+> - §8, electronics, CE pick vs a random trial: MAPE not distinguishable → **better** for
+>   ValendinLSTM (−3.38), not distinguishable for the LSTM; |bias| worse (supported) →
+>   worse for ValendinLSTM only (+4.39), not distinguishable for the LSTM.
+> - §8, CDNOW: rollout |bias| pick's |bias| gain holds for the LSTM, not for ValendinLSTM;
+>   rollout Spearman and longest-trained picks now beat a random trial on Spearman for
+>   ValendinLSTM (+0.103, +0.108).
+> - S1: rollout MAPE's own correlation with holdout MAPE, not supported → not supported
+>   for the LSTM, supported for ValendinLSTM (+0.107); the four supported CDNOW deficits
+>   split two per model.
+> - S3: the electronics gains of a rollout-MAPE re-rank are the LSTM's (supported at every
+>   margin on MAPE); for ValendinLSTM none is supported. The CDNOW losses are the LSTM's
+>   (+61 to +92 MAPE from 1%); for ValendinLSTM they are not supported. The
+>   "a few intervals will exclude zero by chance" multiplicity note is removed: each row
+>   is its own claim and the pattern is described in words.
+> - S4, CDNOW: longest-trained worse than CE as a ranking for Spearman holds for the LSTM
+>   only.
+> - S5: E1 now has a script (`.scratch/model-selection/e1_cdnow.py`); its verdicts are
+>   unchanged.
+>
+> Not re-tested: the 698-trial ValendinLSTM rescore table in §3 and the figures quoted
+> from `docs/benchmarks-real-panels.md` in §5–§7 (descriptive, no per-study data here).
+
+**Standard.** `docs/statistical-protocol.md`: an effect is a mean or a paired difference
+with a 95% percentile-bootstrap interval, supported when the interval excludes zero,
+stated per panel and model and never pooled across them. The study — one complete Optuna
+search — is the replication; its trials are not. A per-study rank correlation is one
+statistic per replication, tested against 0; two criteria scored on the same studies are
+compared paired. The refit noise (next table) is printed as a magnitude reference, not a
+second threshold. It is the mean |difference| between two unseeded refits of the same
+winner, over 20 archived ValendinLSTM winners per panel
+(`.scratch/training-budget/refit_noise.py`), so where it is set beside LSTM trials below
+it is a borrowed yardstick, not a measurement of them. An interval that includes zero is
+reported as "no clear difference at n = …", never as "no worse" or "no effect": it is
+not evidence of equivalence. A table without intervals is descriptive and supports no
+claim on its own.
 
 | panel | refit noise: MAPE | \|bias\| % | Spearman |
 | --- | ---: | ---: | ---: |
@@ -118,28 +154,35 @@ on 2 studies, and its RMSE column supports no ranking claim under the standard.
 | multichannel | 7 | −0.29 | +0.01 | −0.21 | 0.64 | 0.53 |
 
 **The 3,042-trial selection rescore** (LSTM and ValendinLSTM, 21 September; re-checked
-here per panel, `.scratch/model-selection/per_panel.py`). Each study scores a random
-sample of up to 40 of the trials whose checkpoints were kept: median 39 (16–40) on
-electronics, 13–34 on CDNOW. Optuna's own winner is outside the sample in 6 of the 80
-electronics studies, so there "val CE" means the sample's best CE, not the reported
-pick. CDNOW's intervals are percentile bootstraps over 10 studies and run narrow.
+here per panel and model, `.scratch/training-budget/selection_analysis.py`). Each study
+scores a random sample of up to 40 of the trials whose checkpoints were kept: median 39
+(16–40) on electronics, 13–34 on CDNOW. Optuna's own winner is outside the sample in 6 of
+the 80 electronics studies, so there "val CE" means the sample's best CE, not the reported
+pick. Mean per-study rank correlation of val CE with each target, with its 95% interval;
+CDNOW has 5 studies per model, and a percentile interval over five values runs narrow.
 
-| target | electronics, 80 studies | cdnow, 10 studies |
-| --- | ---: | ---: |
-| holdout MAPE | **−0.141** (−0.187, −0.093) | **+0.244** (+0.073, +0.417) |
-| holdout \|bias\| | **−0.264** (−0.302, −0.225) | +0.176 (−0.029, +0.385), not supported |
-| holdout Spearman | +0.045 (−0.005, +0.095), not supported | **+0.472** (+0.342, +0.598) |
+| target | electronics LSTM (n = 40) | electronics ValendinLSTM (n = 40) | cdnow LSTM (n = 5) | cdnow ValendinLSTM (n = 5) |
+| --- | ---: | ---: | ---: | ---: |
+| holdout MAPE | **−0.181** (−0.247, −0.112) | **−0.101** (−0.162, −0.038) | **+0.338** (+0.112, +0.553) | +0.149 (−0.050, +0.392) |
+| holdout \|bias\| | **−0.266** (−0.323, −0.207) | **−0.261** (−0.310, −0.213) | **+0.356** (+0.128, +0.594) | −0.004 (−0.257, +0.255) |
+| holdout Spearman | **+0.092** (+0.013, +0.168) | −0.001 (−0.060, +0.058) | **+0.367** (+0.190, +0.549) | **+0.577** (+0.479, +0.718) |
+
+Bold: interval excludes zero.
 
 Read together:
 
-- **On CDNOW, CE is a real proxy for ranking**, supported: rho +0.472 against holdout
-  Spearman and +0.244 against holdout MAPE. Gift points the same way (the pick is nearly
-  its study's best trial for Spearman, and the median gift trial ranks customers at 0.019
+- **On CDNOW, CE is a real proxy for ranking**, supported on both models: +0.367 (LSTM)
+  and +0.577 (ValendinLSTM) against holdout Spearman. For level it is supported only for
+  the LSTM (+0.338 against MAPE, +0.356 against |bias|); ValendinLSTM shows no clear
+  relationship at n = 5. Gift points the same way for ranking (the pick is nearly its
+  study's best trial for Spearman, and the median gift trial ranks customers at 0.019
   where the pick ranks them at 0.374), but only in the table without intervals.
-- **On electronics it is wrong-signed for level**, supported: across a study's trials,
-  lower CE goes with *higher* holdout MAPE (−0.141) and |bias| (−0.264). Multichannel
-  shows the same signs on RMSE and |bias|, and a pick behind a coin toss for ranking
-  (0.64), but only over 7 studies without intervals; it is not established there.
+- **On electronics it is wrong-signed for level**, supported on both models: across a
+  study's trials, lower CE goes with *higher* holdout MAPE (−0.181, −0.101) and |bias|
+  (−0.266, −0.261). For ranking it is weakly right-signed for the LSTM (+0.092) and shows
+  no clear signal for ValendinLSTM. Multichannel shows the same signs on RMSE and |bias|,
+  and a pick behind a coin toss for ranking (0.64), but only over 7 studies without
+  intervals; it is not established there.
 - **Bias** — see §5.
 
 The two panels where selection works best are the two where the models do not collapse:
@@ -158,7 +201,8 @@ line items, and the share of weeks with any purchase falls 0.56-fold rather than
 separates electronics from CDNOW is how different a study's trials are from each other.
 With two panels this is a description of those two, not an established mechanism.
 
-Holdout outcome by quartile of a trial's own validation CE, within its study:
+Holdout outcome by quartile of a trial's own validation CE, within its study
+(descriptive means, both models, `.scratch/model-selection/per_panel.py`):
 
 | quartile | electronics bias / MAPE / Spearman | cdnow bias / MAPE / Spearman |
 | --- | ---: | ---: |
@@ -169,7 +213,7 @@ Holdout outcome by quartile of a trial's own validation CE, within its study:
 
 A CDNOW study contains broken trials that miss by +99%, and CE finds them. An electronics
 study does not: the new measurement below puts the within-study spread of holdout
-outcomes next to the refit noise.
+outcomes next to the refit noise (descriptive, both models, `per_panel.py`).
 
 | panel | within-study IQR: MAPE | bias % | Spearman |
 | --- | ---: | ---: | ---: |
@@ -187,11 +231,14 @@ with where they do not** — which is where it is used to justify a winner.
 
 ## 5. Bias is not what the criterion selects for
 
-Per panel, CE's ordering of trials by |bias| is supported wrong-signed on electronics
-(rho −0.264, §3) and not distinguishable from zero on CDNOW (+0.176, −0.029 to +0.385).
-Gift (+0.09) and multichannel (−0.21) have no intervals. So nowhere is CE shown to select
-for bias, and on electronics it selects against it. Yet every study holds a trial with
-small bias (`docs/benchmarks-real-panels.md`, no intervals):
+Per panel and model, CE's ordering of trials by |bias| is supported wrong-signed on
+electronics for both models (rho −0.266 LSTM, −0.261 ValendinLSTM, §3). On CDNOW it is
+supported right-signed for the LSTM (+0.356, +0.128 to +0.594, n = 5) and shows no clear
+relationship for ValendinLSTM (−0.004, −0.257 to +0.255, n = 5). Gift (+0.09) and
+multichannel (−0.21) have no intervals. So the one place CE is shown to select for bias
+is CDNOW's LSTM, on five studies; on electronics it selects against it on both models.
+Yet every study holds a trial with small bias (`docs/benchmarks-real-panels.md`, no
+intervals):
 
 | panel | \|bias %\| selected / best trial / median trial |
 | --- | --- |
@@ -205,6 +252,9 @@ points of refit noise — but the gap to the pick is far larger than that. Bias 
 metric the arm tables lead with, and it is the one the objective does not point at.
 
 ## 6. The search rewards models that trained least
+
+*(§6's figures are quoted from `docs/benchmarks-real-panels.md` and the archive; they are
+descriptive, carry no intervals, and were not re-tested under the statistical protocol.)*
 
 - **Batch size.** In the 20 archived electronics benchmark studies (2,000 trials), batch
   256 won all 20. It trains least per epoch, and under patience 7 it reaches the lowest
@@ -235,7 +285,8 @@ paired difference over √2), and the two refits differ by up to 51 points at wo
 (`docs/benchmarks-real-panels.md`, 80 ValendinLSTM studies). On gift the bias spread across a study's
 trials (19.4 sd) barely clears one checkpoint's spread against itself (14.4). Two trials
 closer than the refit noise cannot be told apart by any criterion computed before the
-refit, however good.
+refit, however good. *(Descriptive figures from `docs/benchmarks-real-panels.md`; not
+re-tested under the statistical protocol.)*
 
 ## 8. What is at stake at the pick
 
@@ -243,45 +294,74 @@ The correlations in §3 describe the whole ranking. What the thesis reports is t
 New here: the holdout score of each criterion's pick, minus a random trial's expected
 score (the study's trial mean), paired over studies
 (`.scratch/model-selection/pick_vs_random.py`). Negative is better for MAPE and |bias|,
-positive for Spearman.
+positive for Spearman. Bold: the interval excludes zero.
 
-**Electronics**, 80 studies. Random trial: MAPE 64.9, |bias| 31.8, Spearman 0.021.
-
-| pick by | Δ MAPE | Δ \|bias\| | Δ Spearman |
-| --- | ---: | ---: | ---: |
-| val CE (status quo) | −1.50 (−3.22, +0.10) | **+3.24 (+0.39, +5.91)** | +0.01 (+0.01, +0.02) |
-| val rollout MAPE | **−3.57 (−5.23, −2.04)** | −1.41 (−4.20, +1.27) | +0.00 (−0.00, +0.01) |
-| val rollout \|bias\| | +0.69 (−1.05, +2.45) | +1.30 (−1.83, +4.55) | −0.00 (−0.00, +0.00) |
-| val rollout Spearman | −2.19 (−4.66, +0.35) | −2.76 (−6.28, +0.65) | +0.01 (+0.00, +0.02) |
-| longest-trained (best epoch) | **−6.04 (−8.09, −3.93)** | **−12.41 (−15.76, −9.08)** | +0.01 (+0.00, +0.01) |
-
-**CDNOW**, 10 studies. Random trial: MAPE 80.2, |bias| 70.9, Spearman 0.282.
+**Electronics, LSTM**, n = 40 studies. Random trial: MAPE 58.3, |bias| 26.2, Spearman 0.021.
 
 | pick by | Δ MAPE | Δ \|bias\| | Δ Spearman |
 | --- | ---: | ---: | ---: |
-| val CE (status quo) | −20.6 (−50.5, +13.3) | −22.1 (−54.2, +12.7) | **+0.10 (+0.08, +0.12)** |
-| val rollout MAPE | +32.5 (−9.6, +73.0) | +34.4 (−9.0, +76.1) | +0.02 (−0.07, +0.10) |
-| val rollout \|bias\| | **−41.1 (−60.1, −22.2)** | **−41.1 (−61.3, −21.2)** | +0.06 (−0.01, +0.11) |
-| val rollout Spearman | −16.4 (−38.0, +4.4) | −16.3 (−34.6, +3.6) | +0.07 (−0.03, +0.14) |
-| longest-trained (best epoch) | −14.8 (−45.4, +17.4) | −15.2 (−46.8, +17.4) | +0.04 (−0.03, +0.11) |
+| val CE (status quo) | +0.37 (−1.21, +1.96) | +2.10 (−1.64, +5.65) | **+0.012 (+0.008, +0.017)** |
+| val rollout MAPE | **−1.73 (−2.92, −0.51)** | −1.68 (−4.93, +1.60) | −0.003 (−0.007, +0.002) |
+| val rollout \|bias\| | +0.94 (−1.15, +2.96) | +2.01 (−2.94, +6.71) | −0.002 (−0.008, +0.003) |
+| val rollout Spearman | −1.44 (−3.33, +0.50) | −3.40 (−7.68, +0.81) | **+0.012 (+0.005, +0.020)** |
+| longest-trained (best epoch) | **−4.66 (−6.15, −3.03)** | **−12.74 (−16.46, −8.88)** | +0.006 (−0.001, +0.013) |
+
+**Electronics, ValendinLSTM**, n = 40 studies. Random trial: MAPE 71.4, |bias| 37.4,
+Spearman 0.021.
+
+| pick by | Δ MAPE | Δ \|bias\| | Δ Spearman |
+| --- | ---: | ---: | ---: |
+| val CE (status quo) | **−3.38 (−6.37, −0.68)** | **+4.39 (+0.12, +8.29)** | **+0.012 (+0.003, +0.026)** |
+| val rollout MAPE | **−5.41 (−8.19, −2.64)** | −1.14 (−5.82, +3.14) | **+0.008 (+0.001, +0.017)** |
+| val rollout \|bias\| | +0.44 (−2.30, +3.33) | +0.59 (−3.40, +4.63) | +0.002 (−0.004, +0.008) |
+| val rollout Spearman | −2.95 (−7.30, +1.72) | −2.11 (−7.60, +3.55) | +0.012 (−0.000, +0.027) |
+| longest-trained (best epoch) | **−7.41 (−11.21, −3.42)** | **−12.08 (−17.52, −6.39)** | **+0.011 (+0.002, +0.021)** |
+
+**CDNOW, LSTM**, n = 5 studies. Random trial: MAPE 101.1, |bias| 93.4, Spearman 0.276.
+
+| pick by | Δ MAPE | Δ \|bias\| | Δ Spearman |
+| --- | ---: | ---: | ---: |
+| val CE (status quo) | −39.7 (−74.3, +9.4) | −41.0 (−79.8, +11.4) | **+0.102 (+0.074, +0.129)** |
+| val rollout MAPE | +31.8 (−43.5, +97.8) | +34.8 (−45.8, +103.9) | +0.036 (−0.103, +0.126) |
+| val rollout \|bias\| | **−64.0 (−80.8, −44.6)** | **−64.4 (−83.4, −45.5)** | **+0.094 (+0.062, +0.132)** |
+| val rollout Spearman | −24.2 (−58.8, +13.9) | −19.8 (−52.1, +16.6) | +0.036 (−0.150, +0.159) |
+| longest-trained (best epoch) | −16.4 (−74.4, +41.7) | −16.3 (−77.5, +44.8) | −0.021 (−0.120, +0.078) |
+
+**CDNOW, ValendinLSTM**, n = 5 studies. Random trial: MAPE 59.2, |bias| 48.3, Spearman 0.288.
+
+| pick by | Δ MAPE | Δ \|bias\| | Δ Spearman |
+| --- | ---: | ---: | ---: |
+| val CE (status quo) | −1.4 (−39.1, +43.5) | −3.3 (−46.2, +40.7) | **+0.097 (+0.073, +0.118)** |
+| val rollout MAPE | +33.3 (−8.7, +75.3) | +34.1 (−5.8, +73.9) | −0.002 (−0.142, +0.100) |
+| val rollout \|bias\| | **−18.3 (−38.3, −2.6)** | −17.7 (−38.6, +0.6) | +0.027 (−0.099, +0.114) |
+| val rollout Spearman | −8.6 (−31.1, +11.4) | −12.8 (−28.8, +3.7) | **+0.103 (+0.069, +0.151)** |
+| longest-trained (best epoch) | −13.2 (−36.8, +9.6) | −14.1 (−38.0, +6.0) | **+0.108 (+0.066, +0.161)** |
 
 Three readings:
 
-- **On electronics the status quo costs little at the pick.** Its MAPE is not
-  distinguishable from a random trial's; its |bias| is 3.2 points worse, supported, and
-  under the 5.9-point refit noise. The wrong sign in §3 is real across the ranking, but its price at the argmin is
-  small, because the trials barely differ (§4).
+- **On electronics the status quo costs little at the pick, and the two models differ in
+  what.** For the LSTM the CE pick shows no clear difference from a random trial on MAPE
+  or |bias|. For ValendinLSTM it is 3.4 MAPE points *better* (supported, under the
+  3.6-point refit noise) and 4.4 |bias| points worse (supported, under the 5.9-point refit
+  noise). On both it ranks customers 0.012 better, supported and about the refit noise.
+  The wrong sign in §3 is real across the ranking, but its price at the argmin is small,
+  because the trials barely differ (§4).
 - **The one criterion worth more than the refit noise on electronics is not a validation
-  score.** Picking the longest-trained trial beats a random one by 6.0 MAPE and 12.4
-  |bias|, both above the refit noise. That is §6 again: training length is the lever.
+  score.** Picking the longest-trained trial beats a random one by 4.7 MAPE and 12.7
+  |bias| (LSTM) and 7.4 MAPE and 12.1 |bias| (ValendinLSTM), all supported and above the
+  refit noise. That is §6 again: training length is the lever. Rollout MAPE also lowers
+  MAPE on both models (1.7 and 5.4), supported; the LSTM's gain is under the refit noise.
 - **No criterion is shown safe on both panels.** On CDNOW, validation rollout MAPE picks a
   trial with holdout MAPE 126–221 in 6 of 10 studies. Those trials fit the validation
   year's level well (validation MAPE 11–15) and then explode on the holdout. In 2 of the 6
   the CE pick explodes too (165.2 against 165.2, 142.3 against 140.8), so the blow-ups
-  are not unique to rollout selection; in the other 4 the CE pick scores 25–41. At the
-  pick, rollout MAPE's +32.5 against a random trial is not supported; its harm on CDNOW
-  is supported only as a re-rank of a CE shortlist (S3). The validation score that is
-  best on electronics is therefore the riskiest on CDNOW, on ten studies.
+  are not unique to rollout selection; in the other 4 the CE pick scores 25–41. (These
+  counts are description.) At the pick, rollout MAPE's +31.8 (LSTM) and +33.3
+  (ValendinLSTM) against a random trial show no clear difference at n = 5; its harm on
+  CDNOW is supported only as a re-rank of a CE shortlist, for the LSTM (S3). The
+  validation score that is best on electronics is therefore the riskiest on CDNOW, on ten
+  studies. Rollout |bias| is the CDNOW pick with supported gains — on MAPE for both models
+  and on |bias| for the LSTM — and it has none on electronics.
 
 ## 9. A possible leak into selection
 
@@ -304,16 +384,21 @@ Each remedy with what it targets from Part I, the evidence for it so far, and it
 Simulate the validation window the way the holdout is simulated, and score it with
 `compute_forecast_metrics`. Targets §1 (task mismatch).
 
-- **Measured, electronics:** beats CE on its own target — Δ rho +0.174 (+0.123, +0.226)
-  for MAPE, +0.083 (+0.011, +0.158) for Spearman. But its own correlation with holdout
-  MAPE is +0.033 (−0.017, +0.083): it removes a harmful signal without supplying a useful
-  one. At the pick it gains 3.6 MAPE on a random trial (§8).
-- **Measured, CDNOW:** every rollout criterion's point estimate is below CE's on every
-  target, supported in four cases: rollout Spearman against holdout MAPE (Δ −0.112,
-  −0.183 to −0.039) and against holdout |bias| (Δ −0.085, −0.153 to −0.016), rollout MAPE
-  against holdout Spearman (Δ −0.187, −0.325 to −0.038), and rollout |bias| against
-  holdout Spearman (Δ −0.192, −0.341 to −0.031). Rollout MAPE's pick blows up in 6 of 10
-  studies, 4 of them where CE's does not (§8).
+- **Measured, electronics** (n = 40 per model, `selection_analysis.py`): rollout MAPE
+  beats CE on its own target for both models — Δ rho +0.140 (+0.068, +0.213) LSTM, +0.208
+  (+0.138, +0.281) ValendinLSTM. Its own correlation with holdout MAPE differs by model:
+  −0.041 (−0.112, +0.032) for the LSTM, where it removes a harmful signal without
+  supplying a useful one, and +0.107 (+0.046, +0.168) for ValendinLSTM, where it supplies
+  a weak one. Rollout Spearman does not clearly beat CE on holdout Spearman for either
+  model (+0.110, −0.003 to +0.224; +0.056, −0.039 to +0.150). At the pick rollout MAPE
+  gains 1.7 (LSTM) and 5.4 (ValendinLSTM) MAPE on a random trial (§8).
+- **Measured, CDNOW** (n = 5 per model): four supported deficits against CE, two per
+  model. LSTM: rollout Spearman against holdout MAPE (Δ −0.130, −0.219 to −0.058) and
+  against holdout |bias| (Δ −0.101, −0.166 to −0.044). ValendinLSTM: rollout MAPE against
+  holdout Spearman (Δ −0.298, −0.430 to −0.148) and rollout |bias| against holdout
+  Spearman (Δ −0.288, −0.450 to −0.108). No rollout criterion beats CE on any CDNOW
+  target. Rollout MAPE's pick blows up in 6 of 10 studies (3 per model), 4 of them where
+  CE's does not (§8).
 - **Cost:** one validation rollout per trial. The rescore's 29 s a trial on electronics
   (10 s on CDNOW) timed a validation rollout, a refit and a holdout rollout together, so
   the rollout alone is a fraction of that. ADR-0003's two defects
@@ -322,9 +407,11 @@ Simulate the validation window the way the holdout is simulated, and score it wi
 
 ### S2. A composite of rollout MAPE, |bias| and Spearman
 
-- **Measured, electronics:** worse than whichever single criterion matches the target
-  (+0.039 vs +0.128 for Spearman; −0.069 vs +0.033 for MAPE,
-  `docs/training-budget.md` §14.3).
+- **Measured, electronics** (composite minus the matching single criterion, paired over
+  n = 40 studies per model, `docs/training-budget.md` §14.3): worse for holdout MAPE on
+  both models (LSTM −0.139, −0.194 to −0.083; ValendinLSTM −0.066, −0.115 to −0.018) and
+  for holdout Spearman on the LSTM (−0.166, −0.245 to −0.083); no clear difference for
+  ValendinLSTM's Spearman (−0.012, −0.078 to +0.054).
 - **Verdict:** rejected. Match the criterion to the metric the claim is about.
 
 ### S3. Two-stage: shortlist on CE, re-rank the shortlist by rollout
@@ -332,52 +419,79 @@ Simulate the validation window the way the holdout is simulated, and score it wi
 Keep the trials within *m*% of the best CE and pick among them by a rollout metric.
 Cheap — one rollout per shortlisted trial. Tested offline here on the rescore data
 (`.scratch/model-selection/two_stage.py`); Δ is the pick's holdout score minus the plain
-CE pick's; lower is better for MAPE and |bias|, higher for Spearman. Every margin the
-script tests is shown.
+CE pick's in the same study, paired over studies (n = 40 per model on electronics, 5 on
+CDNOW); lower is better for MAPE and |bias|, higher for Spearman. Bold: the interval
+excludes zero. Every margin the script tests is shown.
 
-| panel | m | shortlist (median) | re-rank by | Δ MAPE | Δ \|bias\| | Δ Spearman |
-| --- | ---: | ---: | --- | ---: | ---: | ---: |
-| electronics | 0.5% | 5.5 | rollout MAPE | −1.14 (−2.88, +0.70) | −2.61 (−5.45, +0.26) | **−0.01 (−0.02, −0.00)** |
-| electronics | 1% | 14 | rollout MAPE | **−2.05 (−3.77, −0.27)** | **−3.74 (−6.66, −0.80)** | **−0.01 (−0.01, −0.00)** |
-| electronics | 2% | 23 | rollout MAPE | −1.83 (−3.62, +0.00) | **−4.29 (−7.44, −1.08)** | **−0.01 (−0.02, −0.00)** |
-| electronics | 5% | 33.5 | rollout MAPE | **−2.06 (−3.94, −0.13)** | **−4.58 (−8.18, −0.95)** | **−0.01 (−0.01, −0.00)** |
-| electronics | 0.5% | 5.5 | rollout Spearman | **+2.30 (+0.51, +4.26)** | +2.65 (−0.24, +5.80) | +0.00 (−0.00, +0.00) |
-| electronics | 1% | 14 | rollout Spearman | +1.33 (−1.03, +3.77) | −0.72 (−4.79, +3.37) | −0.00 (−0.01, +0.00) |
-| electronics | 2% | 23 | rollout Spearman | +1.16 (−1.53, +3.92) | −2.03 (−6.34, +2.38) | −0.00 (−0.01, +0.00) |
-| electronics | 5% | 33.5 | rollout Spearman | −0.88 (−3.82, +2.09) | **−6.18 (−11.04, −1.52)** | −0.00 (−0.01, +0.01) |
-| cdnow | 0.5% | 4.5 | rollout MAPE | +12.9 (−6.0, +43.0) | +13.4 (−5.4, +42.7) | −0.01 (−0.04, +0.01) |
-| cdnow | 1% | 9 | rollout MAPE | **+36.5 (+4.0, +72.7)** | **+39.7 (+6.7, +76.0)** | −0.01 (−0.03, +0.01) |
-| cdnow | 2% | 14.5 | rollout MAPE | **+51.9 (+9.4, +99.9)** | **+55.4 (+10.8, +104.6)** | −0.01 (−0.03, +0.01) |
-| cdnow | 5% | 18 | rollout MAPE | **+51.9 (+9.0, +100.5)** | **+55.4 (+9.8, +106.5)** | −0.01 (−0.03, +0.01) |
-| cdnow | 0.5% | 4.5 | rollout Spearman | +2.1 (−16.1, +21.6) | +1.7 (−16.2, +19.8) | −0.04 (−0.14, +0.04) |
-| cdnow | 1% | 9 | rollout Spearman | +3.0 (−15.5, +22.9) | +1.4 (−17.4, +21.6) | −0.03 (−0.13, +0.05) |
-| cdnow | 2% | 14.5 | rollout Spearman | +4.2 (−15.1, +24.0) | +5.8 (−14.0, +26.2) | −0.03 (−0.13, +0.05) |
-| cdnow | 5% | 18 | rollout Spearman | +4.2 (−15.1, +24.2) | +5.8 (−14.4, +26.1) | −0.03 (−0.13, +0.04) |
+| panel | model | m | shortlist (median) | re-rank by | Δ MAPE | Δ \|bias\| | Δ Spearman |
+| --- | --- | ---: | ---: | --- | ---: | ---: | ---: |
+| electronics | LSTM | 0.5% | 7.5 | rollout MAPE | **−2.81 (−4.61, −1.00)** | **−5.52 (−9.62, −1.47)** | **−0.007 (−0.014, −0.000)** |
+| electronics | LSTM | 0.5% | 7.5 | rollout Spearman | +0.80 (−0.68, +2.27) | +1.46 (−1.89, +4.85) | +0.000 (−0.004, +0.004) |
+| electronics | LSTM | 1% | 20 | rollout MAPE | **−2.61 (−4.35, −0.86)** | **−4.39 (−8.70, −0.05)** | **−0.011 (−0.019, −0.004)** |
+| electronics | LSTM | 1% | 20 | rollout Spearman | −0.38 (−2.16, +1.38) | −1.29 (−5.68, +3.16) | −0.001 (−0.006, +0.004) |
+| electronics | LSTM | 2% | 29 | rollout MAPE | **−2.97 (−4.86, −1.05)** | **−5.14 (−9.73, −0.38)** | **−0.012 (−0.019, −0.005)** |
+| electronics | LSTM | 2% | 29 | rollout Spearman | −0.80 (−2.94, +1.29) | −2.31 (−7.27, +2.59) | −0.001 (−0.007, +0.005) |
+| electronics | LSTM | 5% | 37 | rollout MAPE | **−2.30 (−4.49, −0.07)** | −4.07 (−9.15, +1.23) | **−0.014 (−0.021, −0.007)** |
+| electronics | LSTM | 5% | 37 | rollout Spearman | −1.91 (−4.48, +0.53) | **−5.67 (−10.94, −0.56)** | −0.000 (−0.007, +0.007) |
+| electronics | ValendinLSTM | 0.5% | 5 | rollout MAPE | +0.53 (−2.40, +3.60) | +0.29 (−3.43, +4.24) | **−0.010 (−0.023, −0.000)** |
+| electronics | ValendinLSTM | 0.5% | 5 | rollout Spearman | **+3.80 (+0.63, +7.28)** | +3.84 (−1.01, +9.08) | +0.001 (−0.007, +0.008) |
+| electronics | ValendinLSTM | 1% | 12 | rollout MAPE | −1.48 (−4.52, +1.56) | −3.08 (−7.12, +0.87) | −0.005 (−0.015, +0.004) |
+| electronics | ValendinLSTM | 1% | 12 | rollout Spearman | +3.03 (−1.25, +7.52) | −0.16 (−6.93, +6.77) | −0.000 (−0.007, +0.008) |
+| electronics | ValendinLSTM | 2% | 19.5 | rollout MAPE | −0.69 (−3.66, +2.30) | −3.45 (−7.70, +0.77) | −0.008 (−0.019, +0.002) |
+| electronics | ValendinLSTM | 2% | 19.5 | rollout Spearman | +3.12 (−1.63, +8.17) | −1.74 (−8.67, +5.43) | −0.004 (−0.012, +0.005) |
+| electronics | ValendinLSTM | 5% | 30 | rollout MAPE | −1.82 (−4.89, +1.36) | −5.10 (−10.23, +0.13) | −0.000 (−0.011, +0.010) |
+| electronics | ValendinLSTM | 5% | 30 | rollout Spearman | +0.14 (−5.01, +5.70) | −6.69 (−14.23, +1.29) | −0.000 (−0.010, +0.010) |
+| cdnow | LSTM | 0.5% | 5 | rollout MAPE | +28.5 (−1.1, +83.5) | **+33.1 (+1.7, +85.5)** | −0.021 (−0.066, +0.020) |
+| cdnow | LSTM | 0.5% | 5 | rollout Spearman | +15.6 (−6.4, +46.8) | +17.9 (−3.8, +43.2) | −0.073 (−0.262, +0.070) |
+| cdnow | LSTM | 1% | 15 | rollout MAPE | **+60.7 (+7.5, +113.9)** | **+63.7 (+12.0, +115.4)** | +0.007 (−0.009, +0.029) |
+| cdnow | LSTM | 1% | 15 | rollout Spearman | +14.5 (−7.5, +45.9) | +11.6 (−13.4, +41.3) | −0.062 (−0.253, +0.077) |
+| cdnow | LSTM | 2% | 20 | rollout MAPE | **+91.5 (+25.7, +157.3)** | **+95.0 (+24.6, +165.3)** | +0.005 (−0.010, +0.028) |
+| cdnow | LSTM | 2% | 20 | rollout Spearman | +15.6 (−6.9, +45.9) | +21.1 (−5.1, +45.1) | −0.066 (−0.257, +0.075) |
+| cdnow | LSTM | 5% | 23 | rollout MAPE | **+91.5 (+25.7, +157.3)** | **+95.0 (+24.6, +165.3)** | +0.005 (−0.010, +0.028) |
+| cdnow | LSTM | 5% | 23 | rollout Spearman | +15.6 (−6.9, +45.9) | +21.1 (−5.1, +45.1) | −0.066 (−0.257, +0.075) |
+| cdnow | ValendinLSTM | 0.5% | 4 | rollout MAPE | −2.8 (−16.1, +7.2) | **−6.3 (−14.8, −0.6)** | −0.005 (−0.014, +0.002) |
+| cdnow | ValendinLSTM | 0.5% | 4 | rollout Spearman | −11.5 (−34.5, +4.7) | **−14.6 (−35.0, −1.8)** | +0.003 (−0.043, +0.056) |
+| cdnow | ValendinLSTM | 1% | 7 | rollout MAPE | +12.2 (−15.4, +52.6) | +15.8 (−15.0, +56.9) | **−0.025 (−0.054, −0.001)** |
+| cdnow | ValendinLSTM | 1% | 7 | rollout Spearman | −8.5 (−33.3, +10.2) | −8.8 (−35.3, +16.1) | +0.003 (−0.047, +0.057) |
+| cdnow | ValendinLSTM | 2% | 11 | rollout MAPE | +12.2 (−15.4, +52.6) | +15.8 (−15.0, +56.9) | **−0.025 (−0.054, −0.001)** |
+| cdnow | ValendinLSTM | 2% | 11 | rollout Spearman | −7.2 (−32.1, +10.2) | −9.4 (−35.9, +16.1) | +0.006 (−0.042, +0.059) |
+| cdnow | ValendinLSTM | 5% | 15 | rollout MAPE | +12.2 (−15.4, +52.6) | +15.8 (−15.0, +56.9) | **−0.025 (−0.054, −0.001)** |
+| cdnow | ValendinLSTM | 5% | 15 | rollout Spearman | −7.2 (−32.1, +10.2) | −9.4 (−35.9, +16.1) | +0.006 (−0.042, +0.059) |
 
-Sixteen rows, three metrics each: a few intervals will exclude zero by chance, so a
-single supported cell is weak evidence and a pattern across margins is what counts.
+Each row is its own claim, read by its own interval; the pattern across margins and
+models is described in words below.
 
 - **Verdict:**
-  - *Electronics, re-rank by rollout MAPE:* |bias| improves by 3.7–4.6 at 1% and wider
-    (supported; under the 5.9-point refit noise at 1%, about at it at 5%). MAPE improves by
-    ~2, under the refit noise, and is supported at 1% and 5% but not at 0.5% or 2%.
-    Spearman falls by 0.01 at every margin, supported, under the 0.0105 refit noise.
-  - *Electronics, re-rank by rollout Spearman:* no consistent pattern — worse MAPE at
-    0.5%, better |bias| (−6.2, about the refit noise) at 5% only.
-  - *CDNOW, re-rank by rollout MAPE:* a supported loss of 36–52 MAPE from 1% up.
-    Shortlisting does not contain the CDNOW blow-ups; it only delays them to a wider
-    margin.
-  - Rejected in this form.
+  - *Electronics, LSTM, re-rank by rollout MAPE:* MAPE improves by 2.3–3.0 at every
+    margin (supported; under the 3.6-point refit noise), |bias| by 4.4–5.5 at 0.5–2%
+    (supported; under the 5.9-point refit noise) and not clearly at 5%. Spearman falls by
+    0.007–0.014 at every margin, supported, about the 0.0105 refit noise.
+  - *Electronics, ValendinLSTM, re-rank by rollout MAPE:* no clear MAPE or |bias|
+    difference at any margin; Spearman falls by 0.010 at 0.5% only (supported).
+  - *Electronics, re-rank by rollout Spearman:* no consistent pattern — ValendinLSTM's MAPE
+    worsens by 3.8 at 0.5%, the LSTM's |bias| improves by 5.7 (about the refit noise) at
+    5% only.
+  - *CDNOW, LSTM, re-rank by rollout MAPE:* a supported loss of 61–92 MAPE and 64–95
+    |bias| from 1% up (and 33 |bias| at 0.5%). Shortlisting does not contain the CDNOW
+    blow-ups; it only delays them to a wider margin.
+  - *CDNOW, ValendinLSTM:* rollout MAPE's MAPE loss (+12.2 from 1% up) shows no clear
+    difference at n = 5, while Spearman falls by 0.025 (supported); at 0.5% both re-ranks
+    lower |bias| (−6.3, −14.6, supported).
+  - Rejected in this form: its one consistent gain is the electronics LSTM's, and its one
+    consistent loss is the CDNOW LSTM's, several times larger.
 
 ### S4. Use training length as a criterion, or as a tie-breaker
 
 Targets §6. The best epoch is already recorded.
 
-- **Measured, electronics:** the longest-trained pick beats a random trial by 6.0 MAPE and
-  12.4 |bias| (§8), both above the refit noise — the largest supported gain of any
-  criterion here.
-- **Measured, CDNOW:** no supported effect at the pick; as a ranking it is worse than CE
-  for Spearman, Δ −0.153 (−0.282, −0.034).
+- **Measured, electronics:** the longest-trained pick beats a random trial by 4.7 MAPE and
+  12.7 |bias| (LSTM) and by 7.4 MAPE and 12.1 |bias| (ValendinLSTM) (§8), all supported
+  and above the refit noise — the largest supported gains of any criterion here.
+- **Measured, CDNOW** (n = 5 per model): at the pick, no clear MAPE or |bias| effect on
+  either model; for ValendinLSTM it ranks customers 0.108 better than a random trial
+  (supported). As a ranking of trials it is worse than CE for holdout Spearman on the LSTM,
+  Δ −0.193 (−0.297, −0.084), and shows no clear difference on ValendinLSTM (−0.113,
+  −0.340 to +0.080).
 - **Verdict:** a symptom, not a remedy. It works on electronics because the trials that
   trained longest are the ones the stopping rule let through, which is what S5 fixes at
   the source. Useful as evidence for S5, not as a selection rule.
@@ -392,13 +506,16 @@ a smoothed curve, or a fixed step budget with no early stopping
   ValendinLSTM MAPE by −22.3 (−28.2, −16.2), an order of magnitude more than any selection
   rule — but LSTM by only −4.5 (−12.9, +4.5), not supported. Family U's floored arm
   (paper recipe plus a 90-epoch floor) triples CDNOW's LSTM error, 57.7 → 183.9. E1 has
-  since finished: a 50-epoch floor alone moves CDNOW LSTM MAPE by +3.5 (−0.4, +8.2), not
-  supported, and the paper recipe alone by **+3.6 (+0.1, +7.1)**, a supported harm
-  smaller than the 5.83-point refit noise. Neither comes near a tripling, but E1 does not
-  settle it: its LSTM baseline MAPE is 21.7 against family U's 57.7, so it is not the
-  same setup, and it ran no 90-epoch arm. The tripling is still unexplained. E1's results
-  (`.scratch/training-budget/results/e1_cdnow.csv`) are cited in no other doc, and no
-  script in the repo writes that file.
+  since finished (20 independent searches per arm, so the arms are compared as independent
+  samples, `.scratch/model-selection/e1_cdnow.py`): a 50-epoch floor alone moves CDNOW
+  LSTM MAPE by +3.5 (−0.4, +8.2), no clear difference at n = 20, and the paper recipe
+  alone by **+3.6 (+0.2, +7.0)**, supported and small — under the 5.83-point refit noise.
+  For ValendinLSTM neither shows a clear difference (floor −3.7, −20.8 to +9.7; paper
+  +2.5, −15.0 to +16.4). Neither comes near a tripling, but E1 does not settle it: its
+  LSTM baseline MAPE is 21.7 against family U's 57.7, so it is not the same setup, and it
+  ran no 90-epoch arm. The tripling is still unexplained. The script reads each study's
+  `metrics.csv`; `.scratch/training-budget/results/e1_cdnow.csv` holds the same MAPE
+  values. E1 is cited in no other doc.
 - **Untested:** every principled alternative to the floor.
 - **Verdict:** the highest-value change on the evidence. Run E4, one panel first, then
   CDNOW before adopting anything.
@@ -454,7 +571,7 @@ for a learned alternative to the borrowed label.
 
 1. **Do not replace validation CE with any single rollout criterion yet.** The best one on
    electronics (rollout MAPE, directly or as a two-stage re-rank) is harmful on CDNOW, with
-   support as a re-rank at 1% and wider (S3). Selection is panel-dependent, and the thesis
+   support for the LSTM as a re-rank at 1% and wider (S3). Selection is panel-dependent, and the thesis
    cannot pick a panel.
 2. **Put the effort into training length first (S5).** It is worth an order of magnitude
    more than selection on electronics, and training length is what the one strong
@@ -465,15 +582,17 @@ for a learned alternative to the borrowed label.
    rescore data first, on both panels, before building anything.
 5. **Close E2** before any cluster-arm result is used to argue about selection.
 6. **In the thesis text, state plainly:** the reported winner is the argmin of a
-   criterion that ranks trials correctly on CDNOW (and, without intervals, on gift), is
-   wrong-signed for level and |bias| on electronics (and, without intervals, on
-   multichannel), and is nowhere shown to select for bias; on electronics that costs
-   about 3 points of |bias| at the pick.
+   criterion that ranks trials correctly for customer ranking on CDNOW, on both models
+   (and, without intervals, on gift), is wrong-signed for level and |bias| on
+   electronics, on both models (and, without intervals, on multichannel), and is shown to
+   select for bias only for CDNOW's LSTM, on five studies. At the pick on electronics
+   that costs ValendinLSTM about 4 points of |bias| while gaining about 3 of MAPE, and
+   makes no clear difference to the LSTM.
 
 ## What this does not establish
 
 - **Anything about panels as a class.** The selection rescore covers two panels, one of
-  them with 10 studies, whose percentile intervals run narrow. Gift and multichannel
+  them with 5 studies per model, whose percentile intervals run narrow. Gift and multichannel
   appear only in the 698-trial ValendinLSTM rescore, which has no intervals.
 - **How the new pick-level results would change on a floored or cluster-labelled model.**
   Every trial here trained under patience 7 and no floor; S5 would change the trial

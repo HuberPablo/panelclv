@@ -1,33 +1,22 @@
-"""Per-panel re-check of the selection rescore: correlations with bootstrap CIs, paired
-deltas against val CE, and what each criterion's pick actually scores on the holdout."""
+"""Per-panel description of the selection rescore: what each criterion's pick scores on
+the holdout (means over studies, no intervals), how far apart a study's trials are, and the
+holdout outcome by quartile of a trial's own val CE. Descriptive only — `docs/model-selection.md`
+§4 and §5. The claims (each criterion's rank correlation with the holdout, and its
+difference from val CE, per panel and model through `effect`) come from
+`.scratch/training-budget/selection_analysis.py`."""
 from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 import numpy as np, pandas as pd
-from scipy.stats import bootstrap
 
 
 d = pd.concat([pd.read_csv(f) for f in sorted((REPO/"Studies").glob("selection_rescore__*/selection_rescore.csv"))])
 d["panel"] = d.suite.str.split("__").str[2]
-rng = np.random.default_rng(0)
-def ci(v):
-    v = np.asarray(v, float); v = v[~np.isnan(v)]
-    r = bootstrap((v,), np.mean, confidence_level=0.95, n_resamples=10000, random_state=rng, method="percentile")
-    return f"{v.mean():+.3f} ({r.confidence_interval.low:+.3f}, {r.confidence_interval.high:+.3f})"
 C = {"valCE": lambda x: x.val_loss, "roll_MAPE": lambda x: x.val_mape_aggregate,
      "roll_Spear": lambda x: -x.val_spearman, "roll_absbias": lambda x: x.val_bias_percent.abs(),
      "best_epoch": lambda x: -x.best_epoch}
-T = {"MAPE": lambda x: x.hold_mape_aggregate, "|bias|": lambda x: x.hold_bias_percent.abs(),
-     "Spearman": lambda x: -x.hold_spearman}
 for panel, dp in d.groupby("panel"):
     studies = [g for _, g in dp.groupby("suite") if len(g) >= 10]
     print(f"\n## {panel}: {len(studies)} studies, {sum(len(g) for g in studies)} trials, models {sorted(dp.model.unique())}")
-    for tn, tf in T.items():
-        base = np.array([C["valCE"](g).corr(tf(g), method="spearman") for g in studies])
-        for cn, cf in C.items():
-            v = np.array([cf(g).corr(tf(g), method="spearman") for g in studies])
-            s = f"  {tn:9s} {cn:12s} rho {ci(v)}"
-            if cn != "valCE": s += f"   delta {ci(v - base)}"
-            print(s)
     # What the pick scores: argmin of each criterion, vs oracle and median trial
     print("  pick -> holdout MAPE / |bias| / Spearman (means over studies)")
     for cn, cf in C.items():

@@ -89,7 +89,25 @@ for panel in PANELS:
         print(f"| {panel} | {model} | {v.mean():.3f} | {lo:.3f} to {hi:.3f} | {p:.3f} "
               f"| {reading} |")
 
-# --- §6 / §15.3: correlations, with intervals over studies ------------------------
+# --- §6: correlations across studies, with intervals over studies ----------------
+# The §6 claim is a single rank correlation computed ACROSS the 40 archive studies (each
+# study contributes one (x, y) pair), not a difference of two condition means, so
+# `panelclv.evaluation.effects.effect` cannot express it. The protocol's interval still
+# applies unchanged: the study is the unit, the (x, y) pairs are resampled together
+# (paired), the interval is the 95% PERCENTILE bootstrap from 10,000 resamples with the
+# package's fixed seed, and the claim is supported iff it excludes 0.
+from panelclv.evaluation.effects import CONFIDENCE, N_RESAMPLES, SEED  # noqa: E402
+
+
+def correlation_interval(x, y):
+    """Spearman rho of x against y over units, with its 95% percentile-bootstrap CI."""
+    stat = lambda a, b: pd.Series(a).corr(pd.Series(b), method="spearman")  # noqa: E731
+    r = bootstrap((x, y), stat, n_resamples=N_RESAMPLES, confidence_level=CONFIDENCE,
+                  method="percentile", paired=True, vectorized=False,
+                  random_state=np.random.default_rng(SEED))
+    return stat(x, y), r.confidence_interval.low, r.confidence_interval.high
+
+
 print("\n### Archive correlations (§6) — bootstrap over studies\n")
 sc = pd.read_csv(HERE / "results" / "spearman_electronics.csv")
 hp = pd.read_csv(HERE / "results" / "hparams_electronics.csv")
@@ -101,13 +119,11 @@ j = sc.merge(hp[["suite", "study", "model", "updates", "best_epoch"]],
 MINE = ("training_budget__", "factorial__", "selection_rescore__")
 nc = j[(j.model == "ValendinLSTM") & ~j.suite.str.startswith(MINE)]
 nc = nc[~nc.suite.str.contains("kmeans")]
-print("| relationship | n studies | rho | 95% CI |")
-print("| --- | ---: | ---: | :---: |")
+print("| relationship | n studies | rho | 95% CI | supported |")
+print("| --- | ---: | ---: | :---: | :---: |")
 for col in ("updates", "best_epoch"):
     x, y = nc[col].to_numpy(float), nc.spearman.to_numpy(float)
     ok = ~np.isnan(x) & ~np.isnan(y)
-    stat = lambda a, b: pd.Series(a).corr(pd.Series(b), method="spearman")  # noqa: E731
-    r = bootstrap((x[ok], y[ok]), stat, n_resamples=5000, paired=True,
-                  random_state=0, vectorized=False)
-    print(f"| {col} vs holdout Spearman (no label) | {ok.sum()} | {stat(x[ok], y[ok]):+.3f} "
-          f"| {r.confidence_interval.low:+.3f} to {r.confidence_interval.high:+.3f} |")
+    rho, lo, hi = correlation_interval(x[ok], y[ok])
+    print(f"| {col} vs holdout Spearman (no label) | {ok.sum()} | {rho:+.3f} "
+          f"| {lo:+.3f} to {hi:+.3f} | {'yes' if lo > 0 or hi < 0 else 'no'} |")
