@@ -154,8 +154,14 @@ def model_spec(model: str, arm: str, training_override: dict | None = None) -> M
 # ---------------------------------------------------------------------------
 
 
-def run_worker(phase: str, models: list[str], index: int, total: int) -> int:
-    mine = work_list(phase, models)[index - 1::total]
+def run_worker(phase: str, models: list[str], index: int, total: int,
+               within: tuple[int, int] | None = None) -> int:
+    items = work_list(phase, models)
+    if within:
+        # Share one worker's slice out over `total` boxes: a slow worker's tail is
+        # finished in parallel instead of one suite after another.
+        items = items[within[0] - 1::within[1]]
+    mine = items[index - 1::total]
     print(f"worker {index}/{total} ({phase}): {len(mine)} suites", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
@@ -273,6 +279,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--phase", choices=["searched", "pinned"], default="searched")
+    parser.add_argument("--within", metavar="I/N",
+                        help="with --worker: stride over worker I/N's slice only")
     parser.add_argument("--model", choices=sorted(MODELS), action="append",
                         help="restrict to this model (repeatable); default both")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -285,7 +293,8 @@ def main() -> None:
     models = args.model or list(MODELS)
     if args.worker:
         index, total = (int(x) for x in args.worker.split("/"))
-        sys.exit(run_worker(args.phase, models, index, total))
+        within = tuple(int(x) for x in args.within.split("/")) if args.within else None
+        sys.exit(run_worker(args.phase, models, index, total, within))
     if args.pin:
         sys.exit(pin(models))
     if args.preflight:
