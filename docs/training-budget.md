@@ -400,7 +400,7 @@ is the smaller part. Per-customer Spearman recomputed from the stored `Predictio
 | no per-customer feature, patience 7 (archived benchmark) | 0.03 | archive |
 | same inputs, trained to the paper's epoch count | **0.178** | §15.1, n = 20 |
 | a `kmeans_8` cluster label added, patience 7 | **0.305** | §15.1, n = 20 |
-| Pareto/NBD on the same panel | 0.297 | single fit |
+| Pareto/NBD on the same panel | 0.314 | 20 seeded fits (§15.1) |
 
 *(This table first reported 0.09 for the trained row, from §3's five-replication pilot.
 §15.1 measures 0.178 at n = 20 with an interval of +0.119 to +0.193 on the difference, so

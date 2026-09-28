@@ -559,7 +559,7 @@ Targets §4. Where the model collapses, every trial gives every customer the sam
 and no rule can select between them. In family U on electronics (ValendinLSTM, 20
 replications each), a persistent per-customer input (the `kmeans_8` cluster label) lifts
 Spearman from 0.021 to 0.305, against 0.178 for the floored arm without it; Pareto/NBD
-scores 0.297 (`docs/training-budget.md` §15.1). `docs/absorbing-death-state.md` argues
+scores 0.314 over 20 seeded fits (`docs/training-budget.md` §15.1). `docs/absorbing-death-state.md` argues
 for a learned alternative to the borrowed label.
 
 - **Verdict:** a precondition, not a selection rule. On a collapsed panel it is the only
