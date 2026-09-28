@@ -35,9 +35,14 @@ by_cell = summarise(["model", "arm", "rate", "churn"])
 by_rate.to_csv(OUT / "by_rate.csv", index=False)
 by_cell.to_csv(OUT / "by_cell.csv", index=False)
 
-# Share of panels where the tree's MAPE beats Pareto/NBD's on the same panel.
-pn = d[d.model == "ParetoNBD"].set_index(["rate", "churn", "dataset"]).mape
-d["wins"] = d.mape.values < pn.reindex(pd.MultiIndex.from_frame(d[["rate", "churn", "dataset"]])).values
+# Whether the tree beats Pareto/NBD on the same panel: lower MAPE, smaller |bias|, higher
+# Spearman. Averaged over a table's panels these are the three "Beats P/NBD" shares.
+pn = d[d.model == "ParetoNBD"].set_index(["rate", "churn", "dataset"])
+pn = pn.reindex(pd.MultiIndex.from_frame(d[["rate", "churn", "dataset"]]))
+d["win_mape"] = d.mape.values < pn.mape.values
+d["win_bias"] = d.bias.abs().values < pn.bias.abs().values
+d["win_spearman"] = d.spearman.values > pn.spearman.values
+WINS = ["win_mape", "win_bias", "win_spearman"]
 
 FMT = {"rmse": "{:.2f}", "bias": "{:+.0f}", "mape": "{:.0f}", "spearman": "{:.2f}", "ce": "{:.3f}"}
 
@@ -63,8 +68,9 @@ def name(model, arm):
 
 
 def table(frame, wins=None):
-    head = "| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE |" + (" Beats P/NBD |" if wins is not None else "")
-    sep = "| --- | --- | --- | --- | --- | --- | --- |" + (" ---: |" if wins is not None else "")
+    head = "| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE |" + (
+        " Beats P/NBD: MAPE | Beats P/NBD: \\|bias\\| | Beats P/NBD: Spearman |" if wins is not None else "")
+    sep = "| --- | --- | --- | --- | --- | --- | --- |" + (" ---: | ---: | ---: |" if wins is not None else "")
     lines = [head, sep]
     for model, arm in ORDER:
         r = frame[(frame.model == model) & (frame.arm == arm)]
@@ -73,21 +79,22 @@ def table(frame, wins=None):
         r = r.iloc[0]
         line = f"| {name(model, arm)} | " + " | ".join(cell(r, m) for m in METRICS) + " |"
         if wins is not None:
-            line += " — |" if model == "ParetoNBD" else f" {wins[(model, arm)]:.0%} |"
+            line += " — | — | — |" if model == "ParetoNBD" else "".join(
+                f" {wins.loc[(model, arm), w]:.0%} |" for w in WINS)
         lines.append(line)
     return "\n".join(lines)
 
 
 md = []
 for rate in sorted(d.rate.unique()):
-    w = d[d.rate == rate].groupby(["model", "arm"]).wins.mean()
+    w = d[d.rate == rate].groupby(["model", "arm"])[WINS].mean()
     n = by_rate[by_rate.rate == rate].n
     md.append(f"#### Rate {rate:.2f}, churn pooled ({panels(n)})\n\n"
               + table(by_rate[by_rate.rate == rate], w))
 for rate in sorted(d.rate.unique()):
     for churn in sorted(d.churn.unique()):
         f = by_cell[(by_cell.rate == rate) & (by_cell.churn == churn)]
-        w = d[(d.rate == rate) & (d.churn == churn)].groupby(["model", "arm"]).wins.mean()
+        w = d[(d.rate == rate) & (d.churn == churn)].groupby(["model", "arm"])[WINS].mean()
         md.append(f"##### Rate {rate:.2f}, churn {churn:.0%} ({panels(f.n)})\n\n"
                   + table(f, w))
 (OUT / "tables.md").write_text("\n\n".join(md) + "\n")
@@ -96,14 +103,15 @@ for rate in sorted(d.rate.unique()):
 # The three best trees per rate x churn cell, by MAPE (lowest) and by Spearman (highest).
 def top3(metric, ascending):
     lines = [f"| Rate | Churn | Rank | Model | Arm | {'**MAPE**' if metric == 'mape' else 'MAPE'} | "
-             f"{'**Spearman**' if metric == 'spearman' else 'Spearman'} | RMSE | Bias % | Val. CE | p vs rank 1 |",
-             "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | ---: |"]
+             f"{'**Spearman**' if metric == 'spearman' else 'Spearman'} | RMSE | Bias % | Val. CE | p vs rank 1 | Beats P/NBD: MAPE / \\|bias\\| / Spearman |",
+             "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | ---: | ---: |"]
     for (rate, churn), f in by_cell.groupby(["rate", "churn"]):
         best = f.sort_values(metric, ascending=ascending).head(3)
         # Paired Wilcoxon of each runner-up against the cell's leader, on the same panels.
         panel = d[(d.rate == rate) & (d.churn == churn)].pivot_table(
             index="dataset", columns=["model", "arm"], values=metric)
         leader = panel[(best.iloc[0].model, best.iloc[0].arm)]
+        wins = d[(d.rate == rate) & (d.churn == churn)].groupby(["model", "arm"])[WINS].mean()
         for rank, (_, r) in enumerate(best.iterrows(), 1):
             model, arm = name(r.model, r.arm).split(" | ")
             vals = [cell(r, m) if m == metric else
@@ -111,7 +119,9 @@ def top3(metric, ascending):
                     for m in ("mape", "spearman", "rmse", "bias", "ce")]
             lead = f"{rate:.2f} | {churn:.0%}" if rank == 1 else " | "
             p = "—" if rank == 1 else f"{stats.wilcoxon((panel[(r.model, r.arm)] - leader).dropna()).pvalue:.3f}"
-            lines.append(f"| {lead} | {rank} | {model} | {arm} | " + " | ".join(vals) + f" | {p} |")
+            beats = "—" if r.model == "ParetoNBD" else " / ".join(
+                f"{wins.loc[(r.model, r.arm), w]:.0%}" for w in WINS)
+            lines.append(f"| {lead} | {rank} | {model} | {arm} | " + " | ".join(vals) + f" | {p} | {beats} |")
     return "\n".join(lines)
 
 
