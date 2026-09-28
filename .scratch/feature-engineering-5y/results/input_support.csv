@@ -1,0 +1,12 @@
+feature,escape_pct,z_worst
+period_since_last_transaction,16.278295605858855,0.8359686136245728
+period_since_first_transaction,60.60432244187237,0.6971877217292786
+cumulative_transactions,0.028167571443203934,3.1358728408813477
+transaction_rate,0.0,-16.25204086303711
+has_transacted_before,0.0,0.0
+active_in_last_32_periods,0.0,0.0
+active_in_last_52_periods,0.0,0.0
+"silence>=32 among active, calibration",65.36020529789543,
+"silence>=32 among active, holdout",79.72907917648264,
+"silence>=52 among active, calibration",51.520832221451315,
+"silence>=52 among active, holdout",71.7387073645396,
