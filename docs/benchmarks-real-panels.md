@@ -25,8 +25,9 @@ the decimal shown. The one addition on that date is Pareto/NBD on the three-year
 Windows — two calibration years and one holdout year, the second calibration year used
 for validation (ADR-0001). CDNOW's panel spans 77 weeks, so it keeps the published split
 with the last eight calibration weeks as validation. **Every table in this document that
-is not marked `3y` is on these windows**, and every runner since 13 September imports them
-from `run_real_panel_benchmarks.WINDOWS` rather than restating them, so the families
+is not marked `3y` or electronic_5y is on these windows**, and every runner since
+13 September imports them from `run_real_panel_benchmarks.WINDOWS` rather than restating
+them, so the families
 cannot drift apart.
 
 | panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells | classes |
@@ -35,13 +36,21 @@ cannot drift apart.
 | electronics | 829 | 1999-01-01 → 2000-12-31 | 2000-01-01 | 2001-01-01 → 2001-12-31 | 104 / 52 | 1,467 | 98.6% | 7 |
 | gift | 2,062 | 2001-02-25 → 2003-02-24 | 2002-02-25 | 2003-02-25 → 2004-02-24 | 104 / 52 | 1,146 | 99.0% | 5 |
 | multichannel | 1,402 | 2005-01-01 → 2006-12-31 | 2006-01-01 | 2007-01-01 → 2007-12-31 | 104 / 52 | 228 | 99.7% | 5 |
+| electronic_5y | 3,755 | 1998-12-02 → 2003-12-01 | 2002-12-02 | 2003-12-02 → 2004-11-30 | 260 / 52 | 2,153 | 99.0% | 6 |
+
+**electronic_5y** is a separate panel, not a longer window on `electronics`:
+`Dataset_full_clean/electronics_5y_customer_week_panel.csv`, the paper's cohort at trip
+level, on the split Valendin et al. (2022) use for electronics (`--calibration 5y`,
+`WINDOWS_5Y`). Its results are in "Pareto/NBD on electronic_5y" below; every other table
+in this document is on the four panels above it.
 
 "Classes" is the softmax head size: `clip_target_upper` + 1 where the panel config sets it
 (4 on CDNOW, 6 on electronics), and sized from the data on gift and multichannel, which
-never exceed 4 transactions in a week.
+never exceed 4 transactions in a week, and on electronic_5y, which never exceeds 5.
 
-A transaction is a purchase on CDNOW and gift, a line item on electronics, and a distinct
-order on multichannel (`docs/dataset-preparation.md`).
+A transaction is a purchase on CDNOW and gift, a line item on electronics, a distinct
+order on multichannel (`docs/dataset-preparation.md`), and a household purchase day on
+electronic_5y (`docs/datasets.md`).
 
 ### One caveat on the Pareto/NBD rows: they are single fits, and CDNOW's is not stable
 
@@ -778,14 +787,14 @@ Reading:
 - **What is still missing**: ValendinLSTM on these windows, which would say whether the
   neural benchmark also moves up with the setting or only the AR-fed arms do.
 
-## Pareto/NBD on the paper's electronics split
+## Pareto/NBD on electronic_5y
 
 `scripts/run_real_panel_benchmarks.py --calibration 5y --pareto`, 2026-09-26: one MCMC fit
-on the split Valendin et al. (2022) use for electronics, so the row can be set beside
-their Table 4. Suite `real_panel_benchmarks_cal5y__ParetoNBD__electronics`.
+on electronic_5y, the split Valendin et al. (2022) use for electronics, so the row can
+be set beside their Table 4. Suite `real_panel_benchmarks_cal5y__ParetoNBD__electronics`.
 
-The panel is not the 829-household line-item panel of the tables above. It is
-`Dataset_full_clean/electronics_5y_customer_week_panel.csv` (`docs/datasets.md`): the
+electronic_5y is not the 829-household line-item `electronics` panel of the tables
+above. It is `Dataset_full_clean/electronics_5y_customer_week_panel.csv` (`docs/datasets.md`): the
 paper's cohort (households whose first purchase is in Dec 1998 – Nov 1999), one
 transaction per purchase day, 260 calibration weeks from 1998-12-02 (the last 52 are
 validation, which Pareto/NBD does not use) and a holdout from 2003-12-02 to 2004-11-30, the
@@ -798,7 +807,7 @@ the holdout against 72%.
 | Valendin et al., Table 4 — Pareto/NBD | 3,782 | 53 | 1.26 | −14.8 | 32.2 |
 | **this package — Pareto/NBD** | 3,755 | 52 | **1.23** | **−15.6** | **27.7** |
 | Valendin et al., Table 4 — Base LSTM | 3,782 | 53 | 1.18 | +2.7 | 16.9 |
-| all-zero forecast, this panel | 3,755 | 52 | 1.56 | −100.0 | 100.0 |
+| all-zero forecast, electronic_5y | 3,755 | 52 | 1.56 | −100.0 | 100.0 |
 
 The paper's RMSE is on each customer's holdout total, so it is compared with
 `rmse_customer_total`; the per-cell `rmse` of this fit is 0.1115 (all-zero: 0.1131).
@@ -820,10 +829,10 @@ Reading:
   about 15% while the paper's Base LSTM sits at +2.7% with half the MAPE. A ValendinLSTM
   run on the same windows (`--calibration 5y --worker`) has not been done.
 - **Why the `2y` electronics rows read −63%.** The −63.0 / −65.0 biases in the tables above
-  are the line-item panel's unit mismatch. On trip-level data and the paper's cohort the
-  same model gives −15.6, as published.
+  are the line-item panel's unit mismatch. On electronic_5y (trip-level, the paper's
+  cohort) the same model gives −15.6, as published.
 
-### ValendinLSTM on the same split
+### ValendinLSTM on electronic_5y
 
 `scripts/run_real_panel_benchmarks.py --calibration 5y --worker I/20`, 2026-09-26: 20
 replications of the family-N budget (100 Optuna trials over learning rate and batch size,
@@ -953,8 +962,8 @@ between cells smaller than that are not results.
 
 ### The same procedure for two attention models
 
-`scripts/run_attention_models_5y.py`, 2026-09-27/28: the procedure above — 20 searched
-studies, then the least-biased one's settings pinned under `nofloor` / `from20` /
+`scripts/run_attention_models_5y.py`, 2026-09-27/28, on electronic_5y: the procedure
+above — 20 searched studies, then the least-biased one's settings pinned under `nofloor` / `from20` /
 `from30` x none / `ar_bounded_52` / `kmeans_8`, 20 studies per cell — for two models,
 both on the `valendin` embedder with the embedded week:
 
@@ -970,6 +979,9 @@ both on the `valendin` embedder with the embedded week:
 
 | cell (20 studies) | ValendinLSTM (above) | LSTMAttention | Transformer |
 | --- | --- | --- | --- |
+| Pareto/NBD, this package (one fit, no cells) | 1.230 / −15.6 / 27.7 | *(same)* | *(same)* |
+| Valendin et al., Table 4 — Base LSTM | 1.18 / +2.7 / 16.9 | — | — |
+| Valendin et al., Table 4 — Pareto/NBD | 1.26 / −14.8 / 32.2 | — | — |
 | searched | 1.163 / +13.8 ± 11.1 / 20.5 | 1.208 / +16.0 ± 11.8 / 21.4 | 1.325 / +51.7 ± 23.6 / 54.2 |
 | none, `nofloor` | 1.178 / +13.2 ± 16.7 / 21.5 | 1.205 / +14.1 ± 8.9 / 19.6 | 1.290 / +34.1 ± 20.5 / 43.5 |
 | `ar_bounded_52`, `nofloor` | 1.183 / +8.7 ± 8.2 / 17.5 | 1.221 / +9.1 ± 11.0 / 18.3 | 1.257 / +12.5 ± 19.6 / 31.5 |
@@ -983,9 +995,17 @@ both on the `valendin` embedder with the embedded week:
 
 Each entry is customer-level RMSE / bias % (mean ± sd) / MAPE. The ValendinLSTM column's
 feature cells are `models.MultinomialLSTMModel` in the benchmark's shape. Spearman is
-0.40 in every cell without `kmeans_8` and 0.35–0.37 with it, for all three models.
-Published (Valendin et al., Table 4): Base LSTM 1.18 / +2.7 / 16.9, Pareto/NBD 1.26 /
-−14.8 / 32.2; this package's Pareto/NBD 1.230 / −15.6 / 27.7.
+0.40 in every cell without `kmeans_8` and 0.35–0.37 with it, for all three models
+(Pareto/NBD 0.394). Pareto/NBD has no search, epochs or inputs to vary, so its one fit
+stands against every cell.
+
+`searched` and `nofloor` share inputs (count and embedded week) and training rule
+(patience 7, best-by-validation epoch kept); they differ in how the hyperparameters are
+chosen. In `searched` each study runs its own 100-trial Optuna search, so the 20 studies
+can land on different settings — the imitation of the paper's setup. In `nofloor` the
+least-biased searched study's settings are frozen and each study trains once with them.
+`nofloor` is the control that isolates pinning before the `from20` / `from30` floors
+are added.
 
 Reading:
 
@@ -1001,6 +1021,9 @@ Reading:
   effect than on either LSTM — and gives its best RMSE (1.246 at `from30`).
 - **`kmeans_8` lowers ranking for every model** (Spearman 0.40 → 0.35–0.37) and raises
   the LSTMs' RMSE; for the Transformer it helps bias as much as the flags but not RMSE.
+- **Against Pareto/NBD.** Both LSTMs beat it on customer-level RMSE in every cell but
+  the `kmeans_8` ones; the Transformer only with `ar_bounded_52`. Pareto/NBD
+  under-forecasts (−15.6%) where every neural cell over-forecasts.
 - **No model reaches the published LSTM's bias.** Every cell's mean over-forecasts by
   at least +9%.
 
