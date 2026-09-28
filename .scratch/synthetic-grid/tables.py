@@ -11,6 +11,8 @@ OUT = Path(".scratch/synthetic-grid/results")
 d = pd.read_csv(OUT / "per_study.csv")
 # The two Transformer ar_unbounded forecasts that disagree with their stored results.
 d = d[(d.mape - d.stored_mape).abs() / d.stored_mape < 0.05]
+# The Results tables cover the 13 trees of the 1,000-customer grid only.
+d = d[(d.cohort == "n1000") & ~d.arm.isin(["true_season", "no_ar-no_cluster-small_search"])]
 METRICS = ["rmse", "bias", "mape", "spearman", "ce"]
 ORDER = [("ParetoNBD", "-")] + [(m, f"{a}-{c}") for m in ("LSTM", "Transformer")
          for a in ("ar_bounded", "no_ar", "ar_unbounded") for c in ("no_cluster", "kmeans_8")]
