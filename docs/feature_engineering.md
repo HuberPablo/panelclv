@@ -641,6 +641,46 @@ mean-bias interval is +4.2% (Transformer, `ar_bounded_52`, `nofloor`). Neither i
 under any epoch rule and for any model, brings a cell's mean down to zero. Every
 neural cell's interval lies above Pareto/NBD's −15.6%.
 
+#### The LSTM against Pareto/NBD
+
+The tables above resample only the 20 studies and treat Pareto/NBD's single fit as exact,
+so they ignore that both models are scored on one sample of customers. Here each of 1,000
+bootstrap draws resamples the 3,755 customers and the 20 studies together. The customer
+draw is shared by both models, so the comparison is paired. Δ = mean over studies of the
+LSTM's metric − Pareto/NBD's, both on the resampled customers, with a 95% percentile
+interval. Negative Δ is better for RMSE, |bias| and MAPE; positive Δ is better for
+Spearman. In parentheses: how many of the 20 studies' own scores beat Pareto/NBD's. Bold:
+supported. Script: `.scratch/feature-engineering-5y/lstm_vs_pareto.py`; results:
+`results/lstm_vs_pareto.csv` beside it.
+
+| rule | input | Δ RMSE (customer total) | Δ \|bias\| | Δ MAPE | Δ Spearman |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `searched` | none | **−0.065 [−0.120, −0.018]** (20) | −0.3 [−12.5, +12.5] (13) | **−7.6 [−12.1, −2.3]** (18) | **+0.011 [+0.001, +0.022]** (20) |
+| `nofloor` | none | **−0.050 [−0.102, −0.007]** (18) | +0.3 [−10.7, +14.3] (13) | −6.4 [−11.9, +0.4] (18) | +0.008 [−0.003, +0.020] (18) |
+| `nofloor` | `ar_bounded_52` | **−0.047 [−0.082, −0.016]** (20) | −4.9 [−15.3, +7.1] (16) | **−10.0 [−13.4, −6.1]** (20) | +0.005 [−0.006, +0.016] (17) |
+| `nofloor` | `kmeans_8` | +0.049 [−0.014, +0.106] (1) | −5.5 [−14.2, +7.7] (16) | **−9.3 [−13.0, −4.5]** (19) | **−0.036 [−0.052, −0.022]** (0) |
+| `from20` | none | **−0.070 [−0.123, −0.017]** (20) | −4.5 [−15.2, +8.2] (16) | **−9.7 [−13.5, −5.2]** (20) | +0.009 [−0.002, +0.020] (18) |
+| `from20` | `ar_bounded_52` | **−0.075 [−0.151, −0.015]** (20) | −1.8 [−13.5, +11.6] (12) | **−8.1 [−12.2, −3.0]** (19) | +0.008 [−0.003, +0.018] (17) |
+| `from20` | `kmeans_8` | +0.041 [−0.033, +0.107] (0) | −2.5 [−13.9, +11.2] (11) | **−9.0 [−12.9, −4.1]** (20) | **−0.040 [−0.055, −0.026]** (0) |
+| `from30` | none | **−0.072 [−0.136, −0.016]** (20) | −2.5 [−13.7, +10.0] (11) | **−8.3 [−12.4, −3.4]** (20) | +0.008 [−0.003, +0.018] (18) |
+| `from30` | `ar_bounded_52` | **−0.073 [−0.131, −0.023]** (20) | −5.0 [−15.5, +8.1] (16) | **−9.2 [−12.8, −4.7]** (19) | +0.006 [−0.005, +0.017] (17) |
+| `from30` | `kmeans_8` | +0.038 [−0.041, +0.111] (1) | −3.3 [−14.2, +10.6] (14) | **−9.2 [−13.4, −4.3]** (18) | **−0.044 [−0.060, −0.029]** (0) |
+
+- **The searched LSTM beats Pareto/NBD on RMSE, MAPE and Spearman, supported.** The
+  Spearman gain is small: +0.011, with a lower bound of +0.001.
+- **Without the k-means label, every LSTM cell beats Pareto/NBD on RMSE, supported.**
+  Every cell except `nofloor` / none also beats it on MAPE. Spearman is not
+  distinguishable once the hyperparameters are pinned.
+- **With the k-means label, the LSTM ranks customers worse than Pareto/NBD,** supported
+  under every rule (−0.036 to −0.044). Its RMSE is not distinguishable, yet it loses in
+  19 or 20 of the 20 studies at the stored scores.
+- **No cell differs from Pareto/NBD in the size of its bias.** The two miss the total by
+  similar amounts in opposite directions: the LSTM over-forecasts and Pareto/NBD
+  under-forecasts by 15.6%.
+- Pareto/NBD is one MCMC fit, so the uncertainty of its own fit is not in these
+  intervals. This is one panel and one holdout year. Forecast CV is not compared,
+  because neither direction is better.
+
 #### What each input changes
 
 Effect of adding one input to the count + embedded week baseline, within one model and one
