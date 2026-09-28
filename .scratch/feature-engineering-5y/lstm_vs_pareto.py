@@ -1,77 +1,59 @@
-"""Is the LSTM better than Pareto/NBD on electronic_5y? Backs the "LSTM against
-Pareto/NBD" claims in `docs/feature_engineering.md`.
+"""Every neural cell on electronic_5y against Pareto/NBD. Backs "The LSTM against
+Pareto/NBD" and the Pareto/NBD sentences of `docs/feature_engineering.md` §4.
 
-The cell tables' intervals resample only the 20 studies and hold Pareto/NBD's single
-fit fixed, which ignores that both models are scored on one sample of customers. Here
-each bootstrap draw resamples the 3,755 customers (the same draw for both models, so
-the comparison is paired) and the 20 studies together:
+Pareto/NBD is 20 seeded MCMC fits on the same cohort and windows; each neural cell is 20
+studies with unseeded training. The two share no unit, so each comparison is the
+protocol's independent bootstrap (`docs/statistical-protocol.md` §2):
 
-    delta = mean over resampled studies of LSTM metric - Pareto/NBD metric,
+    delta = mean(cell) - mean(Pareto/NBD), 95% percentile interval, n = 20 / 20,
 
-both on the resampled customers. Supported when the 95% percentile interval excludes
-zero. `wins_*` counts how many of the 20 studies' stored scores beat Pareto/NBD's.
+through the package's `effect` (via the training-budget shim). Supported when the interval
+excludes zero. Reads the per-forecast scores `effects_5y.py` writes (run it first) and
+writes `results/lstm_vs_pareto.csv` with one row per (model, rule, input, metric).
 
     PYTHONPATH=src python .scratch/feature-engineering-5y/lstm_vs_pareto.py
 """
 import sys
 from pathlib import Path
-import numpy as np, pandas as pd
-from scipy.stats import rankdata
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT / ".scratch/feature-engineering-5y"))
-sys.path.insert(0, str(ROOT / ".scratch/training-budget"))
-import effects_5y as E
-from panelclv.data_preparation.target_channel import holdout_actuals
-from panelclv.studies.suite_reader import load_model_predictions
-from panelclv.models.monte_carlo_forecasting import compute_forecast_metrics
 
-base = E.floor.build_data(); act = holdout_actuals(base).astype(float); ids = np.asarray(base["ids"])
-N = act.shape[0]
-def load(md):
-    v, i = load_model_predictions(md, study=1); assert np.array_equal(np.asarray(i), ids); return v.astype(float)
-pn = load(E.S / "real_panel_benchmarks_cal5y__ParetoNBD__electronics" / "ParetoNBD")
-print("PNBD check", compute_forecast_metrics(act, pn))
+import pandas as pd
 
-def metrics_w(pred_tot, pred_wk, w, act_tot, act_wk_w):
-    # w: customer multiplicity weights (N,). pred_tot (N,), pred_wk (N,T)
-    rmse = np.sqrt(np.sum(w * (pred_tot - act_tot) ** 2) / w.sum())
-    pw = w @ pred_wk; aw = act_wk_w
-    bias = 100 * (pw.sum() - aw.sum()) / aw.sum()
-    mape = 100 * np.abs(aw - pw).sum() / aw.sum()
-    return rmse, abs(bias), mape
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1] / ".scratch" / "training-budget"))
+from effects import effect                                               # noqa: E402
 
-def spear(idx, p_tot, a_tot):
-    a = rankdata(a_tot[idx]); p = rankdata(p_tot[idx]); return np.corrcoef(a, p)[0, 1]
+# Signed bias answers "which way does each miss", |bias| "which misses by less".
+METRICS = ("rmse_customer_total", "abs_bias", "mape_aggregate", "spearman", "bias_percent")
+FMT = {"rmse_customer_total": "{:+.3f}", "abs_bias": "{:+.1f}", "mape_aggregate": "{:+.1f}",
+       "spearman": "{:+.3f}", "bias_percent": "{:+.1f}"}
 
-rng = np.random.default_rng(0)
-B = 1000
-a_tot = act.sum(1); pn_tot = pn.sum(1)
-cells = [("none", "searched")] + [(f, a) for a in E.ARMS for f in E.FEATURES]
+per = pd.read_csv(HERE / "results" / "per_forecast.csv")
+pn = per[per.model == "ParetoNBD"]
+assert len(pn) == 20, f"{len(pn)} Pareto/NBD fits in per_forecast.csv; run effects_5y.py"
+
 rows = []
-per = pd.read_csv(ROOT / ".scratch/feature-engineering-5y/results/per_forecast.csv")
-pref = per[per.model == "ParetoNBD"].iloc[0]
-for f, arm in cells:
-    preds = np.stack([load(E.suite("LSTM", f, arm, r)[0] / E.suite("LSTM", f, arm, r)[1]) for r in range(20)])
-    tots = preds.sum(2)
-    g = per[(per.model == "LSTM") & (per.feature == f) & (per.arm == arm)]
-    wins = {"rmse": (g.rmse_customer_total < pref.rmse_customer_total).sum(),
-            "absbias": (g.abs_bias < pref.abs_bias).sum(),
-            "mape": (g.mape_aggregate < pref.mape_aggregate).sum(),
-            "spearman": (g.spearman > pref.spearman).sum()}
-    D = np.empty((B, 4))
-    for b in range(B):
-        idx = rng.integers(0, N, N); w = np.bincount(idx, minlength=N).astype(float)
-        J = rng.integers(0, 20, 20)
-        aw = w @ act
-        p = metrics_w(pn_tot, pn, w, a_tot, aw); ps = spear(idx, pn_tot, a_tot)
-        m = np.mean([metrics_w(tots[j], preds[j], w, a_tot, aw) for j in J], axis=0)
-        ms = np.mean([spear(idx, tots[j], a_tot) for j in J])
-        D[b] = [m[0] - p[0], m[1] - p[1], m[2] - p[2], ms - ps]
-    lo, hi = np.percentile(D, [2.5, 97.5], axis=0)
-    names = ["dRMSE", "d|bias|", "dMAPE", "dSpearman"]
-    row = {"input": f, "rule": arm}
-    for k, n in enumerate(names):
-        row[n] = f"{D[:, k].mean():+.3f} [{lo[k]:+.3f}, {hi[k]:+.3f}]"
-    row.update({f"wins_{k}": int(v) for k, v in wins.items()})
-    rows.append(row); print(row, flush=True)
-pd.DataFrame(rows).to_csv(Path(__file__).resolve().parent / "results" / "lstm_vs_pareto.csv", index=False)
+for (model, feature, arm), g in per[per.model != "ParetoNBD"].groupby(
+        ["model", "feature", "arm"], sort=False):
+    for k in METRICS:
+        e = effect(g[k], pn[k], k, "electronic_5y")
+        rows.append(dict(model=model, rule=arm, input=feature, metric=k, n_a=e.n_a,
+                         n_b=e.n_b, mean_pnbd=e.mean_a, mean_cell=e.mean_b, delta=e.delta,
+                         lo=e.lo, hi=e.hi, supported=e.supported))
+out = pd.DataFrame(rows)
+out.to_csv(HERE / "results" / "lstm_vs_pareto.csv", index=False)
+
+print("Pareto/NBD, 20 fits:", {k: round(pn[k].mean(), 4) for k in METRICS})
+for model in ("LSTM", "LSTMAttention", "Transformer"):
+    print(f"\n### {model} − Pareto/NBD (n = 20 / 20, independent)\n")
+    print("| rule | input | Δ RMSE (customer total) | Δ \\|bias\\| | Δ MAPE | Δ Spearman | Δ bias % |")
+    print("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
+    m = out[out.model == model]
+    for (arm, feature), g in m.groupby(["rule", "input"], sort=False):
+        cells = []
+        for k in METRICS:
+            r = g[g.metric == k].iloc[0]
+            f = FMT[k]
+            txt = f"{f.format(r.delta)} [{f.format(r.lo)}, {f.format(r.hi)}]"
+            cells.append(f"**{txt}**" if r.supported else txt)
+        inp = "none" if feature == "none" else f"`{feature}`"
+        print(f"| `{arm}` | {inp} | " + " | ".join(cells) + " |")

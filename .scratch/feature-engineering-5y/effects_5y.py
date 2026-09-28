@@ -2,13 +2,22 @@
 
 Scores each stored forecast of the 5y runs once, through the runners' own `score`
 (the single scoring authority plus per-customer Spearman), adds forecast CV, then
-applies the standard of `docs/training-budget.md` "How claims are made" via
-`.scratch/training-budget/effects.py`: a cell is a mean with a 95% bootstrap CI over its
-20 studies; an effect is delta = mean(B) - mean(A) with a 95% bootstrap CI, supported
-when the interval excludes zero. Replications are treated as independent samples
-(training is unseeded), so each condition is resampled separately.
+applies `docs/statistical-protocol.md` through the package's `effect` (via the
+`.scratch/training-budget/effects.py` shim):
 
-    python .scratch/feature-engineering-5y/effects_5y.py          # writes results/
+* a cell is the mean over its 20 studies with a 95% percentile-bootstrap interval — the
+  protocol's one-statistic-per-replication case, `effect(x, 0, paired=True)`;
+* an effect is delta = mean(B) - mean(A) with its 95% interval, supported when the
+  interval excludes zero. Training is unseeded, so the studies of two cells are
+  independent replications and each is resampled separately (paired=False).
+
+Pareto/NBD is 20 seeded MCMC fits (`real_panel_benchmarks_cal5y__ParetoNBD__electronics__r00`
+… `r19`), scored like every neural forecast and carried as its own cell (model
+"ParetoNBD", rep 0-19). `lstm_vs_pareto.py` compares every neural cell with it.
+
+    PYTHONPATH=src:scripts python .scratch/feature-engineering-5y/effects_5y.py
+        # writes results/per_forecast.csv, cells.csv, effects.csv, input_support.csv
+        # and prints the three cell tables of docs/feature_engineering.md
 """
 from __future__ import annotations
 
@@ -17,7 +26,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import bootstrap
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -69,18 +77,31 @@ def score_all() -> pd.DataFrame:
                     continue
                 rows.append({"model": model, "feature": feature, "arm": arm, "rep": r,
                              **benchmarks.score(md, actual, ref_ids), "cv": cv_of_totals(md)})
-    pn = S / "real_panel_benchmarks_cal5y__ParetoNBD__electronics" / "ParetoNBD"
-    rows.append({"model": "ParetoNBD", "feature": "-", "arm": "-", "rep": 0,
-                 **benchmarks.score(pn, actual, ref_ids), "cv": cv_of_totals(pn)})
+    df = pd.DataFrame(rows)
+    df["abs_bias"] = df["bias_percent"].abs()
+    return df
+
+
+def score_pareto() -> pd.DataFrame:
+    """The 20 seeded Pareto/NBD fits on electronic_5y, scored like the neural forecasts."""
+    base = floor.build_data()
+    actual, ref_ids = holdout_actuals(base), np.asarray(base["ids"])
+    rows = []
+    for r in range(benchmarks.N_REPLICATIONS):
+        md = benchmarks.pareto_path("electronics", r, "5y")
+        rows.append({"model": "ParetoNBD", "feature": "-", "arm": "-", "rep": r,
+                     **benchmarks.score(md, actual, ref_ids), "cv": cv_of_totals(md)})
     df = pd.DataFrame(rows)
     df["abs_bias"] = df["bias_percent"].abs()
     return df
 
 
 def mean_ci(x: np.ndarray) -> tuple[float, float, float]:
+    """A cell's mean and 95% percentile interval: the protocol's one-statistic case,
+    each study's value against a reference of 0 (the interval of the mean itself)."""
     x = np.asarray(x, float)
-    res = bootstrap((x,), np.mean, n_resamples=10000, method="percentile", random_state=0)
-    return x.mean(), res.confidence_interval.low, res.confidence_interval.high
+    e = effect(x, np.zeros_like(x), metric="cell", panel="electronic_5y", paired=True)
+    return e.mean_b, e.lo, e.hi
 
 
 METRICS = ("rmse_customer_total", "bias_percent", "mape_aggregate", "spearman", "cv")
@@ -88,7 +109,7 @@ METRICS = ("rmse_customer_total", "bias_percent", "mape_aggregate", "spearman", 
 
 def cell_table(df: pd.DataFrame) -> pd.DataFrame:
     out = []
-    for (m, f, a), g in df[df.model != "ParetoNBD"].groupby(["model", "feature", "arm"], sort=False):
+    for (m, f, a), g in df.groupby(["model", "feature", "arm"], sort=False):
         row = {"model": m, "feature": f, "arm": a, "n": len(g)}
         for k in METRICS:
             mu, lo, hi = mean_ci(g[k])
@@ -162,12 +183,36 @@ def input_support() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def print_cell_tables(cells: pd.DataFrame) -> None:
+    """The three model tables of docs/feature_engineering.md, each closed by Pareto/NBD."""
+    fmt = {"rmse_customer_total": "{:.3f}", "bias_percent": "{:+.1f}",
+           "mape_aggregate": "{:.1f}", "spearman": "{:.3f}", "cv": "{:.2f}"}
+    pn = cells[cells.model == "ParetoNBD"].iloc[0]
+
+    def line(label, r):
+        vals = [f"{fmt[k].format(r[k])} [{fmt[k].format(r[k + '_lo'])}, {fmt[k].format(r[k + '_hi'])}]"
+                for k in METRICS]
+        return f"| {label} | " + " | ".join(vals) + " |"
+
+    for m in MODELS:
+        print(f"\n**{m}**\n")
+        print("| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |")
+        print("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
+        for _, r in cells[cells.model == m].iterrows():
+            print(line(f"`{r.arm}` | {'none' if r.feature == 'none' else '`' + r.feature + '`'}", r))
+        print(line("Pareto/NBD, 20 fits | —", pn))
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     per = OUT / "per_forecast.csv"
+    # Neural forecasts are scored once and cached; Pareto/NBD is always re-read from the
+    # seeded fits, so a cache written before they existed cannot carry the old single fit.
     df = pd.read_csv(per) if per.exists() else score_all()
+    df = pd.concat([df[df.model != "ParetoNBD"], score_pareto()], ignore_index=True)
     df.to_csv(per, index=False)
-    cell_table(df).to_csv(OUT / "cells.csv", index=False)
-    effects(df).to_csv(OUT / "effects.csv", index=False)
+    cells = cell_table(df)
+    cells.to_csv(OUT / "cells.csv", index=False)
+    effects(df[df.model != "ParetoNBD"]).to_csv(OUT / "effects.csv", index=False)
     input_support().to_csv(OUT / "input_support.csv", index=False)
-    print(df[df.model == "ParetoNBD"].T)
+    print_cell_tables(cells)
