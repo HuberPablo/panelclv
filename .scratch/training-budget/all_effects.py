@@ -24,11 +24,10 @@ from scipy.stats import bootstrap
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from effects import REFIT_NOISE, effect                                  # noqa: E402
+from effects import REFIT_NOISE, effect, table                           # noqa: E402
 
 F = pd.read_csv(HERE / "results" / "factorial.csv")
 PANELS = ["cdnow", "electronics", "gift", "multichannel"]
-PNBD = {"cdnow": 0.450, "electronics": 0.297, "gift": 0.383, "multichannel": 0.189}
 
 
 def cell(panel, model, training, cluster, metric):
@@ -76,18 +75,25 @@ show(mp, "Level — MAPE (family U)", fmt="{:+.1f}")
 mp.to_csv(HERE / "results" / "effects_mape.csv", index=False)
 
 # --- the best cell against the statistical benchmark ------------------------------
-print("\n### Best cell against Pareto/NBD — Spearman\n")
-print("| panel | model | best cell | 95% CI | Pareto/NBD | reading |")
-print("| --- | --- | ---: | :---: | ---: | --- |")
+# Pareto/NBD is a replicated condition now: 20 seeded MCMC fits per panel on the same
+# 2-year windows as family U (checked against every factorial suite's config.json), scored
+# by `.scratch/statistical-protocol/benchmarks_pareto_scores.py`. The best cell's 20
+# searches and Pareto/NBD's 20 fits share nothing, so the comparison is the protocol's
+# independent bootstrap of Δ = mean(best cell) − mean(Pareto/NBD).
+sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / ".scratch" / "statistical-protocol"))
+from benchmarks_pareto_scores import load as pareto_scores                 # noqa: E402
+
+print("\n### Best cell (floored / kmeans_8) against 20 seeded Pareto/NBD fits — Spearman\n")
+best = []
 for panel in PANELS:
+    pnbd = pareto_scores("2y", panel).spearman
     for model in ("ValendinLSTM", "LSTM"):
-        v = cell(panel, model, "floored", "kmeans_8", "spearman")
-        r = bootstrap((np.asarray(v),), np.mean, n_resamples=10000, random_state=0)
-        lo, hi = r.confidence_interval
-        p = PNBD[panel]
-        reading = ("above" if lo > p else "below" if hi < p else "interval contains it")
-        print(f"| {panel} | {model} | {v.mean():.3f} | {lo:.3f} to {hi:.3f} | {p:.3f} "
-              f"| {reading} |")
+        e = effect(cell(panel, model, "floored", "kmeans_8", "spearman"), pnbd,
+                   "spearman", panel)
+        e.panel = f"{panel} / {model}"
+        best.append(e)
+print(table(best, label="panel / model (A = Pareto/NBD, B = best cell)"))
 
 # --- §6: correlations across studies, with intervals over studies ----------------
 # The §6 claim is a single rank correlation computed ACROSS the 40 archive studies (each

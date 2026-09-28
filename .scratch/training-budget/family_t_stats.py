@@ -1,41 +1,86 @@
-"""Family T, tested: each arm against `archive`, 20 vs 20, Mann-Whitney."""
+"""Family T, tested: each training recipe against `archive` on electronics (§9).
+
+The per-replication scores live in `results/family_t_scores.csv` (2 models x 4 arms x 20
+replications, one row per forecast, scored by `run_training_budget.score`). `--rescore`
+rebuilds that file from the suites in `Studies/`; without it the file is read as is.
+
+Every comparison is `docs/statistical-protocol.md`'s: Δ = mean(arm) − mean(archive) with
+a 95% percentile-bootstrap interval from 10,000 resamples, via the package's `effect`
+(through this folder's shim, which prints electronics' refit noise beside it). Each arm's
+20 replications are their own searches or pinned trainings, with unseeded training, so
+they share nothing with `archive`'s 20: the independent bootstrap (paired=False).
+
+MAPE and Spearman are the primary metrics; |bias| is printed as the secondary
+calibration-accuracy comparison.
+
+    PYTHONPATH=src:scripts python .scratch/training-budget/family_t_stats.py [--rescore]
+"""
 import sys
 from pathlib import Path
-import numpy as np, pandas as pd
-from scipy.stats import mannwhitneyu
-REPO = Path(__file__).resolve().parents[2]
+
+import numpy as np
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO / "scripts"))
-from run_training_budget import (MODELS, ARMS, N_REPLICATIONS, build_data,
-                                 forecast_path, score)
-from panelclv.data_preparation.target_channel import holdout_actuals
+from effects import effect, table                                        # noqa: E402
 
-rows = []
-for model in MODELS:
-    data = build_data(model)
-    actual, ids = holdout_actuals(data), np.asarray(data["ids"])
-    for arm in ARMS:
-        for r in range(N_REPLICATIONS):
-            p = forecast_path(model, arm, r)
-            if p.exists():
-                rows.append(dict(model=model, arm=arm, rep=r,
-                                 **score(p.parents[1], actual, ids)))
-d = pd.DataFrame(rows)
-d.to_csv(Path(__file__).resolve().parent / "results" / "family_t_scores.csv", index=False)
+SCORES = HERE / "results" / "family_t_scores.csv"
+ARMS = ("archive", "paper", "paper90", "floor50")
 
-for model, g in d.groupby("model"):
+
+def rescore() -> None:
+    """Score every family-T forecast from `Studies/` into SCORES."""
+    from panelclv.data_preparation.target_channel import holdout_actuals
+    from run_training_budget import (MODELS, N_REPLICATIONS, build_data, forecast_path,
+                                     score)
+    rows = []
+    for model in MODELS:
+        data = build_data(model)
+        actual, ids = holdout_actuals(data), np.asarray(data["ids"])
+        for arm in ARMS:
+            for r in range(N_REPLICATIONS):
+                p = forecast_path(model, arm, r)
+                if p.exists():
+                    rows.append(dict(model=model, arm=arm, rep=r,
+                                     **score(p.parents[1], actual, ids)))
+    pd.DataFrame(rows).to_csv(SCORES, index=False)
+
+
+if "--rescore" in sys.argv:
+    rescore()
+d = pd.read_csv(SCORES)
+d["abs_bias"] = d.bias_percent.abs()
+
+for model in ("ValendinLSTM", "LSTM"):
+    g = d[d.model == model]
     base = g[g.arm == "archive"]
-    print(f"\n{model} — each arm vs `archive`, Mann-Whitney, 20 vs 20")
-    print(f"{'arm':9s} {'MAPE':>7s} {'p':>9s}   {'Spearman':>9s} {'p':>9s}   {'|bias|':>7s} {'p':>9s}")
-    for arm in ARMS:
-        if arm == "archive":
-            print(f"{arm:9s} {base.mape_aggregate.mean():7.2f} {'—':>9s}   "
-                  f"{base.spearman.mean():9.3f} {'—':>9s}   "
-                  f"{base.bias_percent.abs().mean():7.2f} {'—':>9s}")
-            continue
-        a = g[g.arm == arm]
-        pm = mannwhitneyu(a.mape_aggregate, base.mape_aggregate).pvalue
-        ps = mannwhitneyu(a.spearman, base.spearman).pvalue
-        pb = mannwhitneyu(a.bias_percent.abs(), base.bias_percent.abs()).pvalue
-        print(f"{arm:9s} {a.mape_aggregate.mean():7.2f} {pm:9.2e}   "
-              f"{a.spearman.mean():9.3f} {ps:9.2e}   "
-              f"{a.bias_percent.abs().mean():7.2f} {pb:9.2e}")
+    for metric, noise_key in (("mape_aggregate", "mape_aggregate"),
+                              ("spearman", "spearman"),
+                              ("abs_bias", "bias_percent")):
+        rows = []
+        for arm in ARMS[1:]:
+            # The shim looks the refit noise up under the metric name, so |bias| borrows
+            # the bias entry and is relabelled after.
+            e = effect(g[g.arm == arm][metric], base[metric], noise_key, "electronics")
+            e.metric, e.panel = metric, f"{arm} vs archive"
+            rows.append(e)
+        print(f"\n### {model}: {metric} (A = archive, B = arm; n = 20 / 20, independent)\n")
+        print(table(rows, label="arm"))
+
+# docs/studies-run.md §4.6-4.7: does the search add anything once a model is floored?
+# `floor50` keeps the 100-trial search under a 50-epoch floor; `paper90` pins one trial
+# under a 90-epoch floor. They differ in the floor length too, so this is the only
+# family-T contrast between a searched and a pinned floored arm, not a clean isolation.
+for metric in ("mape_aggregate", "spearman"):
+    rows = []
+    for model in ("ValendinLSTM", "LSTM"):
+        g = d[d.model == model]
+        e = effect(g[g.arm == "floor50"][metric], g[g.arm == "paper90"][metric],
+                   metric, "electronics")
+        e.panel = f"{model}: floor50 (searched) vs paper90 (pinned)"
+        rows.append(e)
+    print(f"\n### Searched against pinned under a floor: {metric} (A = paper90, B = floor50)\n")
+    print(table(rows, label="model"))

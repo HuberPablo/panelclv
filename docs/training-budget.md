@@ -60,6 +60,32 @@ sections each revision covers:
   correlations hold on both. Row 13 is relabelled as a description of two panels, not a
   tested mechanism.
 
+### Training length and inputs: §9, §15.1, §15.2 (register rows 5, 6, 14–19)
+
+Every Δ is recomputed by `effect()` — §9 by `.scratch/training-budget/family_t_stats.py`
+from `results/family_t_scores.csv`, §15 by `all_effects.py` and `factorial_analysis.py`
+from `results/factorial.csv` — and Pareto/NBD is now 20 seeded fits per panel on the same
+2-year windows, compared with the independent bootstrap. Interval endpoints moved in the
+last digit; no verdict on a contrast between two arms flipped. What did:
+
+- **Row 19, best cell against Pareto/NBD on electronics:** "interval above it"
+  (ValendinLSTM) / "contains it" (LSTM) → **supported below** on both (Δ −0.009, −0.017 to
+  −0.000; −0.012, −0.023 to −0.002). Pareto/NBD's mean over 20 fits is 0.314, not the
+  single fit's 0.297.
+- **Row 19, multichannel:** ValendinLSTM "contains it" → supported above (+0.010, +0.000 to
+  +0.020, smaller than the refit noise); LSTM "contains it" → no clear difference.
+- **Row 19b, cdnow and gift:** below → below, now as supported Δ (−0.015 to −0.047).
+- **Row 6, the paper's settings without the floor:** `bounded` → **no clear difference** in
+  MAPE and Spearman at n = 20 (no equivalence margin is met), and ValendinLSTM's |bias| is
+  supported lower (Δ −11.8, −21.2 to −2.3).
+- **Row 17, floor on top of the label on electronics:** `bounded` within ±0.012 → **no
+  clear difference** (ValendinLSTM −0.011 to +0.012, LSTM −0.005 to +0.035); the
+  refit-noise margin of ±0.0105 is not met.
+- **Row 16, floor on cdnow Spearman:** "no detectable effect" → no clear difference at
+  n = 20 (not an absence).
+- **Row 18b, context added:** with the cluster label the same floor shows no clear MAPE
+  difference on CDNOW's LSTM (+4.5, −27.1 to +34.4).
+
 ## Claims register
 
 What this document currently asserts, how strongly, and where the evidence is. **Status**
@@ -102,8 +128,9 @@ on; none generalises.
 ## How claims are made
 
 The standard the whole document is held to. It was written after §15 and then applied
-back to every section, including those written before it; the rows above marked `bounded`
-are claims it downgraded from the stronger form they were first stated in.
+back to every section, including those written before it; the rows above reading "no
+clear difference" are claims it downgraded from the stronger form they were first stated
+in.
 
 **The rules are `docs/statistical-protocol.md`.** Every effect below is Δ = M̄_B − M̄_A
 with a 95% percentile-bootstrap interval, supported when it excludes zero, computed by
@@ -662,7 +689,7 @@ alternatives are all untested.
    `.scratch/training-budget/issues/06-report-and-decide.md`.
 3. ~~**The other three panels are untested.**~~ **Tested in §15**, and the answer is
    heterogeneity rather than generalisation: the floor helps decisively on electronics and
-   multichannel, does nothing on cdnow and hurts on gift. It is an electronics-and-
+   multichannel, shows no clear difference on cdnow and hurts on gift. It is an electronics-and-
    multichannel story, and this document does not claim it is a property of sparse panels
    as a class.
 4. **Adding batch 32 to the registry's search space is not the follow-up.** `paper` settles
@@ -1069,9 +1096,9 @@ its own. That is the honest statement, and it is weaker than "they do not add": 
 interval containing zero is no clear difference at n = 20, not an established absence.
 Only gift/LSTM meets the equivalence margin fixed in "How claims are made" (the panel's
 refit noise): no difference larger than ±0.0116 is detectable there at n = 20. On
-electronics neither model meets it (ValendinLSTM −0.011 to +0.012 against ±0.0105). The label reaches most of what is reachable by itself, the
-floor reaches a little over half of it by itself, and stacking them buys at most a few
-hundredths.
+electronics neither model meets it (ValendinLSTM −0.011 to +0.012 against ±0.0105).
+The label reaches most of what is reachable by itself, the floor reaches a little over
+half of it by itself, and stacking them buys at most a few hundredths.
 
 **On its own the floor is a large effect on two panels, nothing on one, and negative on
 another** — Δ Spearman from adding the floor with no label, ValendinLSTM:
@@ -1084,7 +1111,7 @@ another** — Δ Spearman from adding the floor with no label, ValendinLSTM:
 | gift | **−0.069** | −0.118 to −0.027 | yes (**worse**) | 0.0116 |
 
 That heterogeneity is the result, not a nuisance to average away: the same intervention
-helps decisively on two panels, does nothing on a third and **hurts** on the fourth. It
+helps decisively on two panels, shows no clear difference on a third and **hurts** on the fourth. It
 matters because it needs no extra input — it is the fix available when no cluster label
 is allowed — but it is not the better of the two, and it is not safe everywhere.
 
@@ -1106,10 +1133,10 @@ bootstrap, n = 20 / 20; `all_effects.py`:
 | | LSTM | 0.359 | 0.378 | −0.019 | −0.025 to −0.013 | yes (**below**) | |
 
 Pareto/NBD's electronics mean over 20 fits is 0.314 (range 0.297–0.334; the seed-42 fit
-earlier versions of this document quoted alone is the lowest of them), and **both models' best cell sits below Pareto/NBD on electronics**, by
-about the refit noise; on multichannel the frozen benchmark sits above it by a similarly
-small margin and the LSTM shows no clear difference; on the two panels that never
-collapsed both sit clearly below. So the collapse is closed on both collapsed panels in
+earlier versions of this document quoted alone is the lowest of them), and **both models'
+best cell sits below Pareto/NBD on electronics**, by about the refit noise; on
+multichannel the frozen benchmark sits above it by a similarly small margin and the LSTM
+shows no clear difference; on the two panels that never collapsed both sit clearly below. So the collapse is closed on both collapsed panels in
 the sense that the best cell ranks within about ±0.01 of Pareto/NBD there — not in the
 sense of an equivalence, which none of these intervals was tested for. One caveat
 belongs beside every one of those comparisons: `kmeans_8` is k-means over the Pareto/NBD
