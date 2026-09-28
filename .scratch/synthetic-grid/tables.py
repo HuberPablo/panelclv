@@ -1,12 +1,28 @@
-"""Mean and 95% t-interval over panels from results/per_study.csv: per tree and rate
-(churn pooled, n = 40) and per tree and rate x churn cell (n = 10). Writes the two CSVs
-and results/tables.md, the markdown the insights doc's Results section is pasted from. In
-those tables each column's best tree is bold and every tree tied with it is underlined."""
+"""The Results tables of `docs/insights-synthetic-grid.md`, from results/per_study.csv.
+
+Writes results/by_cell.csv, results/by_rate.csv and the markdown the doc's Results,
+top-3 and "Impact of ..." sections are pasted from (tables.md, top3_*.md,
+impact_tables.md). Everything follows `docs/statistical-protocol.md`:
+
+* A (rate x churn) cell holds 10 generated panels, and a panel is one replication. Every
+  interval and every "tied with the best" mark is computed inside one cell, by
+  `panelclv.evaluation.effects.effect`, and never over panels of different cells.
+* A per-cell metric entry is the mean over the cell's panels with its 95% percentile
+  bootstrap interval (the one-statistic form of `effect`: the panel values against 0).
+* Per-cell marks: each column's best tree is **bold**. A tree is <ins>underlined</ins>
+  when the paired interval of (tree - best) on the cell's panels contains 0, i.e. it is
+  not clearly worse than the best at n = 10.
+* Tables that pool cells (one rate with its four churn levels, the cohort-size and AR
+  tables) are descriptive: means only, no interval, no marks.
+* "Beats P/NBD" columns count the panels where the tree beats Pareto/NBD on that same
+  panel. They are plain description and carry no marks.
+"""
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy import stats
+
+from panelclv.evaluation.effects import effect
 
 OUT = Path(".scratch/synthetic-grid/results")
 d = pd.read_csv(OUT / "per_study.csv")
@@ -20,9 +36,18 @@ METRICS = ["rmse", "bias", "mape", "spearman", "ce"]
 ARMS = ["no_ar-no_cluster", "ar_unbounded-no_cluster", "ar_bounded-no_cluster",
         "ar_bounded-kmeans_8", "ar_unbounded-kmeans_8", "no_ar-kmeans_8"]
 ORDER = [("ParetoNBD", "-")] + [(m, a) for m in ("LSTM", "Transformer") for a in ARMS]
+KEY = ["rate", "churn", "dataset"]
 
 
-def summarise(keys):
+def mean_ci(v):
+    """Mean of one cell's panel values with its 95% percentile-bootstrap interval."""
+    v = np.asarray(v, float)
+    e = effect(v, np.zeros_like(v), paired=True, metric="", panel="")
+    return e.delta, e.lo, e.hi
+
+
+def summarise(keys, with_ci):
+    """One row per group: n and, per metric, the mean (and its interval per cell)."""
     rows = []
     for key, g in d.groupby(keys):
         row = dict(zip(keys, key)) | {"n": len(g)}
@@ -30,66 +55,50 @@ def summarise(keys):
             v = g[m].dropna()
             if len(v) < 2:
                 continue
-            half = stats.t.ppf(0.975, len(v) - 1) * v.std(ddof=1) / np.sqrt(len(v))
-            row |= {m: v.mean(), f"{m}_lo": v.mean() - half, f"{m}_hi": v.mean() + half}
+            if with_ci:
+                mean, lo, hi = mean_ci(v)
+                row |= {m: mean, f"{m}_lo": lo, f"{m}_hi": hi}
+            else:
+                row[m] = v.mean()
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-by_rate = summarise(["model", "arm", "rate"])
-by_cell = summarise(["model", "arm", "rate", "churn"])
+by_rate = summarise(["model", "arm", "rate"], with_ci=False)
+by_cell = summarise(["model", "arm", "rate", "churn"], with_ci=True)
 by_rate.to_csv(OUT / "by_rate.csv", index=False)
 by_cell.to_csv(OUT / "by_cell.csv", index=False)
 
 # Whether the tree beats Pareto/NBD on the same panel: lower MAPE, smaller |bias|, higher
-# Spearman. Averaged over a table's panels these are the three "Beats P/NBD" shares.
-pn = d[d.model == "ParetoNBD"].set_index(["rate", "churn", "dataset"])
-pn = pn.reindex(pd.MultiIndex.from_frame(d[["rate", "churn", "dataset"]]))
+# Spearman. Counted over a table's panels these are the three "Beats P/NBD" columns.
+pn = d[d.model == "ParetoNBD"].set_index(KEY)
+pn = pn.reindex(pd.MultiIndex.from_frame(d[KEY]))
 d["win_mape"] = d.mape.values < pn.mape.values
 d["win_bias"] = d.bias.abs().values < pn.bias.abs().values
 d["win_spearman"] = d.spearman.values > pn.spearman.values
 WINS = ["win_mape", "win_bias", "win_spearman"]
 
-# Per column, the best tree in a table and the trees statistically tied with it, all on the
-# table's own panels. Best is the lowest mean RMSE, per-panel |bias|, MAPE or Val. CE, the
-# highest mean Spearman, or the highest "Beats P/NBD" share. Tied means a paired test against
-# the best gives p >= 0.05, uncorrected, as in the ranking tables' "p vs rank 1": Wilcoxon
-# signed-rank for the five metrics, exact McNemar for the win shares, which are per-panel
-# yes/no outcomes. A win column in which no tree wins a single panel is left unmarked.
-MARKED = {"rmse": 1, "bias": 1, "mape": 1, "spearman": -1, "ce": 1}
+# Direction of "better" per metric: +1 lower is better, -1 higher is better. Bias is
+# judged on |bias| per panel, so +50% on one panel and -50% on another is not unbiased.
+BETTER = {"rmse": 1, "bias": 1, "mape": 1, "spearman": -1, "ce": 1}
 
 
-def marks(sub, columns=(*MARKED, *WINS), tree=("model", "arm")):
-    """{(*tree, column): "best" | "tie"} over the panels in `sub`, a tree being one value of
-    the `tree` columns. Trees from different cohorts ran on different panels, so they are
-    compared unpaired, by Mann-Whitney."""
+def cell_marks(sub):
+    """{(model, arm, metric): "best" | "tie"} over the panels of ONE cell.
+
+    Best is the lowest mean RMSE, |bias|, MAPE or Val. CE, or the highest mean Spearman.
+    Tied means the paired 95% interval of (tree - best), on the cell's own panels,
+    contains 0. Pareto/NBD has no CE (NaN, dropped by the pivot).
+    """
     out = {}
-    for m in columns:
-        # Signed so that lower is better; a win becomes -1, a loss 0.
-        v = (MARKED.get(m, -1) * (sub[m].abs() if m == "bias" else sub[m])).astype(float)
-        # Rows are panels, columns trees. Pareto/NBD has no CE (NaN, dropped by the pivot)
-        # and does not compete in the win columns.
-        trees = sub.assign(v=v)
-        if m in WINS:
-            trees = trees[trees.model != "ParetoNBD"]
-        panel = trees.pivot_table(index=["rate", "churn", "dataset"], columns=list(tree),
-                                  values="v")
-        best = panel.mean().idxmin()
-        if m in WINS and panel[best].mean() == 0:
-            continue
+    for m, sign in BETTER.items():
+        v = sub[m].abs() if m == "bias" else sub[m]
+        panel = sub.assign(v=v).pivot_table(index=KEY, columns=["model", "arm"], values="v")
+        best = (sign * panel.mean()).idxmin()
         out[(*best, m)] = "best"
         for other in panel.columns.drop(best):
             pair = panel[[best, other]].dropna()
-            if "cohort" in tree and best[tree.index("cohort")] != other[tree.index("cohort")]:
-                p = stats.mannwhitneyu(panel[other].dropna(), panel[best].dropna()).pvalue
-            elif m in WINS:
-                # Discordant panels: the best wins where the tree loses, and the reverse.
-                b = int(((pair[best] < 0) & (pair[other] == 0)).sum())
-                c = int(((pair[best] == 0) & (pair[other] < 0)).sum())
-                p = stats.binomtest(b, b + c).pvalue if b + c else 1.0
-            else:
-                p = stats.wilcoxon(pair[other] - pair[best]).pvalue
-            if p >= 0.05:
+            if not effect(pair[other], pair[best], paired=True, metric=m, panel="").supported:
                 out[(*other, m)] = "tie"
     return out
 
@@ -97,13 +106,23 @@ def marks(sub, columns=(*MARKED, *WINS), tree=("model", "arm")):
 FMT = {"rmse": "{:.2f}", "bias": "{:+.0f}", "mape": "{:.0f}", "spearman": "{:.2f}", "ce": "{:.3f}"}
 
 
-def cell(r, m):
+def num(m, x):
+    t = FMT[m].format(x)
+    if float(t) == 0:
+        t = t.lstrip("+-")          # no signed zero: "−0.00" -> "0.00", "+0" -> "0"
+    return t.replace("-", "−")
+
+
+def signed(m, x):
+    """A difference, always with its sign."""
+    t = ("{:+.0f}" if m in ("mape", "bias") else "{:+.2f}" if m in ("rmse", "spearman") else "{:+.3f}").format(x)
+    return ("0" if t.strip("+-0.") == "" else t).replace("-", "−")
+
+
+def entry(r, m, ci):
     if m not in r or pd.isna(r[m]):
         return "—"
-    def f(x):
-        t = FMT[m].format(x)
-        return "0" if t in ("-0", "+0") else t
-    return f"{f(r[m])} [{f(r[m + '_lo'])}, {f(r[m + '_hi'])}]".replace("-", "−")
+    return f"{num(m, r[m])} [{num(m, r[m + '_lo'])}, {num(m, r[m + '_hi'])}]" if ci else num(m, r[m])
 
 
 def panels(n):
@@ -121,61 +140,76 @@ def marked(text, mark):
     return {"best": f"**{text}**", "tie": f"<ins>{text}</ins>"}.get(mark, text)
 
 
-def table(frame, wins=None, mk=None):
-    head = "| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE |" + (
-        " Beats P/NBD: MAPE | Beats P/NBD: \\|bias\\| | Beats P/NBD: Spearman |" if wins is not None else "")
-    sep = "| --- | --- | --- | --- | --- | --- | --- |" + (" ---: | ---: | ---: |" if wins is not None else "")
+def table(frame, wins, mk=None, ci=False):
+    """One markdown table; `wins` holds the win counts, `mk` the per-cell marks."""
+    head = ("| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE | Beats P/NBD: MAPE | "
+            "Beats P/NBD: \\|bias\\| | Beats P/NBD: Spearman |")
+    sep = "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |"
     lines = [head, sep]
     for model, arm in ORDER:
         r = frame[(frame.model == model) & (frame.arm == arm)]
         if r.empty:
             continue
         r = r.iloc[0]
-        line = f"| {name(model, arm)} | " + " | ".join(marked(cell(r, m), (mk or {}).get((model, arm, m))) for m in METRICS) + " |"
-        if wins is not None:
-            line += " — | — | — |" if model == "ParetoNBD" else "".join(
-                f" {marked(f'{wins.loc[(model, arm), w]:.0%}', (mk or {}).get((model, arm, w)))} |" for w in WINS)
+        line = f"| {name(model, arm)} | " + " | ".join(
+            marked(entry(r, m, ci), (mk or {}).get((model, arm, m))) for m in METRICS) + " |"
+        if model == "ParetoNBD":
+            line += " — | — | — |"
+        else:
+            w = wins.loc[(model, arm)]
+            line += "".join(f" {int(w[c])} of {int(w['n'])} |" for c in WINS)
         lines.append(line)
     return "\n".join(lines)
 
 
+def win_counts(sub):
+    g = sub.groupby(["model", "arm"])
+    return g[WINS].sum().join(g.size().rename("n"))
+
+
 md = []
 for rate in sorted(d.rate.unique()):
-    w = d[d.rate == rate].groupby(["model", "arm"])[WINS].mean()
+    sub = d[d.rate == rate]
     n = by_rate[by_rate.rate == rate].n
     md.append(f"#### Rate {rate:.2f}, churn pooled ({panels(n)})\n\n"
-              + table(by_rate[by_rate.rate == rate], w, marks(d[d.rate == rate])))
+              + table(by_rate[by_rate.rate == rate], win_counts(sub)))
 for rate in sorted(d.rate.unique()):
     for churn in sorted(d.churn.unique()):
+        sub = d[(d.rate == rate) & (d.churn == churn)]
         f = by_cell[(by_cell.rate == rate) & (by_cell.churn == churn)]
-        w = d[(d.rate == rate) & (d.churn == churn)].groupby(["model", "arm"])[WINS].mean()
         md.append(f"##### Rate {rate:.2f}, churn {churn:.0%} ({panels(f.n)})\n\n"
-                  + table(f, w, marks(d[(d.rate == rate) & (d.churn == churn)])))
+                  + table(f, win_counts(sub), cell_marks(sub), ci=True))
 (OUT / "tables.md").write_text("\n\n".join(md) + "\n")
 
 
 # The three best trees per rate x churn cell, by MAPE (lowest) and by Spearman (highest).
+# Each runner-up carries the paired Δ against the cell's leader on the ranked metric.
 def top3(metric, ascending):
     lines = [f"| Rate | Churn | Rank | Model | Arm | {'**MAPE**' if metric == 'mape' else 'MAPE'} | "
-             f"{'**Spearman**' if metric == 'spearman' else 'Spearman'} | RMSE | Bias % | Val. CE | p vs rank 1 | Beats P/NBD: MAPE / \\|bias\\| / Spearman |",
-             "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | ---: | ---: |"]
+             f"{'**Spearman**' if metric == 'spearman' else 'Spearman'} | RMSE | Bias % | Val. CE | "
+             f"Δ vs rank 1 [95% CI] | Clearly behind rank 1 | Beats P/NBD: MAPE / \\|bias\\| / Spearman |",
+             "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- | :---: | ---: |"]
     for (rate, churn), f in by_cell.groupby(["rate", "churn"]):
         best = f.sort_values(metric, ascending=ascending).head(3)
-        # Paired Wilcoxon of each runner-up against the cell's leader, on the same panels.
-        panel = d[(d.rate == rate) & (d.churn == churn)].pivot_table(
-            index="dataset", columns=["model", "arm"], values=metric)
-        leader = panel[(best.iloc[0].model, best.iloc[0].arm)]
-        wins = d[(d.rate == rate) & (d.churn == churn)].groupby(["model", "arm"])[WINS].mean()
+        sub = d[(d.rate == rate) & (d.churn == churn)]
+        panel = sub.pivot_table(index="dataset", columns=["model", "arm"], values=metric)
+        leader = (best.iloc[0].model, best.iloc[0].arm)
+        wins = win_counts(sub)
         for rank, (_, r) in enumerate(best.iterrows(), 1):
             model, arm = name(r.model, r.arm).split(" | ")
-            vals = [cell(r, m) if m == metric else
-                    ("—" if pd.isna(r.get(m)) else FMT[m].format(r[m]).replace("-", "−"))
-                    for m in ("mape", "spearman", "rmse", "bias", "ce")]
+            vals = [entry(r, m, ci=(m == metric)) for m in ("mape", "spearman", "rmse", "bias", "ce")]
             lead = f"{rate:.2f} | {churn:.0%}" if rank == 1 else " | "
-            p = "—" if rank == 1 else f"{stats.wilcoxon((panel[(r.model, r.arm)] - leader).dropna()).pvalue:.3f}"
+            if rank == 1:
+                dv, sup = "—", "—"
+            else:
+                pair = panel[[leader, (r.model, r.arm)]].dropna()
+                e = effect(pair[(r.model, r.arm)], pair[leader], paired=True, metric=metric, panel="")
+                dv = f"{signed(metric, e.delta)} [{signed(metric, e.lo)}, {signed(metric, e.hi)}]"
+                sup = "yes" if e.supported else "no"
             beats = "—" if r.model == "ParetoNBD" else " / ".join(
-                f"{wins.loc[(r.model, r.arm), w]:.0%}" for w in WINS)
-            lines.append(f"| {lead} | {rank} | {model} | {arm} | " + " | ".join(vals) + f" | {p} | {beats} |")
+                f"{int(wins.loc[(r.model, r.arm), w])}" for w in WINS) + f" of {int(wins.loc[(r.model, r.arm), 'n'])}"
+            lines.append(f"| {lead} | {rank} | {model} | {arm} | " + " | ".join(vals)
+                         + f" | {dv} | {sup} | {beats} |")
     return "\n".join(lines)
 
 
@@ -184,24 +218,16 @@ def top3(metric, ascending):
 
 
 # The "Impact of cohort size" and "Impact of AR features" tables: per row a tree, per column
-# a rate (churns pooled) or a churn (rates pooled), each cell RMSE / bias % / MAPE as means
-# over the column's 40 panels, each of the three numbers marked within its column.
+# a rate (churns pooled) or a churn (rates pooled), each entry RMSE / bias % / MAPE as means
+# over the column's 40 panels. These pool four cells, so they are description only; the
+# per-cell tests are claims 3, 4 and 12 in the Claims section.
 def triple(frame, rows, label, by):
-    lines = []
+    cells = {}
     for value in sorted(frame[by].unique()):
         sub = frame[frame[by] == value]
-        mk = marks(sub, ("rmse", "bias", "mape"), ("model", "arm", "cohort"))
         for key in rows:
             r = sub[(sub.model == key[0]) & (sub.arm == key[1]) & (sub.cohort == key[2])]
-            nums = []
-            for m in ("rmse", "bias", "mape"):
-                t = FMT[m].format(r[m].mean())
-                t = ("0" if t in ("-0", "+0") else t).replace("-", "−")
-                nums.append(marked(t, mk.get((*key, m))))
-            lines.append((key, " / ".join(nums)))
-    cells = {}
-    for key, text in lines:
-        cells.setdefault(key, []).append(text)
+            cells.setdefault(key, []).append(" / ".join(num(m, r[m].mean()) for m in ("rmse", "bias", "mape")))
     return "\n".join(f"| {label(k)} | " + " | ".join(v) + " |" for k, v in cells.items())
 
 
