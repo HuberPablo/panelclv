@@ -286,7 +286,7 @@ On the two panels that collapse the label is decisive. On the two that do not, t
 interval spans zero — so this document's "sevenfold rise" is an electronics and
 multichannel result, and §5.1's expectation that CDNOW would not show the same effect is
 borne out. (An earlier version of this subsection reported cdnow as a marginal gain at
-p = 0.008; under the standard in `docs/training-budget.md`, "How claims are made", a
+p = 0.008; under `docs/statistical-protocol.md`, a
 difference of means with an interval spanning zero is not supported.)
 
 **What *is* supported on all eight (panel, model) cells is the label added to a model
