@@ -575,7 +575,8 @@ Suites: `Studies/{real_panel_benchmarks,epoch_floor,attention}_cal5y__*`.
 - **Pareto/NBD reference** (one MCMC fit, same cohort): RMSE 1.230, bias −15.6%, MAPE
   27.7, Spearman 0.394, forecast CV 1.40.
 
-Each metric is the mean [95% bootstrap interval] over 20 studies.
+Each metric is the mean [95% bootstrap interval] over 20 studies. The Pareto/NBD row that
+closes each table repeats the reference above: one fit, so no interval.
 
 **LSTM.** Hidden 128, dense 128, dropout 0, learning rate 0.002195, batch 32, weight decay 0,
 pinned from `searched` r13. With input "none" this is the frozen `ValendinLSTM` benchmark.
@@ -596,6 +597,7 @@ implementation to the other.
 | `from30` | none | 1.157 [1.151, 1.163] | +12.7 [+9.6, +15.7] | 19.4 [18.0, 20.8] | 0.402 [0.399, 0.405] | 1.31 [1.28, 1.34] |
 | `from30` | `ar_bounded_52` | 1.157 [1.149, 1.165] | +10.0 [+7.2, +13.2] | 18.4 [17.2, 19.9] | 0.400 [0.398, 0.402] | 1.23 [1.19, 1.26] |
 | `from30` | `kmeans_8` | 1.266 [1.257, 1.276] | +11.5 [+7.5, +15.6] | 18.3 [16.1, 20.9] | 0.351 [0.344, 0.357] | 1.66 [1.59, 1.72] |
+| Pareto/NBD | — | 1.230 | −15.6 | 27.7 | 0.394 | 1.40 |
 
 **LSTMAttention.** `models.MultinomialLSTMAttentionModel`: an LSTM whose head also reads
 single-head causal attention over its own past outputs. Hidden 64, dense 64, dropout 0.007,
@@ -613,6 +615,7 @@ learning rate 0.0025, batch 32, weight decay 0, pinned from `searched` r17.
 | `from30` | none | 1.200 [1.195, 1.204] | +10.8 [+7.9, +13.6] | 18.1 [17.0, 19.4] | 0.400 [0.398, 0.403] | 1.17 [1.14, 1.19] |
 | `from30` | `ar_bounded_52` | 1.202 [1.197, 1.207] | +9.3 [+7.2, +11.6] | 17.0 [16.1, 18.0] | 0.402 [0.400, 0.404] | 1.18 [1.16, 1.20] |
 | `from30` | `kmeans_8` | 1.289 [1.282, 1.296] | +15.5 [+12.5, +18.5] | 19.9 [18.0, 21.9] | 0.369 [0.366, 0.372] | 1.52 [1.48, 1.55] |
+| Pareto/NBD | — | 1.230 | −15.6 | 27.7 | 0.394 | 1.40 |
 
 **Transformer.** `models.MultinomialTransformerModel`, forecast through the key/value
 cache. d_model 64, 4 heads, 3 layers, dropout 0.145, learning rate 0.0027, batch 32, weight
@@ -631,6 +634,7 @@ searched studies.
 | `from30` | none | 1.294 [1.275, 1.316] | +40.1 [+32.5, +48.4] | 44.0 [37.5, 51.1] | 0.396 [0.394, 0.399] | 1.31 [1.28, 1.34] |
 | `from30` | `ar_bounded_52` | 1.246 [1.240, 1.251] | +12.5 [+8.8, +16.2] | 21.7 [19.7, 24.0] | 0.397 [0.396, 0.399] | 1.24 [1.20, 1.28] |
 | `from30` | `kmeans_8` | 1.306 [1.295, 1.318] | +10.6 [+6.7, +14.7] | 24.4 [22.1, 27.0] | 0.352 [0.349, 0.354] | 1.69 [1.66, 1.73] |
+| Pareto/NBD | — | 1.230 | −15.6 | 27.7 | 0.394 | 1.40 |
 
 **Every one of the 30 cells over-forecasts, supported.** The lowest lower bound of any
 mean-bias interval is +4.2% (Transformer, `ar_bounded_52`, `nofloor`). Neither input,
