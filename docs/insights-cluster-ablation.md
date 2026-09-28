@@ -13,6 +13,21 @@ This document answers two questions that were never written down: **how K was ch
 `Studies/cluster__*/results.csv` files, and every Spearman from the stored
 `Studies/cluster__*/LSTM/Predictions/` via `run_cluster_ablation.py --report`.
 
+**Revised under the statistical protocol (2026-09-28).** Every comparison now follows
+`docs/statistical-protocol.md`: Δ = difference of means between two arms' 40 independent
+replications, with its 95% percentile-bootstrap interval (`evaluation.effects.effect`,
+`paired=False`), one panel at a time, printed by
+`.scratch/statistical-protocol/grid_cluster_ablation_effects.py`. The Mann–Whitney tests,
+median shifts and the "outside the across-replication SD" heuristic are gone. What moved:
+
+- §4 and §5.2: every verdict on |bias| is unchanged. §4 now also tests MAPE, the primary
+  level metric, and on CDNOW `cluster_16` is worse on MAPE (+6.1, where |bias| shows no
+  clear difference).
+- §5.1: the Spearman gain is now a tested effect (Δ +0.22 to +0.23 at every K, intervals
+  excluding 0) rather than "3 to 15 SDs wide". The comparison with Pareto/NBD, a single fit
+  on this panel, is not tested: it waits for seeded Pareto/NBD refits on these windows.
+- §6 now quotes the per-cell version of `docs/insights-arm-sweep.md` §4.
+
 ## Contents
 
 1. [How K has been chosen so far](#1-how-k-has-been-chosen-so-far)
@@ -84,8 +99,10 @@ search cannot silently delete the feature under test. And k-means runs at a fixe
 hidden second variance component inside a suite that reports across-study SD.
 
 Replications are unpaired: training is unseeded by design (`CLAUDE.md` priority 3), so
-study *i* of one arm and study *i* of another share a seed but nothing else. All tests
-below are therefore two-sample rank tests, not paired ones.
+study *i* of one arm and study *i* of another share a seed but nothing else. Every test
+below therefore resamples the two arms independently (`docs/statistical-protocol.md` §2):
+Δ = mean(arm) − mean(baseline) over 40 vs 40 replications, with its 95% percentile-bootstrap
+interval, supported when the interval excludes 0.
 
 ## 3. The level, per K
 
@@ -146,8 +163,10 @@ one — the point of the study-suite design (`CLAUDE.md` priority 3) is that the
 part of the result.
 
 **And the one thing they move decisively is the ranking.** On electronics Spearman goes
-from **0.039** without a label to **0.257–0.270** with one — a sevenfold rise, at every K,
-far outside the across-replication SD, and level with Pareto/NBD's 0.297 on that panel.
+from **0.039** without a label to **0.257–0.270** with one — a sevenfold rise, supported at
+every K (§5.1: Δ +0.22 to +0.23, each 95% interval excluding 0). Pareto/NBD scores 0.297 on
+that panel in a single fit; whether the labelled arms differ from it is not tested until
+seeded refits exist (§5.1).
 This is the measurement §8 of the first draft of this document listed as missing, and it
 does not point the same way as the level does: on the metric the rest of this document
 scores, clusters are indistinguishable from nothing; on the metric it never computed, they
@@ -156,32 +175,34 @@ up, because it changes what "drop the cluster axis" can be read to mean.
 
 ## 4. Is any K better than no cluster at all?
 
-Two-sample Mann-Whitney on |bias %|, each arm against `no_cluster`, 40 vs 40.
+Each arm against `no_cluster`, 40 vs 40 independent replications: Δ = mean(arm) −
+mean(`no_cluster`) with its 95% bootstrap interval. Negative Δ is better.
 
-| panel | arm | median \|bias\| | vs baseline | z | p |
+| panel | arm | mean \|bias\| | Δ \|bias\| [95% CI] | mean MAPE | Δ MAPE [95% CI] |
 |---|---|---:|---:|---:|---:|
-| electronics | `no_cluster` | 22.8 | — | — | — |
-| | `cluster_4` | 14.9 | −7.9 | −1.41 | 0.16 |
-| | `cluster_8` | 13.0 | −9.7 | −1.43 | 0.15 |
-| | `cluster_16` | 16.7 | −6.1 | −0.44 | 0.66 |
-| | `ar_unbounded` | 154.1 | +131.3 | 7.19 | 7×10⁻¹³ |
-| | `ar_plus_cluster_8` | 47.0 | +24.2 | 3.09 | 0.002 |
-| CDNOW | `no_cluster` | 9.7 | — | — | — |
-| | `cluster_4` | 20.9 | +11.2 | 4.09 | 4×10⁻⁵ |
-| | `cluster_8` | 9.8 | +0.1 | −0.47 | 0.64 |
-| | `cluster_16` | 9.6 | −0.1 | 0.04 | 0.97 |
-| | `ar_unbounded` | 102.1 | +92.4 | 4.84 | 1×10⁻⁶ |
-| | `ar_plus_cluster_8` | 119.8 | +110.1 | 6.05 | 1×10⁻⁹ |
+| electronics | `no_cluster` | 21.7 | — | 54.9 | — |
+| | `cluster_4` | 19.8 | −1.8 [−8.6, +5.8] | 51.8 | −3.1 [−7.6, +2.0] |
+| | `cluster_8` | 19.0 | −2.7 [−9.0, +3.9] | 53.1 | −1.9 [−6.3, +3.2] |
+| | `cluster_16` | 21.0 | −0.6 [−7.0, +5.9] | 55.2 | +0.3 [−3.2, +3.9] |
+| | `ar_unbounded` | 208.6 | **+186.9 [+136.0, +242.9]** | 213.4 | **+158.5 [+108.8, +213.1]** |
+| | `ar_plus_cluster_8` | 94.5 | **+72.9 [+37.2, +114.0]** | 115.5 | **+60.6 [+27.9, +99.4]** |
+| CDNOW | `no_cluster` | 12.9 | — | 23.1 | — |
+| | `cluster_4` | 30.1 | **+17.2 [+8.5, +27.4]** | 39.6 | **+16.5 [+8.9, +25.6]** |
+| | `cluster_8` | 14.3 | +1.4 [−3.8, +7.1] | 26.9 | +3.9 [−0.2, +8.2] |
+| | `cluster_16` | 15.7 | +2.8 [−3.1, +9.7] | 29.1 | **+6.1 [+1.2, +11.7]** |
+| | `ar_unbounded` | 314.6 | **+301.8 [+156.5, +476.1]** | 325.6 | **+302.6 [+158.2, +475.8]** |
+| | `ar_plus_cluster_8` | 273.2 | **+260.3 [+160.4, +373.2]** | 296.7 | **+273.7 [+174.1, +384.8]** |
 
-**No K, on either panel, beats the no-cluster baseline at any conventional level.** The
-strongest cluster result anywhere here is `cluster_8` on electronics at p = 0.15 — a
-9.7-point median improvement that 40 replications cannot separate from training noise. The
-only *significant* effect of a cluster arm against the baseline is `cluster_4` on CDNOW,
-which is significantly **worse** (p = 4×10⁻⁵).
+Bold: supported. **No K, on either panel, beats the no-cluster baseline on either level
+metric.** The best cluster result anywhere here is `cluster_4` on electronics, −3.1 MAPE
+points with an interval from −7.6 to +2.0: no clear difference at n = 40, which is not the
+same as no difference. Every cluster effect that *is* supported is on CDNOW and is
+**worse**: `cluster_4` on both metrics (+17.2 |bias|, +16.5 MAPE) and `cluster_16` on MAPE
+(+6.1).
 
 So the ladder's verdict on its own question is: the encoding does not pay, and the choice
-among 4, 8 and 16 is a choice among three arms that are individually indistinguishable from
-not using the feature. K = 8 is not a mistake; it is simply not a decision the downstream
+among 4, 8 and 16 is a choice among three arms none of which is clearly better than not
+using the feature. K = 8 is not a mistake; it is simply not a decision the downstream
 evidence was ever able to make.
 
 ## 5. The two things clusters do
@@ -189,19 +210,27 @@ evidence was ever able to make.
 ### 5.1 They rank customers, which nothing else in this family does
 
 On electronics the label is the difference between a model that orders customers and one
-that does not. Spearman over the same 40 replications per arm:
+that does not. Spearman over the same 40 replications per arm (mean ± sd), and each arm
+against `no_cluster` (independent, 40 vs 40, 95% bootstrap interval):
 
-| arm | Spearman | vs `no_cluster` | mean \|bias\| |
+| arm | Spearman | Δ vs `no_cluster` [95% CI] | mean \|bias\| |
 |---|---:|---:|---:|
 | `no_cluster` | 0.039 ± 0.078 | — | 21.7 |
-| `cluster_4` | 0.264 ± 0.015 | **+0.225** | 19.8 |
-| `cluster_8` | 0.270 ± 0.055 | **+0.231** | 19.0 |
-| `cluster_16` | 0.257 ± 0.043 | **+0.218** | 21.0 |
-| Pareto/NBD (benchmark, n = 1) | 0.297 | +0.258 | 63.0 |
+| `cluster_4` | 0.264 ± 0.015 | **+0.226 [+0.199, +0.248]** | 19.8 |
+| `cluster_8` | 0.270 ± 0.055 | **+0.232 [+0.200, +0.259]** | 19.0 |
+| `cluster_16` | 0.257 ± 0.043 | **+0.219 [+0.189, +0.244]** | 21.0 |
+| Pareto/NBD (benchmark, n = 1) | 0.297 | not tested (below) | 63.0 |
 
-The gap is 3 to 15 across-replication SDs wide at every K, so unlike the level effect it is
-not a coin toss at n = 40. **It is bought for nothing on the level** — |bias| is flat to
-slightly better and RMSE is unmoved at 0.377.
+> **TODO — vs Pareto/NBD: pending seeded refits.** Pareto/NBD ran once on this panel and
+> these windows, so it has no replication to resample. Twenty seeded refits on the same
+> panel and windows are being produced under
+> `Studies/real_panel_benchmarks__ParetoNBD__electronics__rNN`; the comparison of the
+> labelled arms with Pareto/NBD will be tested (independent, 40 vs 20) once they exist.
+
+The gain is supported at every K, and every interval sits far from 0, so unlike the level
+effect it is not a coin toss at n = 40. **It is bought for nothing on the level** — §4
+finds no clear |bias| or MAPE difference at any K on this panel, and RMSE is unmoved at
+0.377.
 
 This is the same phenomenon `docs/benchmarks-real-panels.md` calls *the forecast collapse
 on long sparse panels*: with only the count as input, an LSTM on electronics gives every
@@ -270,16 +299,18 @@ not an established ceiling.
 ### 5.2 They rescue the unbounded counters, on one panel
 
 `ar_plus_cluster_8` against `ar_unbounded` — the same three counters, with the bounded
-category added:
+category added. 40 vs 40 independent replications, Δ = mean(`ar_plus_cluster_8`) −
+mean(`ar_unbounded`) with its 95% bootstrap interval:
 
-| panel | `ar_unbounded` median \|bias\| | `+kmeans_8` | z | p |
+| panel | `ar_unbounded` mean \|bias\| | `+kmeans_8` | Δ \|bias\| [95% CI] | Δ MAPE [95% CI] |
 |---|---:|---:|---:|---:|
-| electronics | 154.1 | **47.0** | −4.14 | 3×10⁻⁵ |
-| CDNOW | 102.1 | 119.8 | 0.66 | 0.51 (n.s.) |
+| electronics | 208.6 | **94.5** | **−114.0 [−179.0, −49.5]** | **−97.9 [−160.4, −36.1]** |
+| CDNOW | 314.6 | 273.2 | −41.5 [−246.6, +144.1] | −28.9 [−232.3, +156.3] |
 
-On electronics the rescue is large and significant: adding a bounded categorical summary of
-the same history cuts the unbounded counters' median |bias| by two thirds. **On CDNOW it
-does not happen at all** — the point estimate moves the wrong way.
+On electronics the rescue is large and supported on both level metrics: adding a bounded
+categorical summary of the same history cuts the unbounded counters' mean |bias| by more
+than half. **On CDNOW there is no clear rescue at n = 40**: the interval spans a gain of
+250 points and a loss of 140.
 
 This matters for how the effect is read. The synthetic grid explained the rescue as the
 clusters *displacing* the broken counters rather than contributing: the more of the
@@ -290,32 +321,37 @@ the counters escape most — and CDNOW is that panel (recency leaves the calibra
 fails. Either the displacement account is incomplete, or 39 calibration periods are too few
 for k-means to find groups worth displacing anything with.
 
-Either way, the rescued arm remains far worse than `no_cluster` on both panels (47.0 and
-119.8 against 22.8 and 9.7), so it rescues an arm that should not be used.
+Either way, the rescued arm remains clearly worse than `no_cluster` on both panels (§4:
+Δ |bias| +72.9 on electronics and +260.3 on CDNOW, both supported), so it rescues an arm
+that should not be used.
 
 ## 6. The synthetic corroboration
 
-`docs/insights-arm-sweep.md` §4 tests `kmeans_8` on far stronger evidence — a *paired*
-Wilcoxon over the same 160 synthetic panels, where the data-generating process is known:
+`docs/insights-arm-sweep.md` §4 tests `kmeans_8` on stronger evidence — the same generated
+panels on both sides, where the data-generating process is known. Each rate × churn cell
+is tested on its own (paired, 10 panels, 95% bootstrap interval of the mean |bias|
+difference), and the table counts the cells:
 
-| contrast | model | median \|bias\| | Δ | p |
-|---|---|---:|---:|---:|
-| `kmeans_8` vs none, under `no_ar` | LSTM | 56.5 → 100.4 | +17.3 | 2×10⁻⁷ |
-| `kmeans_8` vs none, under `no_ar` | Transformer | 71.0 → 73.4 | +7.9 | 0.749 (n.s.) |
-| `kmeans_8` vs none, under `ar_bounded` | LSTM | 32.2 → 70.2 | +34.1 | 2×10⁻¹³ |
-| `kmeans_8` vs none, under `ar_bounded` | Transformer | 49.5 → 58.8 | +15.6 | 8×10⁻⁴ |
-| `kmeans_8` vs none, under `ar_unbounded` | LSTM | 261.2 → **132.9** | −59.2 | 7×10⁻⁵ |
-| `kmeans_8` vs none, under `ar_unbounded` | Transformer | 97.7 → **55.7** | −30.7 | 9×10⁻⁹ |
+| contrast | model | mean \|bias\| (pooled) | cells: falls | cells: rises | no clear difference |
+|---|---|---:|---:|---:|---:|
+| `kmeans_8` vs none, under `no_ar` | LSTM | 153.5 → 179.5 | 1 | 6 | 9 |
+| `kmeans_8` vs none, under `no_ar` | Transformer | 92.0 → 96.4 | 1 | 1 | 14 |
+| `kmeans_8` vs none, under `ar_bounded` | LSTM | 78.3 → 115.8 | 1 | 9 | 6 |
+| `kmeans_8` vs none, under `ar_bounded` | Transformer | 60.8 → 80.1 | 0 | 4 | 12 |
+| `kmeans_8` vs none, under `ar_unbounded` | LSTM | 384.9 → 431.9 | **5** | 2 | 9 |
+| `kmeans_8` vs none, under `ar_unbounded` | Transformer | 110.6 → **69.8** | **8** | 1 | 7 |
 
-Five of six significant; four of those say the label **hurts**, and the two that say it
-helps are both under `ar_unbounded` — the arm `docs/insights-arm-sweep.md` §9 recommends
+Under a usable AR encoding the label raises |bias| in 20 cells and lowers it in 3. It
+helps more often than it hurts only under `ar_unbounded` (for the LSTM there it still
+hurts in two rate-0.01 cells, by more than 1,000 points) — the arm `docs/insights-arm-sweep.md` §9 recommends
 dropping anyway. The mechanism given there also survives everything above: a label assigned
 from calibration behaviour cannot update when the simulated customer goes quiet, so it keeps
 asserting the customer is who they used to be. That is the `ar_unbounded` failure in a
 different costume — bounded in *range*, but equally stale in *time*.
 
-Family F neither confirms nor contradicts this on the real panels: it is consistent with a
-null effect, and the synthetic evidence is what settles the direction.
+Family F neither confirms nor contradicts this on the real panels: it finds no clear
+difference on electronics, and a clearly worse level for `cluster_4` (and for `cluster_16`
+on MAPE) on CDNOW. The synthetic evidence is what settles the direction.
 
 **On the level.** Every number in this section, and in §3 and §4, is aggregate bias. The
 synthetic grid computes no per-customer Spearman at all — it reports `shape_correlation`,
@@ -325,9 +361,9 @@ measure different things, and they point opposite ways:
 
 | criterion | evidence | verdict on `kmeans_8` |
 |---|---|---|
-| aggregate bias | 160 paired synthetic panels, both models (§6) | **hurts**, significantly, in 3 of 4 usable contrasts |
-| aggregate bias | 40 replications, 2 real panels (§4) | no effect either way |
-| per-customer Spearman | 40 replications, electronics (§5.1) | **helps**, 0.039 → 0.27, far outside noise |
+| aggregate bias | 16 cells × 10 paired synthetic panels, both models (§6) | **hurts**: \|bias\| rises in 20 cells and falls in 3 across the 4 usable contrasts |
+| aggregate bias, MAPE | 40 replications, 2 real panels (§4) | no clear difference on electronics; worse for K = 4 (and K = 16 on MAPE) on CDNOW |
+| per-customer Spearman | 40 replications, electronics (§5.1) | **helps**, Δ +0.22 to +0.23, supported at every K |
 | per-customer Spearman | synthetic grid | never computed |
 
 **Consolidated verdict: drop the cluster axis.** It improves exactly one arm, and that arm
@@ -408,16 +444,16 @@ rollout's structure, not against the fitting loss. That is the thing to design n
   finding rests on a single panel — and on the one panel where the count-only model
   collapses, which is where any persistent channel is expected to help.
 - **LSTM only.** Family F ran no Transformer and no ValendinLSTM. The synthetic grid shows
-  the two architectures respond differently to `kmeans_8` (§6: the LSTM is hurt
-  significantly under `no_ar`, the Transformer is not), so the real-panel result should not
+  the two architectures respond differently to `kmeans_8` (§6: under `no_ar` the LSTM is
+  hurt in 6 cells, the Transformer in 1), so the real-panel result should not
   be read as architecture-independent.
 - **Three rungs, one basis.** K ∈ {4, 8, 16} on one feature triple with one algorithm, one
   standardisation, one `random_state`. Nothing here separates "K = 8 is right" from "k-means
   on three standardised sufficient statistics is the wrong basis at every K".
-- **Unpaired, n = 40.** Two-sample tests on unseeded training runs. A paired design is
-  impossible while training is unseeded, and that is a deliberate choice, but it costs
-  power: the electronics `cluster_8` improvement would need a substantially larger n to
-  resolve if it is real.
+- **Unpaired, n = 40.** Independent bootstrap intervals on unseeded training runs. A paired
+  design is impossible while training is unseeded, and that is a deliberate choice, but it
+  costs power: the electronics `cluster_8` interval (−9.0 to +3.9 on |bias|) is too wide to
+  resolve an improvement of the size its mean suggests.
 - **The validation-window deviation is untested.** The label is fitted on the full
   calibration window, which contains the validation window early stopping scores on
   (`docs/feature_engineering.md` §4). The bias is argued to be small and bounded; it has
