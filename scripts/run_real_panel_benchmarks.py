@@ -20,9 +20,12 @@ or last day of a week bucket. The second calibration year is the validation wind
 2001 week 8, so its years are counted from there rather than from Jan 1.
 
 **Budget.** 20 ValendinLSTM replications per panel, each a 100-trial Optuna search, the
-ADR-0008 refit and a 500-path Monte Carlo forecast. Pareto/NBD is one deterministic MCMC
-fit per panel: repeating it would reproduce the same numbers, so it runs once, on the
-orchestrator (VastAI/Rules.md §5).
+ADR-0008 refit and a 500-path Monte Carlo forecast. Pareto/NBD is a hierarchical-Bayes
+MCMC fit, reproducible under one seed but not across seeds, so it is replicated like the
+neural model: 20 fits per panel, replication r seeded `BASE_SEED + r`, on the orchestrator
+(VastAI/Rules.md §5). That makes it a condition with its own replications, compared with
+the independent bootstrap of `docs/statistical-protocol.md`. Replication 0 (seed 42) is
+the single fit the older `__ParetoNBD__<panel>` suites hold.
 
 **One suite per replication.** A work item is one (panel, replication) pair holding one
 study, so a box lost mid-run costs the replication it was on and nothing else -- a
@@ -53,7 +56,7 @@ Usage:
     # gate the launch — builds every panel, trains each tiny, costs nothing
     python scripts/run_real_panel_benchmarks.py --preflight
 
-    # the Pareto/NBD row, locally, once per panel
+    # the Pareto/NBD row, locally: 20 seeded fits per panel
     python scripts/run_real_panel_benchmarks.py --pareto
 
     # one worker's slice (this is what a rented box runs)
@@ -272,8 +275,13 @@ def suite_name(panel: str, replication: int, cal: str) -> str:
     return f"{EXPERIMENT}{calibration_tag(cal)}__ValendinLSTM__{panel}__r{replication:02d}"
 
 
-def pareto_suite_name(panel: str, cal: str) -> str:
-    return f"{EXPERIMENT}{calibration_tag(cal)}__ParetoNBD__{panel}"
+def pareto_suite_name(panel: str, replication: int, cal: str) -> str:
+    """`real_panel_benchmarks[_calNy]__ParetoNBD__<panel>__r<NN>` — one seeded fit each."""
+    return f"{EXPERIMENT}{calibration_tag(cal)}__ParetoNBD__{panel}__r{replication:02d}"
+
+
+def pareto_path(panel: str, replication: int, cal: str) -> Path:
+    return STUDIES_BASE / pareto_suite_name(panel, replication, cal) / "ParetoNBD"
 
 
 def work_list(cal: str) -> list[tuple[str, int]]:
@@ -335,25 +343,28 @@ def run_worker(index: int, total: int, cal: str) -> int:
 
 
 def run_pareto(cal: str) -> int:
-    """One Pareto/NBD fit per panel, skipping panels already fitted."""
+    """N_REPLICATIONS seeded Pareto/NBD fits per panel, skipping fits already on disk."""
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
     for panel in CALIBRATIONS[cal]:
-        name = pareto_suite_name(panel, cal)
-        if (STUDIES_BASE / name / "ParetoNBD" / "Predictions").is_dir():
-            print(f"{name}: done, skipping")
-            continue
-        root = run_study_suite(StudySuiteConfig(
-            studies_base_path=str(STUDIES_BASE),
-            suite_name=name,
-            n_studies_per_model=1,
-            n_simulations=N_SIMULATIONS,
-            device="cpu",
-            data=build_data(panel, cal),
-            models=[ModelSpec(name="ParetoNBD", model_type="pareto_nbd")],
-            base_seed=BASE_SEED,
-            overwrite=(STUDIES_BASE / name).exists(),
-        ))
-        print(f"Pareto/NBD written to {root}")
+        data = None
+        for rep in range(N_REPLICATIONS):
+            name = pareto_suite_name(panel, rep, cal)
+            if (pareto_path(panel, rep, cal) / "Predictions").is_dir():
+                print(f"{name}: done, skipping", flush=True)
+                continue
+            data = data or build_data(panel, cal)
+            root = run_study_suite(StudySuiteConfig(
+                studies_base_path=str(STUDIES_BASE),
+                suite_name=name,
+                n_studies_per_model=1,
+                n_simulations=N_SIMULATIONS,
+                device="cpu",
+                data=data,
+                models=[ModelSpec(name="ParetoNBD", model_type="pareto_nbd")],
+                base_seed=BASE_SEED + rep,
+                overwrite=(STUDIES_BASE / name).exists(),
+            ))
+            print(f"Pareto/NBD written to {root}", flush=True)
     return 0
 
 
@@ -414,12 +425,14 @@ def check_complete(cal: str) -> int:
             budget = (cfg["n_simulations"], cfg["models"][0]["n_trials"])
             if budget != (N_SIMULATIONS, N_TRIALS):
                 wrong_budget.append(f"{suite_name(panel, rep)} {budget}")
-        pareto = (STUDIES_BASE / pareto_suite_name(panel, cal) / "ParetoNBD"
-                  / "Predictions").is_dir()
+        pareto = 0
+        for rep in range(N_REPLICATIONS):
+            if (pareto_path(panel, rep, cal) / "Predictions").is_dir():
+                pareto += 1
+            else:
+                missing.append(pareto_suite_name(panel, rep, cal))
         print(f"{panel:12s} ValendinLSTM {have:2d}/{N_REPLICATIONS}   "
-              f"ParetoNBD {'1/1' if pareto else '0/1'}")
-        if not pareto:
-            missing.append(pareto_suite_name(panel, cal))
+              f"ParetoNBD {pareto:2d}/{N_REPLICATIONS}")
     for name in missing:
         print(f"  MISSING      {name}")
     for line in wrong_budget:
@@ -464,8 +477,12 @@ def report(cal: str) -> None:
              **score(forecast_path(panel, rep, cal).parents[1], actual, ref_ids)}
             for rep in range(N_REPLICATIONS) if forecast_path(panel, rep, cal).exists()
         ]
-        pareto_dir = STUDIES_BASE / pareto_suite_name(panel, cal) / "ParetoNBD"
-        pareto = score(pareto_dir, actual, ref_ids) if (pareto_dir / "Predictions").is_dir() else None
+        pareto_rows = [
+            score(pareto_path(panel, rep, cal), actual, ref_ids)
+            for rep in range(N_REPLICATIONS)
+            if (pareto_path(panel, rep, cal) / "Predictions").is_dir()
+        ]
+        pareto = pd.DataFrame(pareto_rows).mean().to_dict() if pareto_rows else None
         # The all-zero forecast: the panels are mostly zeros, so RMSE is only readable
         # beside it, and it is what bias and Spearman exclude (-100% bias, no ranking).
         zero = compute_forecast_metrics(actual, np.zeros_like(actual, dtype=float))
@@ -474,8 +491,9 @@ def report(cal: str) -> None:
         print(f"N = {len(ref_ids)}, T_CAL = {int(data['T_CAL'])}, T_HOLD = {int(data['T_HOLD'])}, "
               f"holdout transactions = {int(actual.sum())}, "
               f"zero cells = {float((actual == 0).mean()):.1%}. "
-              f"ValendinLSTM replications: {len(rows)}/{N_REPLICATIONS}.\n")
-        print("| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD | all-zero |")
+              f"ValendinLSTM replications: {len(rows)}/{N_REPLICATIONS}, "
+              f"Pareto/NBD fits: {len(pareto_rows)}/{N_REPLICATIONS}.\n")
+        print("| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD mean | all-zero |")
         print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
         df = pd.DataFrame(rows)
         for m in METRICS:

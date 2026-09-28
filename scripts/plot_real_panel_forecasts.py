@@ -104,9 +104,10 @@ def arms(panel: str, cal: str) -> list[tuple[str, list[Path]]]:
     # The benchmarks are read from the suites they ran under this calibration. A
     # calibration they were never run on simply yields no directories, and the arm is
     # dropped — never silently filled from the windows they *were* run on.
-    pareto = (benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel, cal)
-              / "ParetoNBD")
-    out.append(("Pareto/NBD", [pareto] if (pareto / "Predictions").is_dir() else []))
+    out.append(("Pareto/NBD",
+                [benchmarks.pareto_path(panel, r, cal)
+                 for r in range(benchmarks.N_REPLICATIONS)
+                 if (benchmarks.pareto_path(panel, r, cal) / "Predictions").is_dir()]))
     out.append(("ValendinLSTM",
                 [benchmarks.forecast_path(panel, r, cal).parents[1]
                  for r in range(benchmarks.N_REPLICATIONS)

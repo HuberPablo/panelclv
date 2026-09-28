@@ -335,10 +335,11 @@ def report(model: str, encodings: tuple[str, ...], cal: str) -> None:
                     if benchmarks.forecast_path(panel, r, cal).exists()]
         if valendin:
             rows.append(("ValendinLSTM (benchmark)", distribution(valendin)))
-        pareto_dir = (benchmarks.STUDIES_BASE / benchmarks.pareto_suite_name(panel, cal)
-                      / "ParetoNBD")
-        if (pareto_dir / "Predictions").is_dir():
-            rows.append(("Pareto/NBD (benchmark)", distribution([pareto_dir])))
+        pareto = [benchmarks.pareto_path(panel, r, cal)
+                  for r in range(benchmarks.N_REPLICATIONS)
+                  if (benchmarks.pareto_path(panel, r, cal) / "Predictions").is_dir()]
+        if pareto:
+            rows.append(("Pareto/NBD (benchmark)", distribution(pareto)))
         zero = compute_forecast_metrics(actual, np.zeros_like(actual, dtype=float))
 
         def cell(df: pd.DataFrame, m: str, digits: int) -> str:
