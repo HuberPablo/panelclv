@@ -669,29 +669,33 @@ and mid-rate panels. The gain is largest with bounded flags. Pareto/NBD improves
 **Setting.** Seasonal panels (4 peaks, amplitude 1.5), 156 weeks, 1,000 vs 3,000 generated
 customers. The 3,000 grid is identical otherwise: same rates, churn levels, seed and training
 budget. The Transformer was not run at 3,000. Each cell is RMSE on customer totals / bias % /
-MAPE, mean over 40 panels.
+MAPE, mean over 40 panels. Each of the three numbers is marked within its column as in the
+Results tables: the best **bold**, those not significantly different from it
+<ins>underlined</ins>. Rows of one cohort share their panels and are compared paired
+(Wilcoxon); a 1,000 row against a 3,000 row runs on different panels, so that comparison is
+unpaired (Mann–Whitney) and needs a larger difference to count.
 
 **By purchase rate** (the 4 churn levels pooled):
 
 | Model | Customers | Rate 0.01 | 0.05 | 0.10 | 0.30 |
 | --- | ---: | --- | --- | --- | --- |
-| Pareto/NBD | 1,000 | 0.62 / +35 / 90 | 1.44 / +11 / 44 | 2.19 / +4 / 37 | 5.17 / −13 / 32 |
-| Pareto/NBD | 3,000 | 0.61 / +19 / 56 | 1.44 / +7 / 34 | 2.17 / 0 / 32 | 5.12 / −13 / 30 |
-| LSTM `no_ar` | 1,000 | 0.84 / +309 / 314 | 2.10 / +199 / 200 | 2.71 / +93 / 98 | 5.17 / +2 / 21 |
-| LSTM `no_ar` | 3,000 | 0.78 / +219 / 219 | 1.78 / +117 / 119 | 2.35 / +5 / 24 | 4.83 / −5 / 14 |
-| LSTM `ar_bounded` | 1,000 | 0.77 / +231 / 243 | 1.64 / +44 / 58 | 2.42 / +20 / 36 | 4.94 / −2 / 20 |
-| LSTM `ar_bounded` | 3,000 | 0.64 / +65 / 83 | 1.53 / +18 / 31 | 2.25 / +1 / 18 | 4.77 / −11 / 16 |
+| Pareto/NBD | 1,000 | <ins>0.62</ins> / +35 / 90 | <ins>1.44</ins> / +11 / 44 | <ins>2.19</ins> / +4 / 37 | <ins>5.17</ins> / −13 / 32 |
+| Pareto/NBD | 3,000 | **0.61** / **+19** / **56** | **1.44** / **+7** / 34 | **2.17** / **0** / 32 | 5.12 / −13 / 30 |
+| LSTM `no_ar` | 1,000 | 0.84 / +309 / 314 | 2.10 / +199 / 200 | 2.71 / +93 / 98 | <ins>5.16</ins> / <ins>+2</ins> / 21 |
+| LSTM `no_ar` | 3,000 | 0.78 / +219 / 219 | 1.78 / +117 / 119 | 2.35 / +5 / 24 | 4.83 / **−5** / **14** |
+| LSTM `ar_bounded` | 1,000 | 0.77 / +231 / 243 | 1.64 / +44 / 58 | <ins>2.42</ins> / +20 / 36 | <ins>4.94</ins> / <ins>−2</ins> / 20 |
+| LSTM `ar_bounded` | 3,000 | 0.64 / +65 / 83 | 1.53 / +18 / **31** | 2.25 / +1 / **18** | **4.77** / <ins>−11</ins> / 16 |
 
 **By churn** (the 4 rates pooled; RMSE here mixes rates, so compare it within a column only):
 
 | Model | Customers | Churn 20% | 40% | 60% | 80% |
 | --- | ---: | --- | --- | --- | --- |
-| Pareto/NBD | 1,000 | 3.14 / +2 / 36 | 2.69 / +9 / 42 | 2.15 / +10 / 50 | 1.43 / +16 / 75 |
-| Pareto/NBD | 3,000 | 3.12 / +1 / 32 | 2.66 / +5 / 35 | 2.11 / +5 / 39 | 1.44 / +1 / 46 |
-| LSTM `no_ar` | 1,000 | 3.35 / +37 / 42 | 2.98 / +74 / 77 | 2.49 / +127 / 134 | 2.01 / +365 / 380 |
-| LSTM `no_ar` | 3,000 | 3.05 / +33 / 34 | 2.74 / +57 / 59 | 2.26 / +89 / 99 | 1.69 / +156 / 184 |
-| LSTM `ar_bounded` | 1,000 | 3.24 / +32 / 39 | 2.78 / +49 / 56 | 2.22 / +66 / 79 | 1.54 / +147 / 183 |
-| LSTM `ar_bounded` | 3,000 | 2.96 / +15 / 21 | 2.60 / +15 / 26 | 2.12 / +20 / 39 | 1.51 / +24 / 63 |
+| Pareto/NBD | 1,000 | <ins>3.14</ins> / <ins>+2</ins> / 36 | <ins>2.69</ins> / <ins>+9</ins> / 42 | <ins>2.15</ins> / +10 / 50 | **1.43** / +16 / 75 |
+| Pareto/NBD | 3,000 | <ins>3.11</ins> / **+1** / 32 | <ins>2.66</ins> / **+5** / 35 | **2.11** / **+5** / <ins>39</ins> | <ins>1.44</ins> / **+1** / **46** |
+| LSTM `no_ar` | 1,000 | <ins>3.35</ins> / +37 / 42 | <ins>2.97</ins> / +74 / 77 | <ins>2.49</ins> / +127 / 134 | 2.01 / +365 / 380 |
+| LSTM `no_ar` | 3,000 | 3.05 / +33 / 34 | 2.74 / +57 / 59 | 2.26 / +89 / 99 | <ins>1.69</ins> / +156 / 184 |
+| LSTM `ar_bounded` | 1,000 | <ins>3.24</ins> / +32 / 39 | <ins>2.78</ins> / +49 / 56 | <ins>2.22</ins> / +66 / 79 | 1.54 / +147 / 183 |
+| LSTM `ar_bounded` | 3,000 | **2.96** / +15 / **21** | **2.60** / +15 / **26** | 2.12 / +20 / **39** | <ins>1.51</ins> / +24 / <ins>63</ins> |
 
 **Tests** (Mann–Whitney, 40 vs 40 panels per rate, since the panels differ):
 
@@ -756,28 +760,30 @@ every rate, and hurt the Transformer only on dense panels.
 **Setting.** Seasonal panels, 1,000 customers, no cluster label. `no_ar` = count and calendar
 only; `ar_bounded` = 0/1 flags for activity in the last 2 / 4 / 8 / 16 / 32 weeks plus
 has-bought-before; `ar_unbounded` = recency, frequency and age as counters. Each cell is RMSE
-on customer totals / bias % / MAPE, mean over 40 panels.
+on customer totals / bias % / MAPE, mean over 40 panels. Each of the three numbers is marked
+within its column as in the Results tables (paired Wilcoxon on the same panels): the best
+**bold**, those not significantly different from it <ins>underlined</ins>.
 
 **By purchase rate** (the 4 churn levels pooled):
 
 | Model | AR features | Rate 0.01 | 0.05 | 0.10 | 0.30 |
 | --- | --- | --- | --- | --- | --- |
-| Pareto/NBD | — | 0.62 / +35 / 90 | 1.44 / +11 / 44 | 2.19 / +4 / 37 | 5.17 / −13 / 32 |
-| LSTM | none | 0.84 / +309 / 314 | 2.10 / +199 / 200 | 2.71 / +93 / 98 | 5.17 / +2 / 21 |
-| LSTM | unbounded | 3.38 / +505 / 513 | 11.88 / +582 / 582 | 12.71 / +315 / 322 | 16.35 / +131 / 141 |
-| LSTM | bounded | 0.77 / +231 / 243 | 1.64 / +44 / 58 | 2.42 / +20 / 36 | 4.94 / −2 / 20 |
+| Pareto/NBD | — | **0.62** / **+35** / **90** | **1.44** / **+11** / **44** | **2.19** / **+4** / <ins>37</ins> | 5.17 / −13 / 32 |
+| LSTM | none | 0.84 / +309 / 314 | 2.10 / +199 / 200 | 2.71 / +93 / 98 | 5.16 / <ins>+2</ins> / <ins>21</ins> |
+| LSTM | unbounded | 3.38 / +505 / 513 | 11.88 / +582 / 582 | 12.71 / +315 / 322 | 16.34 / +131 / 141 |
+| LSTM | bounded | 0.77 / +231 / 243 | 1.64 / +44 / 58 | 2.42 / +20 / **36** | **4.94** / **−2** / **20** |
 | Transformer | none | 0.67 / +74 / 120 | 1.99 / +109 / 114 | 3.18 / +126 / 130 | 6.47 / +43 / 56 |
-| Transformer | unbounded | 0.75 / +89 / 150 | 1.95 / +95 / 105 | 3.79 / +148 / 149 | 8.92 / +89 / 92 |
+| Transformer | unbounded | 0.75 / +89 / <ins>150</ins> | 1.95 / +95 / 105 | 3.79 / +148 / 149 | 8.92 / +89 / 92 |
 | Transformer | bounded | 0.65 / +50 / 103 | 1.74 / +64 / 78 | 2.73 / +64 / 77 | 5.98 / +38 / 50 |
 
 **By churn** (the 4 rates pooled; compare RMSE within a column only):
 
 | Model | AR features | Churn 20% | 40% | 60% | 80% |
 | --- | --- | --- | --- | --- | --- |
-| Pareto/NBD | — | 3.14 / +2 / 36 | 2.69 / +9 / 42 | 2.15 / +10 / 50 | 1.43 / +16 / 75 |
-| LSTM | none | 3.35 / +37 / 42 | 2.98 / +74 / 77 | 2.49 / +127 / 134 | 2.01 / +365 / 380 |
+| Pareto/NBD | — | **3.14** / **+2** / **36** | **2.69** / **+9** / **42** | **2.15** / **+10** / **50** | **1.43** / **+16** / **75** |
+| LSTM | none | 3.35 / +37 / <ins>42</ins> | 2.97 / +74 / 77 | 2.49 / +127 / 134 | 2.01 / +365 / 380 |
 | LSTM | unbounded | 19.44 / +328 / 330 | 12.08 / +255 / 259 | 7.19 / +333 / 337 | 5.60 / +618 / 632 |
-| LSTM | bounded | 3.24 / +32 / 39 | 2.78 / +49 / 56 | 2.22 / +66 / 79 | 1.54 / +147 / 183 |
+| LSTM | bounded | 3.24 / +32 / <ins>39</ins> | <ins>2.78</ins> / +49 / 56 | 2.22 / +66 / 79 | 1.54 / +147 / <ins>183</ins> |
 | Transformer | none | 3.99 / +41 / 57 | 3.52 / +71 / 84 | 2.85 / +94 / 110 | 1.96 / +145 / 170 |
 | Transformer | unbounded | 5.16 / +67 / 78 | 4.29 / +72 / 89 | 3.39 / +111 / 128 | 2.27 / +174 / 204 |
 | Transformer | bounded | 3.80 / +41 / 55 | 3.09 / +32 / 56 | 2.65 / +70 / 89 | 1.56 / +73 / 109 |
@@ -801,7 +807,7 @@ no significant change at rates 0.01 and 0.05.
   mid-rate panels. On the sparsest panels silence says little; on the densest the plain LSTM
   already gets the level right (bias +2%).
 - Unbounded counters keep growing through the holdout, past any value seen in training, and
-  the LSTM's forecast climbs with them. Its RMSE rises from 2.1–5.2 to 11.9–16.4 at rates
+  the LSTM's forecast climbs with them. Its RMSE rises from 2.1–5.2 to 11.9–16.3 at rates
   0.05–0.30.
 - Even with flags, the neural bias at churn 80% (+147 LSTM, +73 Transformer) stays far above
   Pareto/NBD's +16 at 1,000 customers. The cohort-size section shows that gap mostly closes

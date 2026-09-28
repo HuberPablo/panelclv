@@ -12,8 +12,10 @@ OUT = Path(".scratch/synthetic-grid/results")
 d = pd.read_csv(OUT / "per_study.csv")
 # The two Transformer ar_unbounded forecasts that disagree with their stored results.
 d = d[(d.mape - d.stored_mape).abs() / d.stored_mape < 0.05]
-# The Results tables cover the 13 trees of the 1,000-customer grid only.
-d = d[(d.cohort == "n1000") & ~d.arm.isin(["true_season", "no_ar-no_cluster-small_search"])]
+full = d[~d.arm.isin(["true_season", "no_ar-no_cluster-small_search"])]
+# The Results tables cover the 13 trees of the 1,000-customer grid only; the cohort-size
+# tables at the end also read the 3,000-customer grid from `full`.
+d = full[full.cohort == "n1000"].copy()
 METRICS = ["rmse", "bias", "mape", "spearman", "ce"]
 ARMS = ["no_ar-no_cluster", "ar_unbounded-no_cluster", "ar_bounded-no_cluster",
         "ar_bounded-kmeans_8", "ar_unbounded-kmeans_8", "no_ar-kmeans_8"]
@@ -57,10 +59,12 @@ WINS = ["win_mape", "win_bias", "win_spearman"]
 MARKED = {"rmse": 1, "bias": 1, "mape": 1, "spearman": -1, "ce": 1}
 
 
-def marks(sub):
-    """{(model, arm, column): "best" | "tie"} over the panels in `sub`."""
+def marks(sub, columns=(*MARKED, *WINS), tree=("model", "arm")):
+    """{(*tree, column): "best" | "tie"} over the panels in `sub`, a tree being one value of
+    the `tree` columns. Trees from different cohorts ran on different panels, so they are
+    compared unpaired, by Mann-Whitney."""
     out = {}
-    for m in [*MARKED, *WINS]:
+    for m in columns:
         # Signed so that lower is better; a win becomes -1, a loss 0.
         v = (MARKED.get(m, -1) * (sub[m].abs() if m == "bias" else sub[m])).astype(float)
         # Rows are panels, columns trees. Pareto/NBD has no CE (NaN, dropped by the pivot)
@@ -68,23 +72,25 @@ def marks(sub):
         trees = sub.assign(v=v)
         if m in WINS:
             trees = trees[trees.model != "ParetoNBD"]
-        panel = trees.pivot_table(index=["rate", "churn", "dataset"], columns=["model", "arm"],
+        panel = trees.pivot_table(index=["rate", "churn", "dataset"], columns=list(tree),
                                   values="v")
         best = panel.mean().idxmin()
         if m in WINS and panel[best].mean() == 0:
             continue
         out[(*best, m)] = "best"
-        for tree in panel.columns.drop(best):
-            pair = panel[[best, tree]].dropna()
-            if m in WINS:
+        for other in panel.columns.drop(best):
+            pair = panel[[best, other]].dropna()
+            if "cohort" in tree and best[tree.index("cohort")] != other[tree.index("cohort")]:
+                p = stats.mannwhitneyu(panel[other].dropna(), panel[best].dropna()).pvalue
+            elif m in WINS:
                 # Discordant panels: the best wins where the tree loses, and the reverse.
-                b = int(((pair[best] < 0) & (pair[tree] == 0)).sum())
-                c = int(((pair[best] == 0) & (pair[tree] < 0)).sum())
+                b = int(((pair[best] < 0) & (pair[other] == 0)).sum())
+                c = int(((pair[best] == 0) & (pair[other] < 0)).sum())
                 p = stats.binomtest(b, b + c).pvalue if b + c else 1.0
             else:
-                p = stats.wilcoxon(pair[tree] - pair[best]).pvalue
+                p = stats.wilcoxon(pair[other] - pair[best]).pvalue
             if p >= 0.05:
-                out[(*tree, m)] = "tie"
+                out[(*other, m)] = "tie"
     return out
 
 
@@ -175,3 +181,53 @@ def top3(metric, ascending):
 
 (OUT / "top3_mape.md").write_text(top3("mape", True) + "\n")
 (OUT / "top3_spearman.md").write_text(top3("spearman", False) + "\n")
+
+
+# The "Impact of cohort size" and "Impact of AR features" tables: per row a tree, per column
+# a rate (churns pooled) or a churn (rates pooled), each cell RMSE / bias % / MAPE as means
+# over the column's 40 panels, each of the three numbers marked within its column.
+def triple(frame, rows, label, by):
+    lines = []
+    for value in sorted(frame[by].unique()):
+        sub = frame[frame[by] == value]
+        mk = marks(sub, ("rmse", "bias", "mape"), ("model", "arm", "cohort"))
+        for key in rows:
+            r = sub[(sub.model == key[0]) & (sub.arm == key[1]) & (sub.cohort == key[2])]
+            nums = []
+            for m in ("rmse", "bias", "mape"):
+                t = FMT[m].format(r[m].mean())
+                t = ("0" if t in ("-0", "+0") else t).replace("-", "−")
+                nums.append(marked(t, mk.get((*key, m))))
+            lines.append((key, " / ".join(nums)))
+    cells = {}
+    for key, text in lines:
+        cells.setdefault(key, []).append(text)
+    return "\n".join(f"| {label(k)} | " + " | ".join(v) + " |" for k, v in cells.items())
+
+
+COHORT_ROWS = [(m, a, c) for m, a in [("ParetoNBD", "-"), ("LSTM", "no_ar-no_cluster"),
+               ("LSTM", "ar_bounded-no_cluster")] for c in ("n1000", "n3000")]
+
+
+def cohort_label(k):
+    model = "Pareto/NBD" if k[0] == "ParetoNBD" else f"{k[0]} `{k[1].split('-')[0]}`"
+    return f"{model} | {'1,000' if k[2] == 'n1000' else '3,000'}"
+
+
+AR_ROWS = [("ParetoNBD", "-", "n1000")] + [(m, f"{a}-no_cluster", "n1000") for m in ("LSTM", "Transformer")
+                                           for a in ("no_ar", "ar_unbounded", "ar_bounded")]
+AR_NAME = {"no_ar": "none", "ar_unbounded": "unbounded", "ar_bounded": "bounded"}
+
+
+def ar_label(k):
+    return "Pareto/NBD | —" if k[0] == "ParetoNBD" else f"{k[0]} | {AR_NAME[k[1].split('-')[0]]}"
+
+
+cohort = full[full.set_index(["model", "arm", "cohort"]).index.isin(COHORT_ROWS)]
+ar = full[full.set_index(["model", "arm", "cohort"]).index.isin(AR_ROWS)]
+(OUT / "impact_tables.md").write_text("\n\n".join([
+    "#### Cohort size, by rate\n\n" + triple(cohort, COHORT_ROWS, cohort_label, "rate"),
+    "#### Cohort size, by churn\n\n" + triple(cohort, COHORT_ROWS, cohort_label, "churn"),
+    "#### AR features, by rate\n\n" + triple(ar, AR_ROWS, ar_label, "rate"),
+    "#### AR features, by churn\n\n" + triple(ar, AR_ROWS, ar_label, "churn"),
+]) + "\n")
