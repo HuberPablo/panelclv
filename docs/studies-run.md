@@ -12,6 +12,13 @@ and cross-checking the commands that own the "what is owed" question:
 `scripts/reconcile_grid.py --grid <name>`. Those commands are the authority; this document
 is a snapshot of them taken **18 September 2026**, plus the families they do not cover.
 
+**Revised under the statistical protocol (2026-09-28).** One verdict flipped: §4.7's "the
+search adds nothing once a model is floored" had no test behind it. Tested as
+`floor50` against `paper90` with `effect()`, it holds as no clear difference for
+ValendinLSTM and for the LSTM's MAPE, and **flips for the LSTM's Spearman**: the searched
+floored arm ranks worse (Δ −0.100, 95% CI −0.138 to −0.063, n = 20 / 20). Pareto/NBD on
+the real panels is now 20 seeded fits per panel (§4.3, family N).
+
 ---
 
 ## 1. How to read a row
@@ -321,7 +328,7 @@ restated, so a row from one reads directly against a row from another.
 | family | model | inputs | embedder | replications | trials | paths | seeds | panels | windows |
 |---|---|---|---|---:|---:|---:|---|---|---|
 | N | ValendinLSTM | count + week, both embedded; every other column discarded | frozen (ADR-0004) | 20 | 100 | 500 | 43–62 | all four | 2y (§2) |
-| N | ParetoNBD | `(t_x, x, T)` from active weeks | — | 1 (deterministic) | — | — | 42 | all four | 2y |
+| N | ParetoNBD | `(t_x, x, T)` from active weeks | — | 20 seeded fits (28 Sep; `__r00` is the original fit) | — | — | 42–61 | all four | 2y |
 | O | LSTM | count (embedded), `week_sin`/`week_cos`, one AR encoding | `valendin` | 100 | 100 | 500 | 43–142 | all four | 2y |
 | P | LSTM | as O | `valendin` | 100 | 100 | 500 | 43–142 | 3 panels | 3y (§2) |
 | Q | ParetoNBD | as N | — | 1 | — | — | 42 | 3 panels | 3y |
@@ -421,7 +428,13 @@ the floor reaches a little over half of it; stacking them buys a few hundredths 
 Two things a reader must carry when quoting a family U row:
 
 - **Its `floored` arm runs ONE pinned trial**, not a search, so its `param_*` columns are
-  constant by design. Family T §4.6 shows the search adds nothing once a model is floored.
+  constant by design. Whether the search would add anything under a floor is answered only
+  indirectly, by family T's `floor50` (searched, 50-epoch floor) against `paper90` (pinned,
+  90-epoch floor) on electronics, 20 / 20 replications, which also differ in floor length:
+  no clear difference in MAPE for either model (ValendinLSTM Δ +1.1, 95% CI −3.2 to +5.3;
+  LSTM −4.6, −13.6 to +3.6) nor in Spearman for ValendinLSTM (−0.009, −0.061 to +0.044),
+  and **the searched arm ranks worse for the LSTM** (Spearman −0.100, −0.138 to −0.063).
+  `.scratch/training-budget/family_t_stats.py`.
 - **Its LSTM carries no year index on any panel**, unlike families H, O and T, which
   inherited one on electronics. `run_real_panel_arms.py` argues against a year index for
   CDNOW — constant in calibration, out of range across the holdout — and family U applies
