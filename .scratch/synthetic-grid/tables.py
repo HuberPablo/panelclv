@@ -1,7 +1,7 @@
 """Mean and 95% t-interval over panels from results/per_study.csv: per tree and rate
 (churn pooled, n = 40) and per tree and rate x churn cell (n = 10). Writes the two CSVs
 and results/tables.md, the markdown the insights doc's Results section is pasted from. In
-those tables each metric's best tree is bold and every tree tied with it is underlined."""
+those tables each column's best tree is bold and every tree tied with it is underlined."""
 from pathlib import Path
 
 import numpy as np
@@ -48,24 +48,42 @@ d["win_bias"] = d.bias.abs().values < pn.bias.abs().values
 d["win_spearman"] = d.spearman.values > pn.spearman.values
 WINS = ["win_mape", "win_bias", "win_spearman"]
 
-# Per metric, the best tree in a table and the trees statistically tied with it. Best is the
-# lowest mean over the table's panels of RMSE, MAPE or per-panel |bias|, or the highest mean
-# Spearman. A tree is tied when a paired Wilcoxon against the best, on the same panels, gives
-# p >= 0.05 (uncorrected, as in the ranking tables' "p vs rank 1").
-MARKED = {"rmse": 1, "bias": 1, "mape": 1, "spearman": -1}
+# Per column, the best tree in a table and the trees statistically tied with it, all on the
+# table's own panels. Best is the lowest mean RMSE, per-panel |bias|, MAPE or Val. CE, the
+# highest mean Spearman, or the highest "Beats P/NBD" share. Tied means a paired test against
+# the best gives p >= 0.05, uncorrected, as in the ranking tables' "p vs rank 1": Wilcoxon
+# signed-rank for the five metrics, exact McNemar for the win shares, which are per-panel
+# yes/no outcomes. A win column in which no tree wins a single panel is left unmarked.
+MARKED = {"rmse": 1, "bias": 1, "mape": 1, "spearman": -1, "ce": 1}
 
 
 def marks(sub):
-    """{(model, arm, metric): "best" | "tie"} over the panels in `sub`."""
+    """{(model, arm, column): "best" | "tie"} over the panels in `sub`."""
     out = {}
-    for m, sign in MARKED.items():
-        panel = sub.assign(v=sign * (sub[m].abs() if m == "bias" else sub[m])).pivot_table(
-            index=["rate", "churn", "dataset"], columns=["model", "arm"], values="v")
+    for m in [*MARKED, *WINS]:
+        # Signed so that lower is better; a win becomes -1, a loss 0.
+        v = (MARKED.get(m, -1) * (sub[m].abs() if m == "bias" else sub[m])).astype(float)
+        # Rows are panels, columns trees. Pareto/NBD has no CE (NaN, dropped by the pivot)
+        # and does not compete in the win columns.
+        trees = sub.assign(v=v)
+        if m in WINS:
+            trees = trees[trees.model != "ParetoNBD"]
+        panel = trees.pivot_table(index=["rate", "churn", "dataset"], columns=["model", "arm"],
+                                  values="v")
         best = panel.mean().idxmin()
+        if m in WINS and panel[best].mean() == 0:
+            continue
         out[(*best, m)] = "best"
         for tree in panel.columns.drop(best):
-            diff = (panel[tree] - panel[best]).dropna()
-            if stats.wilcoxon(diff).pvalue >= 0.05:
+            pair = panel[[best, tree]].dropna()
+            if m in WINS:
+                # Discordant panels: the best wins where the tree loses, and the reverse.
+                b = int(((pair[best] < 0) & (pair[tree] == 0)).sum())
+                c = int(((pair[best] == 0) & (pair[tree] < 0)).sum())
+                p = stats.binomtest(b, b + c).pvalue if b + c else 1.0
+            else:
+                p = stats.wilcoxon(pair[tree] - pair[best]).pvalue
+            if p >= 0.05:
                 out[(*tree, m)] = "tie"
     return out
 
@@ -110,7 +128,7 @@ def table(frame, wins=None, mk=None):
         line = f"| {name(model, arm)} | " + " | ".join(marked(cell(r, m), (mk or {}).get((model, arm, m))) for m in METRICS) + " |"
         if wins is not None:
             line += " — | — | — |" if model == "ParetoNBD" else "".join(
-                f" {wins.loc[(model, arm), w]:.0%} |" for w in WINS)
+                f" {marked(f'{wins.loc[(model, arm), w]:.0%}', (mk or {}).get((model, arm, w)))} |" for w in WINS)
         lines.append(line)
     return "\n".join(lines)
 
