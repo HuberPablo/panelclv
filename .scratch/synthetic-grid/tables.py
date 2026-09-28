@@ -14,8 +14,9 @@ d = d[(d.mape - d.stored_mape).abs() / d.stored_mape < 0.05]
 # The Results tables cover the 13 trees of the 1,000-customer grid only.
 d = d[(d.cohort == "n1000") & ~d.arm.isin(["true_season", "no_ar-no_cluster-small_search"])]
 METRICS = ["rmse", "bias", "mape", "spearman", "ce"]
-ORDER = [("ParetoNBD", "-")] + [(m, f"{a}-{c}") for m in ("LSTM", "Transformer")
-         for a in ("ar_bounded", "no_ar", "ar_unbounded") for c in ("no_cluster", "kmeans_8")]
+ARMS = ["no_ar-no_cluster", "ar_unbounded-no_cluster", "ar_bounded-no_cluster",
+        "ar_bounded-kmeans_8", "ar_unbounded-kmeans_8", "no_ar-kmeans_8"]
+ORDER = [("ParetoNBD", "-")] + [(m, a) for m in ("LSTM", "Transformer") for a in ARMS]
 
 
 def summarise(keys):
