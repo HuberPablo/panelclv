@@ -324,11 +324,11 @@ patience-7 run.
 > raw sd of per-customer predicted totals rather than forecast CV, because the pilot did
 > not store its forecasts.
 
-**Read MAPE and Spearman here, not bias.** `docs/benchmarks-real-panels.md` measures a
-refit noise on electronics of 8.9 points of sd — refitting one checkpoint twice
-moves aggregate bias by that much with everything else held fixed. The bias difference
-above (+31.0 → +9.9, five replications) sits inside that noise and is not a result. The
-MAPE difference of 14 points and the sevenfold Spearman difference are outside it.
+**Read MAPE and Spearman here, not bias.** Bias is the secondary metric, and
+`docs/benchmarks-real-panels.md` measures a refit noise on electronics of 8.9 points of sd
+— refitting one checkpoint twice moves aggregate bias by that much with everything else
+held fixed — as the magnitude to hold the bias difference above (+31.0 → +9.9, five
+replications) against. None of this pilot's differences was tested; §9 tests them.
 
 The patience-7 rows reproduce the archived electronics benchmark
 (`docs/benchmarks-real-panels.md`: bias +46.0 ± 14.8, MAPE 70.8, Spearman 0.032), which is

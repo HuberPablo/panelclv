@@ -331,7 +331,7 @@ restated, so a row from one reads directly against a row from another.
 | N | ParetoNBD | `(t_x, x, T)` from active weeks | — | 20 seeded fits (28 Sep; `__r00` is the original fit) | — | — | 42–61 | all four | 2y |
 | O | LSTM | count (embedded), `week_sin`/`week_cos`, one AR encoding | `valendin` | 100 | 100 | 500 | 43–142 | all four | 2y |
 | P | LSTM | as O | `valendin` | 100 | 100 | 500 | 43–142 | 3 panels | 3y (§2) |
-| Q | ParetoNBD | as N | — | 1 | — | — | 42 | 3 panels | 3y |
+| Q | ParetoNBD | as N | — | 20 seeded fits (28 Sep; `__r00` is the original fit) | — | — | 42–61 | 3 panels | 3y |
 
 O and P cross four AR encodings — `bounded32`, `log`, `ratio`, `bounded32ratio` — with no
 cluster column and no calendar variant. That is 4 encodings × 4 panels × 100 replications
