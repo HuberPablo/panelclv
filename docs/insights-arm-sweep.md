@@ -10,12 +10,33 @@ This document is that measurement. It reads the arm sweep of `grids/seasonal_4x4
 run on the vast.ai fleet 4–6 September 2026 — twelve neural `(model, arm)` trees and one
 Pareto/NBD benchmark, each trained on all 160 synthetic panels, 2,080 suites in total.
 
-**The answer is no.** Bounded AR features help, significantly and cheaply, and leave the
-churn slope monotone and an order of magnitude outside the benchmark. Nothing on the arm
-axis removes it.
+**The answer is no.** Bounded AR features help cheaply, in 9 of 16 cells for the LSTM and 5
+for the Transformer and in none do they hurt, but they leave the churn slope monotone and
+an order of magnitude outside the benchmark. Nothing on the arm axis removes it.
 
 Every number below was recomputed from the `results.csv` files under
-`Studies/seasonal_4x4x10__*/`. A rendered version of this analysis, with the per-cell
+`Studies/seasonal_4x4x10__*/`, except the tests of §4, §5 and §7, which read the per-panel
+metrics recomputed from the stored forecasts (`.scratch/synthetic-grid/results/per_study.csv`,
+printed by `.scratch/synthetic-grid/arm_sweep_effects.py`).
+
+**Revised under the statistical protocol (2026-09-28).** §4, §5 and §7 now follow
+`docs/statistical-protocol.md`: a paired difference of means with its 95% percentile-bootstrap
+interval (`evaluation.effects.effect`), run inside each rate × churn cell of 10 panels and
+never over the 160 panels pooled. The Wilcoxon tests, median differences and p-values are
+gone. §4's per-cell tests read `per_study.csv`, which leaves out two Transformer
+`ar_unbounded` studies whose recomputed forecasts disagree with their stored results, so
+those contrasts rest on 158 panels. Verdicts that moved:
+
+- §4 `ar_unbounded` vs `no_ar`, Transformer: "not significant" → worse in 5 of 16 cells
+  (rates 0.10–0.30), better in 1.
+- §4 `kmeans_8` under `ar_unbounded`, LSTM: "significantly helps" → mixed: better in 5
+  cells, worse in 2 (rate 0.01, by more than 1,000 points), and the pooled mean |bias| rises.
+- §4 `ar_bounded` vs `no_ar`, Transformer, and `kmeans_8` under `ar_bounded`, Transformer:
+  "significant" over 160 panels → supported in only 5 and 4 of 16 cells.
+- §5: "the LSTM wins twelve of sixteen cells" → the LSTM is clearly closer to the truth in 7
+  cells, the Transformer in 3, and 6 show no clear difference.
+- §7 is unchanged in substance: at rate 0.30, churn 0.6–0.8, no clear difference from
+  Pareto/NBD at n = 10. A rendered version of this analysis, with the per-cell
 heatmaps as figures, is published at
 <https://claude.ai/code/artifact/2aca6161-3a28-4798-84c5-eaa1abeb922e>.
 
@@ -144,30 +165,34 @@ this panel size rather than about the arms.
 
 ## 4. What the arm axis moved
 
-Each row is a Wilcoxon signed-rank test on |bias %| across the same 160 paired panels,
-against the arm differing in one factor. Δ is the median of the per-panel differences, so
-it is not the difference of the two medians.
+Each row compares two arms differing in one factor, on |bias %|. The test is run inside
+each rate × churn cell: the paired difference of mean |bias| over the cell's 10 panels,
+with its 95% bootstrap interval. The columns count the cells where |bias| clearly falls,
+clearly rises, or shows no clear difference, and give the range of the supported Δ. The
+pooled mean over all panels is description only. The per-cell intervals are in
+`docs/insights-synthetic-grid.md`, claims 3–5.
 
-| contrast | model | median \|bias\| before → after | Δ median | p |
-| --- | --- | ---: | ---: | ---: |
-| `ar_bounded` vs `no_ar` | LSTM | 56.5 → **32.2** | −13.2 | 2×10⁻¹² |
-| `ar_bounded` vs `no_ar` | Transformer | 71.0 → **49.5** | −10.5 | 9×10⁻⁵ |
-| `ar_unbounded` vs `no_ar` | LSTM | 56.5 → 261.2 | +167.2 | 1×10⁻¹⁷ |
-| `ar_unbounded` vs `no_ar` | Transformer | 71.0 → 97.7 | +10.2 | 0.106 (n.s.) |
-| `kmeans_8` vs none, under `no_ar` | LSTM | 56.5 → 100.4 | +17.3 | 2×10⁻⁷ |
-| `kmeans_8` vs none, under `no_ar` | Transformer | 71.0 → 73.4 | +7.9 | 0.749 (n.s.) |
-| `kmeans_8` vs none, under `ar_bounded` | LSTM | 32.2 → 70.2 | +34.1 | 2×10⁻¹³ |
-| `kmeans_8` vs none, under `ar_bounded` | Transformer | 49.5 → 58.8 | +15.6 | 8×10⁻⁴ |
-| `kmeans_8` vs none, under `ar_unbounded` | LSTM | 261.2 → **132.9** | −59.2 | 7×10⁻⁵ |
-| `kmeans_8` vs none, under `ar_unbounded` | Transformer | 97.7 → **55.7** | −30.7 | 9×10⁻⁹ |
+| contrast | model | panels | mean \|bias\| before → after (pooled) | cells: \|bias\| falls | cells: rises | cells: no clear difference | supported Δ, range |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `ar_bounded` vs `no_ar` | LSTM | 160 | 153.5 → 78.3 | 9 | 0 | 7 | −470.5 to −7.9 |
+| `ar_bounded` vs `no_ar` | Transformer | 160 | 92.0 → 60.8 | 5 | 0 | 11 | −174.8 to −41.8 |
+| `ar_unbounded` vs `no_ar` | LSTM | 160 | 153.5 → 384.9 | 0 | 13 | 3 | +38.6 to +816.9 |
+| `ar_unbounded` vs `no_ar` | Transformer | 158 | 92.9 → 110.6 | 1 | 5 | 10 | −17.9 to +59.8 |
+| `kmeans_8` vs none, under `no_ar` | LSTM | 160 | 153.5 → 179.5 | 1 | 6 | 9 | −17.1 to +124.7 |
+| `kmeans_8` vs none, under `no_ar` | Transformer | 160 | 92.0 → 96.4 | 1 | 1 | 14 | −63.2 to +24.2 |
+| `kmeans_8` vs none, under `ar_bounded` | LSTM | 160 | 78.3 → 115.8 | 1 | 9 | 6 | −17.6 to +260.0 |
+| `kmeans_8` vs none, under `ar_bounded` | Transformer | 160 | 60.8 → 80.1 | 0 | 4 | 12 | +21.4 to +85.6 |
+| `kmeans_8` vs none, under `ar_unbounded` | LSTM | 160 | 384.9 → 431.9 | 5 | 2 | 9 | −207.5 to +1171.9 |
+| `kmeans_8` vs none, under `ar_unbounded` | Transformer | 158 | 110.6 → 69.8 | 8 | 1 | 7 | −102.8 to +27.2 |
 
 **Bounding the AR features helps, for both architectures.** It is the only change on the
-arm axis that improves anything, and it is significant for both models. It is also cheap —
-six binary flags. Keep it.
+arm axis that improves |bias| without hurting it in any cell: in 9 of 16 cells for the LSTM
+and 5 for the Transformer, and no clear difference elsewhere. It is also cheap — six binary
+flags. Keep it.
 
 **Handing the model the true sufficient statistic makes it worse.** `ar_unbounded` is what
-the generator conditions on, and giving it to the LSTM raises median |bias| from 56.5% to
-261.2%. It is also the only arm that moves RMSE at all — 0.18 → 0.32, on a metric that
+the generator conditions on, and giving it to the LSTM raises mean |bias| from 153.5% to
+384.9%, and clearly so in 13 of 16 cells. It is also the only arm that moves RMSE at all — 0.18 → 0.32, on a metric that
 separates nothing else on this page.
 
 The mechanism is the one `insights-study.md` §4.3 diagnosed: two of the three counters are
@@ -179,21 +204,25 @@ is unusable.** That is the cleanest statement of the point available anywhere in
 because here the true model is known and its own error is the ceiling.
 
 **Frozen per-customer categories hurt — except where they are covering for something
-worse.** Five of the six `kmeans_8` contrasts are significant, and they split by what they
-are added to. Under `no_ar` and `ar_bounded` the cluster label hurts in all four contrasts
-(three significantly): a label assigned from calibration behaviour cannot update when the
+worse.** The `kmeans_8` contrasts split by what the label is added to. Under `no_ar` and
+`ar_bounded` it mostly hurts where a difference is clear: |bias| rises in 6 and 9 cells for
+the LSTM (and falls in 1 each), and in 1 and 4 for the Transformer (falling in 1 under
+`no_ar`). A label assigned from calibration behaviour cannot update when the
 simulated customer goes quiet, so it adds a channel that keeps asserting the customer is
 who they used to be — the same failure as `ar_unbounded`, in a different costume.
 
-Under `ar_unbounded` it reverses, and strongly: median |bias| falls 261.2 → 132.9 for the
-LSTM (p = 7×10⁻⁵) and 97.7 → 55.7 for the Transformer (p = 9×10⁻⁹). The consistent reading
+Under `ar_unbounded` it reverses for the Transformer: |bias| falls in 8 cells and rises in
+1, and the mean falls 110.6 → 69.8. For the LSTM it is mixed: |bias| falls in 5 cells, all
+at rates 0.05–0.30, but rises in 2 cells at rate 0.01 by more than 1,000 points, so the
+pooled mean rises 384.9 → 431.9. The consistent reading
 is that this is not the clusters working, it is the clusters *displacing* the broken
 counters. K-means gives the model a **bounded** categorical summary of the same history, so
 the more of the prediction it carries, the less rests on channels that drift out of range
 during the rollout. Both arms it rescues remain worse than the corresponding `ar_bounded`
 arm, which reaches the same end by construction rather than by competition.
 
-So `kmeans_8` improves exactly one thing, and that thing is the arm §9 recommends dropping.
+So `kmeans_8` improves |bias| only where the counters are present, and there only
+partly — and that is the arm §9 recommends dropping.
 
 ---
 
@@ -231,19 +260,21 @@ for the best arm of each architecture and the benchmark.
 
 ### The two architectures fail in different corners
 
-Mean of |LSTM bias| − |Transformer bias| per cell, ten paired panels each. Positive means
-the Transformer is closer to truth in that cell:
+Mean of |LSTM bias| − |Transformer bias| per cell, ten paired panels each, with its 95%
+bootstrap interval (bold: supported). Positive means the Transformer is closer to truth in
+that cell:
 
 | rate \ churn | 0.2 | 0.4 | 0.6 | 0.8 |
 | --- | ---: | ---: | ---: | ---: |
-| 0.01 | +2.5 | +56.4 | +129.1 | **+486.4** |
-| 0.05 | −16.3 | −2.4 | −8.2 | −57.5 |
-| 0.10 | −15.1 | −4.6 | −91.8 | −74.4 |
-| 0.30 | −17.0 | −28.7 | −51.9 | −27.1 |
+| 0.01 | +2.5 [−24, +33] | **+56.4 [+33, +77]** | **+129.1 [+95, +170]** | **+486.4 [+253, +750]** |
+| 0.05 | −16.3 [−36, +7] | −2.4 [−38, +29] | −8.2 [−44, +22] | **−57.5 [−108, −11]** |
+| 0.10 | −15.1 [−34, +2] | −4.6 [−20, +11] | **−91.8 [−133, −57]** | **−74.4 [−118, −37]** |
+| 0.30 | **−17.0 [−34, −2]** | **−28.7 [−45, −14]** | **−51.9 [−77, −28]** | **−27.1 [−45, −8]** |
 
-**The split is on the sparsity axis, not the churn axis.** The LSTM wins twelve of sixteen
-cells, often by 15–90 points, and loses the entire `rate = 0.01` row — at churn 0.80 by
-486 points. Its cells span −12.6% to +575.9%, a 46× range; the Transformer's span +23.4% to
+**The split is on the sparsity axis, not the churn axis.** The LSTM is clearly closer to
+the truth in 7 of 16 cells, all at rates 0.05–0.30, by 17–92 points; the Transformer in 3,
+all in the `rate = 0.01` row — at churn 0.80 by 486 points. The other 6 cells, mostly at
+low churn on the mid-rate rows, show no clear difference at n = 10. Its cells span −12.6% to +575.9%, a 46× range; the Transformer's span +23.4% to
 +103.5%, a 4.4× range. The LSTM is the better model wherever there is enough data to be
 better on, and falls apart where there is not; the Transformer is uniformly mediocre and
 never falls apart.
@@ -434,19 +465,34 @@ volume in every cell of this row.
 
 ### The LSTM reaches parity on death detection, on dense panels only
 
-Paired per-panel comparison of `L_D`, ten replicates per cell:
+Paired per-panel comparison of `L_D`, ten replicates per cell; Δ is LSTM minus Pareto/NBD
+with its 95% bootstrap interval (all 16 cells, so the dense row can be read against the
+rest):
 
-| rate 0.30 | Pareto/NBD | LSTM | LSTM better on | Wilcoxon p |
-| --- | ---: | ---: | ---: | ---: |
-| churn 0.2 | 0.111 | 0.165 | 0/10 | 0.002 |
-| churn 0.4 | 0.185 | 0.218 | 0/10 | 0.002 |
-| churn 0.6 | 0.248 | 0.258 | 5/10 | 0.63 |
-| churn 0.8 | 0.290 | 0.270 | 6/10 | 0.38 |
+| cell | Pareto/NBD | LSTM | LSTM better on | Δ [95% CI] | supported |
+| --- | ---: | ---: | ---: | :---: | :---: |
+| rate 0.01, churn 0.2 | 0.275 | 0.417 | 2/10 | +0.142 [+0.080, +0.205] | yes |
+| rate 0.01, churn 0.4 | 0.554 | 1.090 | 0/10 | +0.536 [+0.462, +0.609] | yes |
+| rate 0.01, churn 0.6 | 0.763 | 2.014 | 0/10 | +1.251 [+0.895, +1.634] | yes |
+| rate 0.01, churn 0.8 | 1.042 | 5.480 | 0/10 | +4.438 [+2.774, +6.235] | yes |
+| rate 0.05, churn 0.2 | 0.223 | 0.424 | 0/10 | +0.201 [+0.178, +0.226] | yes |
+| rate 0.05, churn 0.4 | 0.390 | 0.728 | 0/10 | +0.338 [+0.289, +0.380] | yes |
+| rate 0.05, churn 0.6 | 0.441 | 0.918 | 0/10 | +0.477 [+0.381, +0.568] | yes |
+| rate 0.05, churn 0.8 | 0.532 | 0.799 | 0/10 | +0.267 [+0.172, +0.370] | yes |
+| rate 0.10, churn 0.2 | 0.183 | 0.323 | 0/10 | +0.140 [+0.105, +0.175] | yes |
+| rate 0.10, churn 0.4 | 0.274 | 0.507 | 0/10 | +0.232 [+0.170, +0.303] | yes |
+| rate 0.10, churn 0.6 | 0.353 | 0.527 | 0/10 | +0.174 [+0.143, +0.204] | yes |
+| rate 0.10, churn 0.8 | 0.421 | 0.520 | 4/10 | +0.099 [+0.006, +0.199] | yes |
+| rate 0.30, churn 0.2 | 0.111 | 0.165 | 0/10 | +0.054 [+0.044, +0.063] | yes |
+| rate 0.30, churn 0.4 | 0.185 | 0.218 | 0/10 | +0.033 [+0.022, +0.043] | yes |
+| rate 0.30, churn 0.6 | 0.248 | 0.258 | 5/10 | +0.010 [−0.016, +0.036] | no |
+| rate 0.30, churn 0.8 | 0.290 | 0.270 | 6/10 | −0.020 [−0.057, +0.017] | no |
 
-At the two highest churn levels of the densest row the LSTM is **statistically
-indistinguishable** from the process that generated the deaths. It is not better: over all
-160 panels it leaks less on 17. The cell means alone would have suggested a win at
-`churn 0.8` (0.270 against 0.290); the paired test says that margin is noise.
+At the two highest churn levels of the densest row there is **no clear difference**
+between the LSTM and the process that generated the deaths, at n = 10. That is not
+equivalence, and it is not a win: over all 160 panels it leaks less on 17. The cell means
+alone would have suggested a win at `churn 0.8` (0.270 against 0.290); the paired interval
+(−0.057 to +0.017) spans zero. In every other cell the LSTM leaks clearly more.
 
 Away from that row it collapses. Leakage at `rate = 0.01` runs 0.42 → 1.09 → 2.01 → **5.48**
 across the churn axis: at the sparse, high-churn corner the LSTM assigns dead customer-weeks
@@ -512,8 +558,8 @@ replicate-to-replicate variance as well as the level.
 ## 9. What this says to build next
 
 1. **Keep `ar_bounded`; make it the default AR encoding.** It is the only arm-axis change
-   that improved anything, it improved both architectures significantly, and it costs six
-   binary flags. It is not the fix, but there is no reason to run without it.
+   that improved |bias| without hurting it anywhere — in 9 of 16 cells for the LSTM and 5
+   for the Transformer — and it costs six binary flags. It is not the fix, but there is no reason to run without it.
 
 2. **Never let an unbounded counter into a rollout.** This grid measured the cost on
    panels where the truth is known: the generator's own sufficient statistic, encoded as
@@ -522,15 +568,15 @@ replicate-to-replicate variance as well as the level.
    by construction. `docs/feature_engineering.md` should carry this as a rule rather than
    a caution.
 
-3. **Drop `kmeans_8`.** It significantly hurt three of the four contrasts where it was
-   added to a usable AR encoding, for the same reason as (2): the rollout cannot update it.
-   The two contrasts it wins are both under `ar_unbounded`, where it is only outperforming
+3. **Drop `kmeans_8`.** Added to a usable AR encoding it hurt |bias| in 20 cells across the
+   four contrasts and helped in 3, for the same reason as (2): the rollout cannot update it.
+   Where it helps more than it hurts is under `ar_unbounded`, where it is only outperforming
    a broken channel — and `ar_bounded` beats every clustered arm outright. There is no
    configuration this grid recommends it in.
 
 4. **Diagnose the two architectures separately.** A single "neural vs benchmark" number
-   hides that the LSTM is better in twelve of sixteen cells and catastrophic in the other
-   four, while the Transformer is neither. Whatever absorbing state gets built should be
+   hides that the LSTM is clearly better in 7 of sixteen cells and clearly worse in 3 — all
+   in the sparse row, where it is catastrophic — while the Transformer is neither. Whatever absorbing state gets built should be
    evaluated per cell, not pooled.
 
 5. **Build the absorbing state, and target it at the sparse panels.** This was the
@@ -559,9 +605,9 @@ replicate-to-replicate variance as well as the level.
 - **One study per suite.** `n_studies_per_model=1`, so replication is across the ten panels
   in a cell, not across training runs on one panel. Model training is not seeded
   (`CLAUDE.md`), so a cell's spread mixes panel-to-panel variation with run-to-run
-  variation and cannot separate them. The 160-panel paired tests in §4 are unaffected —
-  they compare arms on the same panels — but a single cell's ±CI should not be read as
-  panel variation alone.
+  variation and cannot separate them. The per-cell paired intervals of §4, §5 and §7
+  therefore measure robustness to drawing a new panel and training on it once, together,
+  and should not be read as panel variation alone.
 
 - **These are synthetic panels with a known generator.** That is exactly what makes §4's
   conclusion sharp, and it is also the limit: on a real panel there is no ceiling to
