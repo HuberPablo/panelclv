@@ -10,6 +10,46 @@ calibrations — was re-scored from `Studies/` on 2026-09-17 and reproduced unch
 the decimal shown. The one addition on that date is Pareto/NBD on the three-year windows
 ("Three-year calibration" below), which did not exist when the section was written.
 
+## Revised under the statistical protocol (2026-09-28)
+
+Every comparison in this document is now Δ of means with a 95% percentile-bootstrap
+interval from `panelclv.evaluation.effects.effect`
+(`.scratch/statistical-protocol/benchmarks_real_panels_effects.py`), and Pareto/NBD is 20
+seeded fits per panel and calibration instead of one. Verdicts that flipped (old → new):
+
+- **ValendinLSTM against Pareto/NBD on ranking, CDNOW and gift:** "overlaps / at least as
+  well" → Pareto/NBD supported higher (−0.046 and −0.010).
+- **Best family-U cell against Pareto/NBD:** electronics "marginally above" → supported
+  below (−0.009); multichannel "contains it" → above for ValendinLSTM (+0.010), no clear
+  difference for the LSTM.
+- **`ar_saturating` on electronics:** Spearman "level with Pareto/NBD" → supported below
+  (−0.015).
+- **CDNOW flags in `real_panel_arms`:** MAPE "matches Pareto/NBD" → higher than the one
+  Pareto/NBD fit on the same 38-week window (+2.3). **CDNOW count-only LSTM "beats
+  ValendinLSTM":** withdrawn — the two forecast different holdouts.
+- **LSTM + bounded32 on gift:** "on a par with ValendinLSTM" → no clear difference in
+  MAPE and |bias|, Spearman supported lower (−0.037).
+- **LSTM + ratio:** "reaches Pareto/NBD's ranking on three panels" → supported above on
+  gift only (+0.014), supported below by about 0.01 on CDNOW, electronics and
+  multichannel. Its CDNOW MAPE "best, against ValendinLSTM's 36.2" → no clear difference.
+- **Multichannel:** "Pareto/NBD best overall" → bounded32 has the lower MAPE (−2.6),
+  Pareto/NBD the better level and ranking.
+- **Three-year Pareto/NBD:** MAPE "barely moves" → very slightly worse, supported
+  (+0.25 electronics, +0.17 gift); multichannel's best LSTM arm against Pareto/NBD: no
+  clear difference.
+- **electronic_5y:** Pareto/NBD's bias −15.6 → −16.6 over 20 fits, outside which the
+  published −14.8 lies. "The gain is the floor, not the pinning", "thirty is worse than
+  twenty" and "longer training moves the means" → no clear difference at n = 20. The
+  flags "steady" ValendinLSTM → no clear mean difference. Attention "~0.04 worse RMSE"
+  → RMSE is descriptive; no clear difference on the primary metrics without the label.
+  The searched ValendinLSTM now beats Pareto/NBD on Spearman and MAPE (supported); "RMSE
+  beats it in every study" is description only.
+- **Trial selection ("Does the search select the best trial?"):** its table is now
+  descriptive; the supported per-model results are `docs/model-selection.md` §3.
+- **Not re-tested:** the second draw of four electronic_5y cells (forecasts lost), and
+  every CDNOW Spearman in the pre-ADR-0009 suites (cannot be rebuilt). Spreads and refit
+  noise are reported as magnitude only; no threshold is drawn from them.
+
 ## Setup
 
 | | |
@@ -18,7 +58,7 @@ the decimal shown. The one addition on that date is Pareto/NBD on the three-year
 | ValendinLSTM embedder | **frozen** — ADR-0004 keeps the published raw sqrt(cardinality)+1 embeddings, so the embedder is not a searched parameter and `param_embedder` is empty in its `results.csv`. |
 | Week grid | Valendin's `dayofyear // 7`, capped at 51, on every panel (ADR-0009) |
 | ValendinLSTM budget | **20 replications × 100 Optuna trials × 500 Monte Carlo paths** per panel. Each replication is its own study: a 100-trial search over learning rate, weight decay and batch size, the ADR-0008 refit, and a 500-path forecast. Seeds 43–62. |
-| Pareto/NBD | one hierarchical-Bayes MCMC fit per panel — deterministic, so **n = 1** and no spread. No embedder, no trials. |
+| Pareto/NBD | **20 hierarchical-Bayes MCMC fits per panel**, replication r seeded 42 + r (suites `real_panel_benchmarks__ParetoNBD__<panel>__r00` … `r19`; r00 is the single fit this document first reported). A fit is reproducible under its seed but not across seeds, so Pareto/NBD is a replicated condition like the neural model. No embedder, no trials. |
 | Metrics | `compute_forecast_metrics` (`bias_percent`, `mape_aggregate`, `rmse`) plus Spearman of per-customer holdout totals, the last recomputed from the stored `Predictions/` because it needs the panel actuals. Regenerate all four with `python scripts/run_real_panel_benchmarks.py --report`. |
 | Archive | family N of `docs/studies-run.md` — 84 suites, 13 September 2026. |
 
@@ -52,19 +92,23 @@ A transaction is a purchase on CDNOW and gift, a line item on electronics, a dis
 order on multichannel (`docs/dataset-preparation.md`), and a household purchase day on
 electronic_5y (`docs/datasets.md`).
 
-### One caveat on the Pareto/NBD rows: they are single fits, and CDNOW's is not stable
+### How the benchmark comparisons are made
 
-The Setup table above calls the Pareto/NBD "deterministic, so **n = 1** and no spread".
-That holds on electronics — ±0.35 points of bias over three seeds (`docs/p-slstm.md` §10)
-— and **does not hold on CDNOW**, where the death parameters sit on a nearly flat
-likelihood ridge. Refitting the CDNOW benchmark on seeds 42, 43 and 44 gives biases of
-−15.97, −15.08 and −11.50: a 4.5-point spread, and the row reported here is seed 42, the
-most pessimistic of the three. Any CDNOW comparison drawn within ~5 points of bias against
-this benchmark is not a result. Ranking is stable (Spearman 0.450, 0.457, 0.440), so the
-Spearman comparisons are unaffected.
+Every comparison below follows `docs/statistical-protocol.md`: Δ = mean(B) − mean(A) with a
+95% percentile-bootstrap interval from 10,000 resamples, supported when it excludes zero,
+computed by `panelclv.evaluation.effects.effect` in
+`.scratch/statistical-protocol/benchmarks_real_panels_effects.py`, whose output this
+document quotes. A neural condition's replications are independent searches, and
+Pareto/NBD's 20 seeded fits are their own replications, so every comparison uses the
+independent bootstrap and states its n. Spearman and aggregate MAPE carry the claims;
+signed bias carries direction claims, |bias| calibration accuracy; RMSE is descriptive.
+Each panel is tested separately.
 
-A fit is ~16 s, so replacing the CDNOW row with a seed distribution is five minutes of
-compute; it has not been done.
+**Pareto/NBD's own spread across its 20 fits** (`.scratch/statistical-protocol/benchmarks_pareto_scores.py`):
+bias sd 2.35 points on CDNOW (range −20.0 to −9.8), 0.42 on electronics, 0.73 on gift and
+1.84 on multichannel; Spearman sd 0.006–0.012; MAPE sd 0.2–0.8. CDNOW's death parameters
+sit on a nearly flat likelihood ridge, which is why its bias moves most. The seed-42 fit
+this document first reported is one of the 20.
 
 For the record, the suspicion in `docs/pareto-nbd-cdnow-replication.md` §9(b) that the
 benchmark's forecast window is misaligned by one period **was investigated on 2026-09-17
@@ -98,11 +142,11 @@ patience 7 gives:
 | trained to the paper's epoch count | −5.7 ± 27.0 | **46.8** | **0.177 ± 0.089** |
 
 As differences of condition means with 95% bootstrap intervals, 20 independent
-replications each: MAPE −22.3 (−28.2 to −16.2) and Spearman +0.150 (+0.108 to +0.191),
+replications each: MAPE −22.3 (−28.3 to −16.2) and Spearman +0.150 (+0.107 to +0.191),
 against a refit noise of 3.63 MAPE and 0.0105 Spearman on this panel. The developed LSTM
 moves the same way on discrimination. Copying the notebook's optimizer, batch size and
-patience *without* the epoch count moves neither (both intervals span zero) — it is the
-training length, not the settings.
+patience *without* the epoch count shows no clear difference in either at n = 20 (both
+intervals span zero) — it is the training length, not the settings.
 
 **The cause is this package's own doing, not the published method.** Run under the
 paper's own customer-wise validation split, the same recipe trains 28-56 epochs on this
@@ -123,113 +167,123 @@ whether they are regenerated under a training floor is decided in
 §15). Per-customer Spearman for `ValendinLSTM`, 20 replications a cell, against the rows
 in this document:
 
-Δ is against family U's own `archive / no_cluster` control, with a 95% bootstrap interval
-over 20 replications; the panel's Spearman refit noise is 0.0105–0.0159.
+Δ is against family U's own `archive / no_cluster` control, with a 95% percentile-bootstrap
+interval, n = 20 / 20; the panel's Spearman refit noise is 0.0105–0.0159. The Pareto/NBD
+column is the mean of its 20 seeded fits.
 
 | panel | control | trained past the plateau | Δ (95% CI) | with a `kmeans_8` label | Δ (95% CI) | Pareto/NBD |
 | --- | ---: | ---: | :---: | ---: | :---: | ---: |
-| cdnow | 0.364 | 0.383 | +0.019 (−0.019, +0.065) | 0.403 | +0.039 (−0.003, +0.088) | 0.450 |
-| electronics | 0.021 | **0.178** | **+0.157 (+0.119, +0.193)** | **0.305** | **+0.283 (+0.265, +0.302)** | 0.297 |
-| gift | 0.349 | 0.280 | **−0.069 (−0.118, −0.027)** | 0.359 | +0.010 (−0.005, +0.026) | 0.383 |
-| multichannel | −0.004 | **0.119** | **+0.123 (+0.099, +0.148)** | **0.178** | **+0.182 (+0.162, +0.199)** | 0.189 |
+| cdnow | 0.364 | 0.383 | +0.019 (−0.019, +0.065) | 0.403 | +0.039 (−0.003, +0.086) | 0.450 |
+| electronics | 0.021 | **0.178** | **+0.157 (+0.119, +0.193)** | **0.305** | **+0.283 (+0.264, +0.302)** | 0.314 |
+| gift | 0.349 | 0.280 | **−0.069 (−0.118, −0.027)** | 0.359 | +0.010 (−0.005, +0.026) | 0.378 |
+| multichannel | −0.004 | **0.119** | **+0.123 (+0.099, +0.147)** | **0.178** | **+0.182 (+0.163, +0.199)** | 0.185 |
 
 Three things follow for the rows below. **The collapse is closed on both panels where it
-occurred** — with both levers applied, electronics reaches 0.305 (interval 0.298 to 0.312,
-marginally above Pareto/NBD's single fit at 0.297) and multichannel 0.195 (0.187 to 0.204,
-interval containing 0.189) — and it took either a training floor or a per-customer input;
-stacking the two adds at most a few hundredths of Spearman, the order of an unseeded
-refit's own movement. **Neither lever is supported on cdnow or gift**, where the intervals
-span zero (and the floor is supported *negative* on gift). **The two panels that never collapsed gain nothing**, and a floor makes gift
-slightly worse. And **a training floor is not safe everywhere**: on CDNOW it triples the
-developed LSTM's MAPE (57.7 to 183.9, p = 10⁻⁴), though the frozen benchmark there is
-unharmed. So the undertraining caveat applies to the **electronics and multichannel rows**
+occurred, to within about ±0.01 of Pareto/NBD** — with both levers applied, electronics
+reaches 0.305, still supported *below* Pareto/NBD's 20 fits (Δ −0.009, 95% CI −0.017 to
+−0.000), and multichannel 0.195, supported slightly above them (+0.010, +0.000 to
++0.020), both smaller than the refit noise (`docs/training-budget.md` §15.1) — and it
+took either a training floor or a per-customer input; stacking the two adds at most a few
+hundredths of Spearman. **Neither lever shows a clear gain on cdnow or gift**, where the
+intervals span zero, and the floor is supported *negative* on gift. And **a training floor
+is not safe everywhere**: on CDNOW it triples the developed LSTM's MAPE (57.7 to 183.9;
+Δ +126.2, 95% CI +77.2 to +173.2, n = 20 / 20), while the frozen benchmark there shows no
+clear difference (+4.8, −19.8 to +30.8). So the undertraining caveat applies to the **electronics and multichannel rows**
 specifically, not to this document as a whole.
 
 ## Results
 
 ### Summary
 
-ValendinLSTM as mean ± sd over 20 replications; Pareto/NBD and the all-zero forecast are
-single values. The per-panel tables below add median, IQR, min and max.
+ValendinLSTM as mean ± sd over 20 replications, Pareto/NBD as mean ± sd over its 20
+seeded fits; the all-zero forecast is a single value. The per-panel tables below add
+median, IQR, min and max for ValendinLSTM.
 
 | panel | model | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | ---: | ---: | ---: |
 | cdnow | ValendinLSTM | −23.73 ± 20.18 | 36.20 ± 8.16 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
-| | Pareto/NBD | −15.97 | 21.03 | 0.1455 | 0.450 |
+| | Pareto/NBD | −14.14 ± 2.35 | 20.47 ± 0.85 | 0.1455 ± 0.0000 | 0.450 ± 0.006 |
 | | all-zero | −100 | 100 | 0.1506 | — |
 | electronics | ValendinLSTM | +46.03 ± 14.84 | 70.80 ± 6.37 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
-| | Pareto/NBD | −63.02 | 65.65 | 0.3758 | 0.297 |
+| | Pareto/NBD | −63.09 ± 0.42 | 65.72 ± 0.31 | 0.3758 ± 0.0000 | 0.314 ± 0.010 |
 | | all-zero | −100 | 100 | 0.3775 | — |
 | gift | ValendinLSTM | −15.65 ± 16.37 | 29.74 ± 4.91 | 0.1064 ± 0.0001 | 0.368 ± 0.018 |
-| | Pareto/NBD | −9.86 | 43.13 | 0.1066 | 0.383 |
+| | Pareto/NBD | −11.39 ± 0.73 | 42.68 ± 0.22 | 0.1066 ± 0.0000 | 0.378 ± 0.006 |
 | | all-zero | −100 | 100 | 0.1075 | — |
 | multichannel | ValendinLSTM | +66.64 ± 55.45 | 96.61 ± 39.70 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
-| | Pareto/NBD | +6.87 | 55.86 | 0.0567 | 0.189 |
+| | Pareto/NBD | +6.49 ± 1.84 | 55.77 ± 0.31 | 0.0567 ± 0.0000 | 0.185 ± 0.012 |
 | | all-zero | −100 | 100 | 0.0569 | — |
 
-ValendinLSTM is reported as its distribution across the 20 replications. Pareto/NBD is a
-single fit. The all-zero forecast is printed beside RMSE because the panels are 98–99.7%
+ValendinLSTM is reported as its distribution across the 20 replications, Pareto/NBD as its
+distribution across 20 seeded fits. The all-zero forecast is printed beside RMSE because the panels are 98–99.7%
 zeros: predicting nothing lands within 0.1–2.6% of the best RMSE here, so RMSE separates
 almost nothing and is not a basis for a ranking.
 
 ### CDNOW
 
-| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD | all-zero |
+| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD (mean of 20) | all-zero |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| bias_percent | -23.73 | 20.18 | -28.26 | 22.95 | -53.35 | 22.74 | -15.97 | -100.00 |
-| mape_aggregate | 36.20 | 8.16 | 35.23 | 9.24 | 22.86 | 54.39 | 21.03 | 100.00 |
+| bias_percent | -23.73 | 20.18 | -28.26 | 22.95 | -53.35 | 22.74 | -14.14 | -100.00 |
+| mape_aggregate | 36.20 | 8.16 | 35.23 | 9.24 | 22.86 | 54.39 | 20.47 | 100.00 |
 | rmse | 0.1468 | 0.0008 | 0.1466 | 0.0005 | 0.1460 | 0.1496 | 0.1455 | 0.1506 |
 | spearman | 0.404 | 0.024 | 0.400 | 0.034 | 0.361 | 0.445 | 0.450 | — |
 
 ### Electronics
 
-| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD | all-zero |
+| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD (mean of 20) | all-zero |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| bias_percent | 46.03 | 14.84 | 46.84 | 17.26 | 0.80 | 66.98 | -63.02 | -100.00 |
-| mape_aggregate | 70.80 | 6.37 | 69.48 | 8.90 | 57.19 | 81.65 | 65.65 | 100.00 |
+| bias_percent | 46.03 | 14.84 | 46.84 | 17.26 | 0.80 | 66.98 | -63.09 | -100.00 |
+| mape_aggregate | 70.80 | 6.37 | 69.48 | 8.90 | 57.19 | 81.65 | 65.72 | 100.00 |
 | rmse | 0.3770 | 0.0003 | 0.3769 | 0.0004 | 0.3764 | 0.3775 | 0.3758 | 0.3775 |
-| spearman | 0.032 | 0.033 | 0.033 | 0.043 | -0.039 | 0.083 | 0.297 | — |
+| spearman | 0.032 | 0.033 | 0.033 | 0.043 | -0.039 | 0.083 | 0.314 | — |
 
 ### Gift
 
-| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD | all-zero |
+| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD (mean of 20) | all-zero |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| bias_percent | -15.65 | 16.37 | -19.15 | 20.88 | -44.30 | 22.75 | -9.86 | -100.00 |
-| mape_aggregate | 29.74 | 4.91 | 27.75 | 6.45 | 24.76 | 44.83 | 43.13 | 100.00 |
+| bias_percent | -15.65 | 16.37 | -19.15 | 20.88 | -44.30 | 22.75 | -11.39 | -100.00 |
+| mape_aggregate | 29.74 | 4.91 | 27.75 | 6.45 | 24.76 | 44.83 | 42.68 | 100.00 |
 | rmse | 0.1064 | 0.0001 | 0.1064 | 0.0001 | 0.1063 | 0.1066 | 0.1066 | 0.1075 |
-| spearman | 0.368 | 0.018 | 0.370 | 0.012 | 0.328 | 0.393 | 0.383 | — |
+| spearman | 0.368 | 0.018 | 0.370 | 0.012 | 0.328 | 0.393 | 0.378 | — |
 
 ### Multichannel
 
-| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD | all-zero |
+| metric | Valendin mean | sd | median | IQR | min | max | Pareto/NBD (mean of 20) | all-zero |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| bias_percent | 66.64 | 55.45 | 60.55 | 67.94 | -17.40 | 173.71 | 6.87 | -100.00 |
-| mape_aggregate | 96.61 | 39.70 | 84.84 | 46.84 | 50.81 | 181.16 | 55.86 | 100.00 |
+| bias_percent | 66.64 | 55.45 | 60.55 | 67.94 | -17.40 | 173.71 | 6.49 | -100.00 |
+| mape_aggregate | 96.61 | 39.70 | 84.84 | 46.84 | 50.81 | 181.16 | 55.77 | 100.00 |
 | rmse | 0.0570 | 0.0001 | 0.0570 | 0.0002 | 0.0569 | 0.0574 | 0.0567 | 0.0569 |
-| spearman | 0.005 | 0.029 | 0.011 | 0.027 | -0.069 | 0.049 | 0.189 | — |
+| spearman | 0.005 | 0.029 | 0.011 | 0.027 | -0.069 | 0.049 | 0.185 | — |
 
 ## Reading
 
-- **Pareto/NBD ranks customers at least as well as ValendinLSTM on every panel**, and far
-  better on electronics (0.297 against 0.032) and multichannel (0.189 against 0.005).
-  On CDNOW and gift the LSTM's whole Spearman range sits just below or overlaps the
-  Pareto/NBD value.
+- **Pareto/NBD ranks customers better than ValendinLSTM on every panel**, supported on
+  all four. Δ Spearman (ValendinLSTM − Pareto/NBD), n = 20 / 20: CDNOW −0.046 (95% CI
+  −0.057 to −0.035), electronics −0.282 (−0.297 to −0.267), gift −0.010 (−0.018 to
+  −0.002), multichannel −0.181 (−0.194 to −0.168). The gap is large where the LSTM
+  collapses and small, but supported, on CDNOW and gift.
 - **On electronics and multichannel ValendinLSTM has collapsed to a cohort average.**
   Its forecast barely varies between customers: the coefficient of variation of
-  per-customer holdout totals is 0.05 (electronics) and 0.07 (multichannel), against 1.12
-  and 1.21 for Pareto/NBD and 1.92 for the same model on CDNOW (replication r00). A
+  per-customer holdout totals is 0.05 (electronics) and 0.07 (multichannel), against 1.11
+  and 1.21 for Pareto/NBD (mean of its 20 fits) and 1.92 for the same model on CDNOW (replication r00). A
   forecast that gives every customer the same number cannot rank them, which is the
   near-zero Spearman above. This is not specific to ValendinLSTM or to this run; see
   "The forecast collapse on long sparse panels" below.
-- **Level.** ValendinLSTM under-forecasts CDNOW (-23.7%) and gift (-15.7%) and
-  over-forecasts electronics (+46.0%) and multichannel (+66.6%). Pareto/NBD is closer to
-  the level on CDNOW, gift and multichannel. On gift ValendinLSTM has the better aggregate
-  MAPE (29.7 against 43.1) despite its bias.
+- **Level.** ValendinLSTM under-forecasts CDNOW (−23.7%) and gift (−15.7%) and
+  over-forecasts electronics (+46.0%) and multichannel (+66.6%), each mean-bias interval
+  excluding zero. Pareto/NBD's |bias| is smaller on CDNOW (Δ |bias| ValendinLSTM −
+  Pareto/NBD +14.0, +8.5 to +19.6), gift (+8.1, +3.3 to +12.9) and multichannel (+63.6,
+  +43.2 to +86.4), and its MAPE is lower on CDNOW (+15.7, +12.3 to +19.2), electronics
+  (+5.1, +2.3 to +7.8) and multichannel (+40.8, +24.9 to +58.7). On gift ValendinLSTM has
+  the lower aggregate MAPE despite its bias (29.7 against 42.7; Δ −12.9, −14.8 to −10.7).
 - **Pareto/NBD's -63.0% on electronics is a unit mismatch, not a failed fit.** Pareto/NBD
   models purchase *occasions*: `benchmarks/pareto_nbd.py` builds `x` from active weeks, as
   BTYDplus does. The electronics target counts *line items*, 2.43 per active week in the
   holdout, against 1.02–1.05 on the other three panels. Scored against active weeks, the
   same forecast is within a few points of its error on the other panels:
+
+  Pareto/NBD columns are the seed-42 fit (replication r00); across the 20 fits the
+  electronics bias moves by 0.4 points of sd.
 
   | panel | items per active week | Pareto/NBD predicted | actual items | actual active weeks | bias vs items | bias vs active weeks |
   | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -246,9 +300,9 @@ almost nothing and is not a basis for a ranking.
   `x > 0` with `t_x = 0` and the sampler diverges (`_build_cbs` docstring).
   ValendinLSTM trains on counts clipped at 6 but is scored on the unclipped holdout; that
   shaves about 5 points off its electronics bias and does not explain the +46%.
-- **Spread.** Replication-to-replication SD of bias is 15–20 points on CDNOW, electronics
-  and gift, and 55 on multichannel, whose holdout holds 228 transactions. A difference
-  between two models smaller than that SD is not a result on that panel.
+- **Spread.** Replication-to-replication SD of ValendinLSTM's bias is 15–20 points on
+  CDNOW, electronics and gift, and 55 on multichannel, whose holdout holds 228
+  transactions. That is description; comparisons between models rest on the intervals.
 - **Electronics is not the paper's cohort.** 829 customers against Valendin et al.'s
   3,782, and its transactions are line items rather than purchase occasions, so neither
   benchmark's electronics number is comparable with the published one.
@@ -361,10 +415,17 @@ Reading:
   right, and the unbounded channels' extra spread is the extrapolation
   `docs/feature_engineering.md` §4 measures.
 - **The Transformer collapses less completely than the LSTM.** Its count-only rows sit at
-  CV 0.16–0.19 and Spearman 0.09–0.15 against the LSTM's 0.07–0.09 and 0.04–0.05, and 22 of
-  its 54 count-only forecasts escape (CV > 0.2) against 10 of the LSTM's 204. Attention
+  CV 0.16–0.19 and Spearman 0.09–0.15 against the LSTM's 0.07–0.09 and 0.04–0.05 (22 of
+  its 54 count-only forecasts escape, CV > 0.2, against 10 of the LSTM's 204, as
+  description). In the one experiment that ran both count-only on the same budget
+  (`real_panel_arms`, 20 / 20), the Transformer ranks higher: Δ Spearman +0.077 (95% CI
+  +0.020 to +0.132); MAPE shows no clear difference (−3.3, −7.1 to +0.8). Attention
   reads the whole calibration window at every step rather than carrying it in a state, so
   it has less to forget — but it does not reach a usable ranking either.
+
+The census above predates the 20 seeded Pareto/NBD fits (28 September), which are not in
+it; their mean on this panel is CV 1.11 and Spearman 0.314. The CV and Spearman columns are
+descriptive.
 
 **The trigger is the panel, not the architecture.** Measured on 2026-09-13 across all four
 panels, which the electronics-only table above does not cover. The same count-only configuration
@@ -427,7 +488,7 @@ cells read `n/a`, not "small".
 | panel | model and features | n | trials / paths | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | electronics | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
-| electronics | **Benchmark: Pareto/NBD** | 1 | — | −63.0 | 65.7 | 0.3758 | 0.297 |
+| electronics | **Benchmark: Pareto/NBD** | 20 fits | — | −63.1 ± 0.4 | 65.7 ± 0.3 | 0.3758 ± 0.0000 | 0.314 ± 0.010 |
 | electronics | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | +22.4 ± 16.4 | 56.3 ± 7.5 | 0.3767 ± 0.0003 | 0.041 ± 0.065 |
 | electronics | LSTM ar_bounded_32 (`ar_encoding`) | 100 | 50 / 300 | +1.2 ± 23.6 | 46.3 ± 8.4 | 0.3760 ± 0.0003 | 0.257 ± 0.044 |
 | electronics | LSTM ar_bounded_52 (`ar_encoding`) | 100 | 50 / 300 | −8.2 ± 16.4 | 45.4 ± 5.0 | 0.3760 ± 0.0004 | 0.202 ± 0.121 |
@@ -440,7 +501,8 @@ cells read `n/a`, not "small".
 | electronics | Transformer no_ar (`real_panel_arms`) | 20 | 50 / 200 | +15.9 ± 19.2 | 53.0 ± 6.3 | 0.3792 ± 0.0006 | 0.113 ± 0.107 |
 | electronics | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.5 ± 19.9 | 49.5 ± 4.6 | 0.3763 ± 0.0003 | 0.201 ± 0.135 |
 | cdnow | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
-| cdnow | **Benchmark: Pareto/NBD** | 1 | — | −16.0 | 21.0 | 0.1455 | 0.450 |
+| cdnow | **Benchmark: Pareto/NBD** | 20 fits | — | −14.1 ± 2.3 | 20.5 ± 0.8 | 0.1455 ± 0.0000 | 0.450 ± 0.006 |
+| cdnow | Pareto/NBD on the arms' 38-week window (`real_panel_arms__ParetoNBD__cdnow`) | 1 fit | — | −11.6 | 18.7 | 0.1468 | n/a |
 | cdnow | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | −0.7 ± 16.2 | 22.4 ± 8.2 | 0.1475 ± 0.0003 | n/a |
 | cdnow | LSTM ar_bounded_16 (`ar_encoding`) | 100 | 50 / 300 | −8.5 ± 15.2 | 22.6 ± 5.7 | 0.1473 ± 0.0002 | n/a |
 | cdnow | LSTM ar_bounded_32 (`ar_encoding`) | 40 | 50 / 300 | +42.9 ± 43.7 | 55.4 ± 37.2 | 0.1498 ± 0.0030 | n/a |
@@ -453,35 +515,56 @@ cells read `n/a`, not "small".
 | cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 ± 17.3 | 25.6 ± 6.9 | 0.1479 ± 0.0006 | n/a |
 
 The CDNOW Transformer no_ar suite is a partial run (19 forecasts, no `results.csv`) and is
-left out. **The `ar_encoding` arms are not budget-matched to each other**: eleven ran five
+left out. The electronics Transformer no_ar suite's stored predictions do not reproduce its
+`results.csv` (they score MAPE 51.3 and bias +10.2 against 53.0 and +15.9); its row and its
+effects use `results.csv`, like every other row.
+
+**How the arms are compared.** Each arm against both benchmarks and against its own
+family's `no_ar` arm, independent bootstrap, n as in the table
+(`benchmarks_real_panels_effects.py`). On electronics the arms share the benchmark's windows,
+so they are compared with ValendinLSTM's 20 replications and Pareto/NBD's 20 seeded fits.
+On CDNOW they forecast a 38-week holdout the benchmarks do not, so they are compared only
+with each other and with the single Pareto/NBD fit on their own window
+(`real_panel_arms__ParetoNBD__cdnow`: bias −11.6, MAPE 18.7). That fit was never
+replicated, so it is a fixed reference — each arm's interval is the paired case against a
+constant — and **Pareto/NBD's own fit-to-fit spread (2.3 points of bias sd on CDNOW) is not
+in those intervals**. **The `ar_encoding` arms are not budget-matched to each other**: eleven ran five
 seed shards (100 replications), CDNOW `ar_ratio` four (80), and `ar_unbounded` and CDNOW
 `ar_bounded_32` two (40). `docs/studies-run.md` §4.1 has the shard map.
 
 Reading:
 
-- **On electronics the bounded flags beat both benchmarks on the level and on MAPE.** The
-  LSTM with flags is within a few points of zero bias (+1.2 and −8.2 in `ar_encoding`,
-  +2.0 in `real_panel_arms`) against ValendinLSTM's +46.0, and its MAPE is 45–48 against
-  70.8 for ValendinLSTM and 65.7 for Pareto/NBD. Pareto/NBD's −63.0 is the unit mismatch
-  described above, so its electronics level is not a like-for-like row.
-- **On electronics the flags fix ranking relative to the count-only models, but do not
-  reach Pareto/NBD.** Spearman rises from 0.03–0.11 without AR to 0.20–0.26 with flags;
-  Pareto/NBD has 0.297. This is the collapse above being lifted by a persistent channel.
-- **`ar_saturating` is the best electronics arm in the ablation on every metric at once,
-  and it had never been reported.** Bias −11.6 ± 18.0, MAPE 43.3 ± 3.6 — the lowest in the
-  family, and the tightest — with Spearman 0.299, level with Pareto/NBD's 0.297. Its
+- **On electronics the bounded flags beat both benchmarks on MAPE and ValendinLSTM on
+  level**, supported for all three LSTM flag arms. Their MAPE (45–48) is lower than
+  ValendinLSTM's 70.8 by 22.4 to 25.4 points and than Pareto/NBD's 65.7 by 17.3 to 20.3,
+  every interval excluding zero; their |bias| is lower than ValendinLSTM's by 23.8 to
+  31.2. Pareto/NBD's −63.0 is the unit mismatch described above, so its electronics
+  level is not a like-for-like row.
+- **On electronics the flags lift ranking over the count-only models, but stay below
+  Pareto/NBD.** Against their own `no_ar` arm the LSTM flag arms gain +0.160 to +0.216
+  Spearman and the Transformer's +0.088 (+0.009 to +0.159), all supported; against
+  Pareto/NBD's 0.314 every flag arm is supported below it (Δ −0.056 to −0.113). This is
+  the collapse above being lifted by a persistent channel.
+- **`ar_saturating` has the family's lowest mean MAPE and a ranking close to, but below,
+  Pareto/NBD's, and it had never been reported.** Bias −11.6 ± 18.0, MAPE 43.3 ± 3.6 — the
+  lowest and tightest in the family, 22.4 below Pareto/NBD (−23.1 to −21.7) — with
+  Spearman 0.299, supported below Pareto/NBD's 0.314 by 0.015 (−0.020 to −0.009). Its
   columns are `saturating_recency_26_periods`, `transaction_rate`,
   `saturating_tenure_26_periods`: the same two clocks as `ratio`, saturated at C rather
-  than divided by tenure. It is the only encoding here that holds the level *and* the
-  ranking, which is what the flags-plus-ratio arm was built to do and did not achieve.
+  than divided by tenure. Among these encodings it combines the best level with a ranking
+  within 0.015 of Pareto/NBD, which is what the flags-plus-ratio arm was built to do and
+  did not achieve.
   **It was never carried onto gift or multichannel**, so the four-panel sections below do
   not contain it (`docs/studies-run.md` §6, gap 4).
-- **On CDNOW the flags move almost nothing, and the count-only LSTM already beats the
-  ValendinLSTM benchmark on level and MAPE.** CDNOW does not collapse, so there is little
-  for the flags to add: bias shifts by 8–11 points towards under-forecasting, MAPE stays
-  within 21–27. Pareto/NBD's MAPE of 21.0 is matched by the LSTM with flags in
-  `real_panel_arms` (21.0 ± 3.3). These CDNOW differences are within one SD and partly
-  confounded by the one-week window difference.
+- **On CDNOW the flags move the level towards under-forecasting and do little else.**
+  CDNOW does not collapse, so there is little for the flags to add. Against their own
+  `no_ar` arm they shift bias by −7.8 (−12.2 to −3.5; `ar_encoding`, n = 100 / 100) and
+  −11.4 (−22.4 to −1.1; `real_panel_arms`, 20 / 20), both supported. Their MAPE shows no
+  clear difference in `ar_encoding` (+0.3, −1.7 to +2.1) and is lower in `real_panel_arms`
+  (−5.7, −11.6 to −0.8). Against the one Pareto/NBD fit on the same 38-week window (MAPE
+  18.7) every CDNOW arm has the higher MAPE, the flags in `real_panel_arms` by the least
+  (+2.3, +0.9 to +3.8 — not "matched"). These arms and the ValendinLSTM benchmark forecast
+  different holdouts (38 against 39 weeks), so the two are not compared.
 - **The budgets differ, so the benchmark rows are not a budget-matched comparison.**
   ValendinLSTM ran 100 trials and 500 paths, the developed models 50 trials and 200–300
   paths. Monte Carlo noise at 200+ paths is under 2% of the replication SD, so the path
@@ -509,37 +592,46 @@ decision. Scored by the same code as the benchmark rows, on the same customers.
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | cdnow | **LSTM + bounded32, sin/cos** | 100 | +37.1 ± 47.7 | 65.3 ± 30.7 | 0.1498 ± 0.0026 | 0.085 ± 0.170 |
 | cdnow | ValendinLSTM (benchmark) | 20 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
-| cdnow | Pareto/NBD (benchmark) | 1 | −16.0 | 21.0 | 0.1455 | 0.450 |
+| cdnow | Pareto/NBD (benchmark) | 20 fits | −14.1 ± 2.3 | 20.5 ± 0.8 | 0.1455 ± 0.0000 | 0.450 ± 0.006 |
 | cdnow | all-zero | — | −100.0 | 100.0 | 0.1506 | — |
 | electronics | **LSTM + bounded32, sin/cos** | 100 | −1.7 ± 18.9 | 45.0 ± 4.5 | 0.3757 ± 0.0002 | 0.263 ± 0.042 |
 | electronics | ValendinLSTM (benchmark) | 20 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
-| electronics | Pareto/NBD (benchmark) | 1 | −63.0 | 65.7 | 0.3758 | 0.297 |
+| electronics | Pareto/NBD (benchmark) | 20 fits | −63.1 ± 0.4 | 65.7 ± 0.3 | 0.3758 ± 0.0000 | 0.314 ± 0.010 |
 | electronics | all-zero | — | −100.0 | 100.0 | 0.3775 | — |
 | gift | **LSTM + bounded32, sin/cos** | 100 | −18.5 ± 15.3 | 31.4 ± 5.2 | 0.1066 ± 0.0001 | 0.331 ± 0.035 |
 | gift | ValendinLSTM (benchmark) | 20 | −15.7 ± 16.4 | 29.7 ± 4.9 | 0.1064 ± 0.0001 | 0.368 ± 0.017 |
-| gift | Pareto/NBD (benchmark) | 1 | −9.9 | 43.1 | 0.1066 | 0.383 |
+| gift | Pareto/NBD (benchmark) | 20 fits | −11.4 ± 0.7 | 42.7 ± 0.2 | 0.1066 ± 0.0000 | 0.378 ± 0.006 |
 | gift | all-zero | — | −100.0 | 100.0 | 0.1075 | — |
 | multichannel | **LSTM + bounded32, sin/cos** | 100 | +17.0 ± 20.0 | 53.2 ± 8.2 | 0.0569 ± 0.0000 | 0.096 ± 0.054 |
 | multichannel | ValendinLSTM (benchmark) | 20 | +66.6 ± 55.5 | 96.6 ± 39.7 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
-| multichannel | Pareto/NBD (benchmark) | 1 | +6.9 | 55.9 | 0.0567 | 0.189 |
+| multichannel | Pareto/NBD (benchmark) | 20 fits | +6.5 ± 1.8 | 55.8 ± 0.3 | 0.0567 ± 0.0000 | 0.185 ± 0.012 |
 | multichannel | all-zero | — | −100.0 | 100.0 | 0.0569 | — |
 
 Reading:
 
+Every comparison below is independent, n = 100 (LSTM) / 20 (either benchmark), from
+`benchmarks_real_panels_effects.py`.
+
 - **Electronics: the best level and error of anything measured here.** Bias −1.7 ± 18.9
-  and MAPE 45.0 ± 4.5, against ValendinLSTM's +46.0 / 70.8, and Spearman 0.263, close to
-  Pareto/NBD's 0.297. It reproduces the AR-encoding ablation's `ar_bounded_32` electronics
+  and MAPE 45.0 ± 4.5; MAPE is lower than ValendinLSTM's by 25.8 (−28.5 to −22.9) and
+  than Pareto/NBD's by 20.7 (−21.5 to −19.8). Its Spearman, 0.263, is supported below
+  Pareto/NBD's 0.314 (Δ −0.050, −0.060 to −0.041). It reproduces the AR-encoding ablation's `ar_bounded_32` electronics
   arm (+1.2 bias, 46.3 MAPE, 0.257) at twice its trial budget.
-- **Multichannel: the flags lift the collapse, partly.** Bias +17.0 against the
-  benchmark's +66.6 and MAPE 53.2 against 96.6 — slightly better than Pareto/NBD's 55.9 —
-  with a far tighter spread (SD 20 against 55). Ranking rises from 0.005 to 0.096, still
-  half of Pareto/NBD's 0.189.
-- **Gift: on a par with ValendinLSTM, not better.** Every metric overlaps the benchmark
-  within one SD; Spearman is slightly lower (0.331 against 0.368). Gift is the panel that
-  only half-collapsed without AR features, so there was less for the flags to recover.
+- **Multichannel: the flags lift the collapse, partly.** MAPE 53.2 against
+  ValendinLSTM's 96.6 (Δ −43.4, −61.3 to −27.0) and slightly below Pareto/NBD's 55.8
+  (−2.6, −4.1 to −0.9 — supported and small); |bias| lower than ValendinLSTM's by 50.4
+  (−73.3 to −29.2) but higher than Pareto/NBD's by 13.2 (+9.8 to +16.7). Ranking rises
+  from 0.005 to 0.096 (Δ +0.091, +0.075 to +0.108), still below Pareto/NBD's 0.185 by
+  0.089 (−0.101 to −0.078).
+- **Gift: no better than ValendinLSTM, and it ranks worse.** MAPE (+1.7, −0.8 to +3.9)
+  and |bias| (+1.2, −4.2 to +6.6) show no clear difference from the benchmark at these n;
+  Spearman is supported lower (0.331 against 0.368; Δ −0.037, −0.047 to −0.027). Gift is
+  the panel that only half-collapsed without AR features, so there was less for the flags
+  to recover.
 - **CDNOW: this configuration fails.** Bias +37.1 with an SD of 47.7, MAPE 65.3 and
-  Spearman 0.085 ± 0.170 — worse than both benchmarks and near no ranking at all, where
-  the archived CDNOW LSTM runs sat at −8.5 to −11.8 bias and ~0.4 Spearman. Two things
+  Spearman 0.085 ± 0.170 — supported worse than both benchmarks on MAPE (+29.1 and +44.9)
+  and Spearman (−0.318 and −0.364), where the archived CDNOW LSTM runs sat at −8.5 to
+  −11.8 bias (their Spearman cannot be recomputed, above). Two things
   changed from those runs and this one cannot separate them: the deepest flag is 32 weeks
   on a 39-week calibration window (they used 16, because a 32-week silence barely occurs
   while fitting), and the model now reads `week_sin` / `week_cos` (they read no calendar),
@@ -569,22 +661,22 @@ them on electronics and CDNOW only, at 50 trials and 300 paths.
 | cdnow | LSTM + log | 100 | +65.8 ± 29.1 | 68.4 ± 26.9 | 0.1536 ± 0.0055 | 0.442 ± 0.015 |
 | cdnow | **LSTM + ratio** | 100 | +17.6 ± 24.0 | 32.2 ± 14.4 | 0.1466 ± 0.0012 | 0.439 ± 0.009 |
 | cdnow | ValendinLSTM (benchmark) | 20 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
-| cdnow | Pareto/NBD (benchmark) | 1 | −16.0 | 21.0 | 0.1455 | 0.450 |
+| cdnow | Pareto/NBD (benchmark) | 20 fits | −14.1 ± 2.3 | 20.5 ± 0.8 | 0.1455 ± 0.0000 | 0.450 ± 0.006 |
 | electronics | **LSTM + bounded32** | 100 | −1.7 ± 18.9 | 45.0 ± 4.5 | 0.3757 ± 0.0002 | 0.263 ± 0.042 |
 | electronics | LSTM + log | 100 | +32.5 ± 25.7 | 55.7 ± 16.5 | 0.3816 ± 0.0116 | 0.296 ± 0.010 |
 | electronics | LSTM + ratio | 100 | +49.1 ± 37.4 | 71.0 ± 29.8 | 0.3772 ± 0.0034 | 0.306 ± 0.013 |
 | electronics | ValendinLSTM (benchmark) | 20 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
-| electronics | Pareto/NBD (benchmark) | 1 | −63.0 | 65.7 | 0.3758 | 0.297 |
+| electronics | Pareto/NBD (benchmark) | 20 fits | −63.1 ± 0.4 | 65.7 ± 0.3 | 0.3758 ± 0.0000 | 0.314 ± 0.010 |
 | gift | LSTM + bounded32 | 100 | −18.5 ± 15.3 | 31.4 ± 5.2 | 0.1066 ± 0.0001 | 0.331 ± 0.035 |
 | gift | LSTM + log | 100 | +11.0 ± 17.7 | 32.1 ± 9.9 | 0.1102 ± 0.0106 | 0.381 ± 0.007 |
 | gift | **LSTM + ratio** | 100 | −2.9 ± 16.4 | 32.4 ± 10.0 | 0.1066 ± 0.0007 | 0.392 ± 0.008 |
 | gift | ValendinLSTM (benchmark) | 20 | −15.7 ± 16.4 | 29.7 ± 4.9 | 0.1064 ± 0.0001 | 0.368 ± 0.017 |
-| gift | Pareto/NBD (benchmark) | 1 | −9.9 | 43.1 | 0.1066 | 0.383 |
+| gift | Pareto/NBD (benchmark) | 20 fits | −11.4 ± 0.7 | 42.7 ± 0.2 | 0.1066 ± 0.0000 | 0.378 ± 0.006 |
 | multichannel | **LSTM + bounded32** | 100 | +17.0 ± 20.0 | 53.2 ± 8.2 | 0.0569 ± 0.0000 | 0.096 ± 0.054 |
 | multichannel | LSTM + log | 100 | +70.9 ± 81.8 | 90.9 ± 73.8 | 0.0596 ± 0.0077 | 0.123 ± 0.116 |
 | multichannel | LSTM + ratio | 100 | +79.7 ± 47.8 | 98.0 ± 43.0 | 0.0571 ± 0.0015 | 0.175 ± 0.015 |
 | multichannel | ValendinLSTM (benchmark) | 20 | +66.6 ± 55.5 | 96.6 ± 39.7 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
-| multichannel | Pareto/NBD (benchmark) | 1 | +6.9 | 55.9 | 0.0567 | 0.189 |
+| multichannel | Pareto/NBD (benchmark) | 20 fits | +6.5 ± 1.8 | 55.8 ± 0.3 | 0.0567 ± 0.0000 | 0.185 ± 0.012 |
 
 All-zero forecast RMSE: 0.1506 CDNOW, 0.3775 electronics, 0.1075 gift, 0.0569
 multichannel.
@@ -593,28 +685,34 @@ Reading:
 
 - **The ablation's trade-off holds on all four panels: the flags protect the level, the
   compressed encodings protect the ranking.** On every panel log and ratio rank customers
-  better than bounded32 (Spearman 0.30–0.44 against 0.09–0.33 on CDNOW, electronics and
-  gift; 0.12–0.18 against 0.10 on multichannel), and with a far tighter spread across
-  replications (SD 0.007–0.015 for ratio). Where the level is hard — electronics and
+  better than bounded32, supported in all eight comparisons (n = 100 / 100): ratio by
+  +0.043 to +0.354 and log by +0.027 to +0.357 (multichannel log +0.027, +0.001 to
+  +0.051, the smallest), with a far tighter spread across replications (SD 0.007–0.015
+  for ratio). Where the level is hard — electronics and
   multichannel — they pay for it with over-forecasting (+32 to +80%), exactly the pattern
   `.scratch/ar-encoding-support/issues/03` recorded on electronics.
-- **Ratio reaches Pareto/NBD's ranking on three panels.** 0.439 against 0.450 on CDNOW,
-  0.306 against 0.297 on electronics, 0.392 against 0.383 on gift — the first neural
-  configuration in this project to do so — and 0.175 against 0.189 on multichannel.
+- **Ratio ranks above Pareto/NBD on gift and just below it on the other three panels.**
+  Against Pareto/NBD's 20 fits: gift +0.014 (+0.011 to +0.017), the first neural
+  configuration in this project to rank supported above it; CDNOW −0.010 (−0.013 to
+  −0.007), electronics −0.008 (−0.013 to −0.003) and multichannel −0.010 (−0.016 to
+  −0.005), all supported below, by less than the refit noise.
 - **CDNOW's bounded32 failure was the 32-week flag, not the calendar.** Log and ratio read
-  the same `week_sin` / `week_cos` and rank at 0.44; only bounded32 collapses (0.085 ±
-  0.170). A 32-week flag on a 39-week calibration window is the cause the section above
+  the same `week_sin` / `week_cos` and rank at 0.44, above bounded32 by +0.357 and +0.354
+  (both supported); only bounded32 collapses (0.085 ± 0.170). A 32-week flag on a 39-week calibration window is the cause the section above
   could not isolate.
 - **Best configuration per panel, reading level and ranking together:**
-  - *CDNOW:* ratio — best neural MAPE (32.2, against ValendinLSTM's 36.2), ranking at
-    Pareto/NBD's level; still over-forecasts (+17.6) where Pareto/NBD under-forecasts
-    (−16.0) and wins MAPE (21.0).
-  - *Electronics:* bounded32 for the level (−1.7, MAPE 45.0); ratio or log for the
-    ranking. No single encoding wins both.
-  - *Gift:* ratio on every metric — bias −2.9, the best ranking measured (0.392), MAPE
-    within a point of the best (29.7 ValendinLSTM).
-  - *Multichannel:* bounded32 for the level (+17.0, MAPE 53.2 — best MAPE on the panel);
-    Pareto/NBD remains the best overall (+6.9, 55.9, 0.189).
+  - *CDNOW:* ratio — the lowest neural mean MAPE (32.2), though not clearly below
+    ValendinLSTM's 36.2 (Δ −4.0, −8.6 to +0.5); ranking 0.010 below Pareto/NBD; still
+    over-forecasts (+17.6) where Pareto/NBD under-forecasts (−14.1), and Pareto/NBD's
+    MAPE is lower by 11.7 (+9.0 to +14.7).
+  - *Electronics:* bounded32 for the level (−1.7, MAPE 45.0, lower than ratio's by 25.9
+    and log's by 10.7, both supported); ratio or log for the ranking. No single encoding
+    wins both.
+  - *Gift:* ratio — bias −2.9 with |bias| no clearly different from Pareto/NBD's
+    (+0.8, −1.2 to +3.2), the best ranking measured (0.392, above Pareto/NBD), and MAPE
+    not clearly different from ValendinLSTM's 29.7 (+2.7, −0.2 to +5.7).
+  - *Multichannel:* bounded32 for MAPE (53.2, supported below Pareto/NBD's 55.8 by 2.6);
+    Pareto/NBD keeps the better level (|bias| 13.2 lower) and ranking (0.089 higher).
 - **The obvious next arm is the combination**: the flags, which hold the level where it is
   hard, plus the ratio triple, which holds the ranking. Run below.
 
@@ -641,20 +739,24 @@ reference.
 
 Reading:
 
-- **The combination keeps the ratio's ranking and does not keep the flags' level.**
-  Spearman is within 0.015 of ratio alone on every panel (0.425, 0.302, 0.385, 0.176). Bias
-  lands between the two parents on the panels where the level is hard — +33.0 on
-  electronics (flags −1.7, ratio +49.1), +55.0 on multichannel (flags +17.0, ratio +79.7) —
+- **The combination nearly keeps the ratio's ranking and does not keep the flags' level.**
+  Against ratio alone its Spearman is supported lower by 0.015 on CDNOW, 0.004 on
+  electronics and 0.007 on gift, and shows no clear difference on multichannel (+0.001,
+  −0.003 to +0.005), n = 100 / 100. Bias lands between the two parents on the panels where
+  the level is hard, supported on both sides — +33.0 on electronics (16.1 below ratio,
+  34.7 above the flags), +55.0 on multichannel (24.7 below ratio, 38.0 above the flags) —
   so carrying the flags does not stop the over-forecasting the ratio channels bring; it
   only halves it. The hope that the two sets would each do their own job is not borne out.
 - **The ratio channels rescue CDNOW from the 32-week flag.** Bounded32 alone ranks at
-  0.085 there; with the ratio triple added the same flags rank at 0.425. Whatever the
+  0.085 there; with the ratio triple added the same flags rank at 0.425 (Δ +0.340, +0.307
+  to +0.373). Whatever the
   over-deep flag does to the fit, a channel that stays inside its calibration range
   outweighs it for ordering customers.
-- **It is a compromise, not a winner.** On electronics and multichannel it is better than
-  ratio on level, MAPE and spread (bias SD 23–25 against 37–48) at the same ranking, and
-  worse than bounded32 on level. On CDNOW and gift it is slightly worse than ratio alone
-  on every metric. No panel has it as the best configuration.
+- **It is a compromise, not a winner.** On electronics and multichannel its MAPE is lower
+  than ratio's (−11.6 and −24.2, both supported) and its bias spread tighter (SD 23–25
+  against 37–48), at nearly the same ranking, and it is supported worse than bounded32 on
+  MAPE (+14.4, +20.6). On CDNOW and gift it is supported worse than ratio alone on MAPE
+  (+8.5, +2.9) and Spearman. No panel has it as the best configuration.
 - **So the level and the ranking still come from different encodings** on electronics and
   multichannel, and ratio alone remains the best single choice on CDNOW and gift.
 
@@ -703,13 +805,15 @@ multichannel; every LSTM row is within 0.003 of it, as before.
 Reading:
 
 - **Ranking improves on every panel and every encoding.** Electronics 0.26–0.31 → 0.31–0.32,
-  gift 0.33–0.39 → 0.42–0.44, multichannel 0.10–0.18 → 0.24–0.25. Across-replication SD of
-  Spearman falls too (0.004–0.032). This is the most consistent effect in the table — but
-  Pareto/NBD gains about as much on the same move, so most of it belongs to the setting
-  rather than to the model. See the control below.
+  gift 0.33–0.39 → 0.42–0.44, multichannel 0.10–0.18 → 0.24–0.25; Δ (3y − 2y) is
+  supported in all twelve cells, +0.011 to +0.140 (n = 100 / 100). Across-replication SD
+  of Spearman falls too (0.004–0.032). This is the most consistent effect in the table —
+  but Pareto/NBD gains on the same move too, so much of it belongs to the setting rather
+  than to the model. See the control below.
 - **On electronics the encodings converge.** At two years the level ranged from −1.7 to
   +49.1 and MAPE from 45 to 71 depending on the encoding; at three years every encoding sits
-  within −13 to +10 and MAPE 38–40, with bias SD 13–19 against 19–37. The flags-versus-ratio
+  within −13 to +10 and MAPE 38–40 (every encoding's MAPE falls, Δ −6.8 to −31.9, all
+  supported), with bias SD 13–19 against 19–37. The flags-versus-ratio
   trade-off that dominated the 2-year results largely disappears when the model sees a
   longer history. Ratio is the best single row: +6.0 / 39.1 / 0.323.
 - **Gift keeps the trade-off.** Bounded32 has the best level and MAPE (−5.4 / 27.9, the best
@@ -723,8 +827,9 @@ Reading:
 
 ### Pareto/NBD on the same windows
 
-`scripts/run_real_panel_benchmarks.py --calibration 3y --pareto`, 2026-09-17: one
-deterministic MCMC fit per panel on the three-year windows, scored on the same holdout
+`scripts/run_real_panel_benchmarks.py --calibration 3y --pareto`: 20 seeded MCMC fits
+per panel on the three-year windows (the first on 2026-09-17, the other 19 on
+2026-09-28), scored on the same holdout
 years, the same cohort and by the same code as the arms above. It is the control the
 section above asked for — a model with no hidden state and no sequence memory, moved from
 one setting to the other — so an effect it shows too cannot be the LSTM "seeing a longer
@@ -740,45 +845,49 @@ row is given beside it.
 
 | panel | model | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | ---: | ---: | ---: |
-| electronics | **Pareto/NBD, 3-year** | −65.0 | 65.8 | 0.4049 | 0.329 |
+| electronics | **Pareto/NBD, 3-year (20 fits)** | −65.2 ± 0.3 | 66.0 ± 0.3 | 0.4049 | 0.332 ± 0.005 |
 | electronics | LSTM + bounded32, 3-year (best MAPE) | −12.8 ± 19.0 | 38.2 ± 4.8 | 0.4041 | 0.322 ± 0.017 |
-| electronics | Pareto/NBD, 2-year (earlier holdout year) | −63.0 | 65.7 | 0.3758 | 0.297 |
+| electronics | Pareto/NBD, 2-year (earlier holdout year, 20 fits) | −63.1 ± 0.4 | 65.7 ± 0.3 | 0.3758 | 0.314 ± 0.010 |
 | electronics | all-zero, 3-year | −100.0 | 100.0 | 0.4067 | — |
-| gift | **Pareto/NBD, 3-year** | −7.5 | 43.0 | 0.1002 | 0.427 |
+| gift | **Pareto/NBD, 3-year (20 fits)** | −8.1 ± 0.5 | 42.8 ± 0.2 | 0.1001 | 0.437 ± 0.005 |
 | gift | LSTM + bounded32, 3-year (best MAPE) | −5.4 ± 10.9 | 27.9 ± 2.6 | 0.1001 | 0.423 ± 0.013 |
-| gift | Pareto/NBD, 2-year (earlier holdout year) | −9.9 | 43.1 | 0.1066 | 0.383 |
+| gift | Pareto/NBD, 2-year (earlier holdout year, 20 fits) | −11.4 ± 0.7 | 42.7 ± 0.2 | 0.1066 | 0.378 ± 0.006 |
 | gift | all-zero, 3-year | −100.0 | 100.0 | 0.1015 | — |
-| multichannel | **Pareto/NBD, 3-year** | +22.1 | 60.3 | 0.0488 | 0.236 |
+| multichannel | **Pareto/NBD, 3-year (20 fits)** | +22.6 ± 1.6 | 60.4 ± 0.4 | 0.0488 | 0.253 ± 0.009 |
 | multichannel | LSTM + bounded32, 3-year (best MAPE) | +33.3 ± 25.5 | 63.8 ± 12.2 | 0.0489 | 0.236 ± 0.032 |
-| multichannel | Pareto/NBD, 2-year (earlier holdout year) | +6.9 | 55.9 | 0.0567 | 0.189 |
+| multichannel | Pareto/NBD, 2-year (earlier holdout year, 20 fits) | +6.5 ± 1.8 | 55.8 ± 0.3 | 0.0567 | 0.185 ± 0.012 |
 | multichannel | all-zero, 3-year | −100.0 | 100.0 | 0.0490 | — |
 
 Reading:
 
-- **The ranking gain is the setting, not the model.** Moved to these windows Pareto/NBD
-  gains 0.297 → 0.329 on electronics, 0.383 → 0.427 on gift and 0.189 → 0.236 on
-  multichannel: +0.03 to +0.05, the same order as the LSTM arms' +0.02 to +0.14. A
-  parametric model that reads only recency, frequency and tenure cannot be benefiting from
-  a longer sequence, so the bulk of the improvement is in the data, not in what the LSTM
-  does with it. Measured *against* Pareto/NBD on the same windows, the best LSTM arm is
-  +0.014 on gift (0.441 vs 0.427), +0.005 on multichannel (0.241) and −0.006 on electronics
-  (0.323) — about where it stood at two years (+0.009, −0.013, +0.009). **Three years of
-  calibration did not close the ranking gap to Pareto/NBD; it moved both models up
-  together.**
-- **The MAPE gain on electronics and gift is not an easier year.** Pareto/NBD's own error
-  barely moves between the two settings on those panels — MAPE 65.7 → 65.8 and 43.1 → 43.0,
-  bias −63.0 → −65.0 and −9.9 → −7.5 — so 2002 and 2004–05 are not simply softer targets
-  than 2001 and 2003–04. The LSTM's 45.0 → 38.2 and 31.4 → 27.9 over the same move are
-  therefore real gains, and they are the strongest case in this document for the longer
-  calibration.
+- **Much of the ranking gain is the setting, not the model.** Moved to these windows
+  Pareto/NBD gains 0.314 → 0.332 on electronics, 0.378 → 0.437 on gift and 0.185 → 0.253
+  on multichannel: Δ +0.019 (+0.014 to +0.023), +0.059 (+0.056 to +0.062) and +0.068
+  (+0.061 to +0.074), n = 20 / 20, against the LSTM arms' +0.011 to +0.140. A parametric
+  model that reads only recency, frequency and tenure cannot be benefiting from a longer
+  sequence, so much of the improvement is in the data, not in what the LSTM does with it.
+  Measured *against* Pareto/NBD on the same windows, the best-ranking LSTM arm is +0.004
+  on gift (ratio, +0.002 to +0.006), −0.005 on multichannel (log, −0.011 to +0.001, no
+  clear difference) and −0.009 on electronics (ratio, −0.012 to −0.006) — about where it
+  stood at two years (+0.014, −0.009, −0.008). **Three years of calibration did not close
+  the ranking gap to Pareto/NBD; it moved both models up together.**
+- **The MAPE gain on electronics and gift is not an easier year.** Pareto/NBD's own MAPE
+  gets very slightly *worse* between the two settings on those panels — 65.7 → 66.0
+  (+0.25, +0.08 to +0.42) and 42.7 → 42.8 (+0.17, +0.05 to +0.28), supported and small —
+  so 2002 and 2004–05 are not softer targets than 2001 and 2003–04. The LSTM's 45.0 →
+  38.2 (Δ −6.8, −8.1 to −5.6) and 31.4 → 27.9 (−3.5, −4.7 to −2.4) over the same move are
+  therefore gains of the model, and they are the strongest case in this document for the
+  longer calibration. At three years bounded32's MAPE is lower than Pareto/NBD's by 27.7
+  on electronics and 15.0 on gift, both supported.
 - **Multichannel 2008 is a harder year, and roughly a third of the over-forecast is the
   year.** Its holdout holds 173 transactions against 2007's 228, a 24% fall that nothing in
-  the calibration window announces. Pareto/NBD, which was +6.9% on 2007, over-forecasts
-  2008 by +22.1% and its MAPE worsens 55.9 → 60.3. The LSTM arms' +33 to +57% splits into
-  that shared component and an excess of their own; on this panel the 3-year LSTM is worse
-  than the 3-year Pareto/NBD on both level (+33.3 vs +22.1) and MAPE (63.8 vs 60.3), where
-  at two years it at least held the better MAPE (53.2 vs 55.9, on a worse level).
-- **Electronics' −65.0% is the unit mismatch, not a failed fit** — occasions against line
+  the calibration window announces. Pareto/NBD, which was +6.5% on 2007, over-forecasts
+  2008 by +22.6% (Δ +16.1, +15.0 to +17.1) and its MAPE worsens 55.8 → 60.4 (+4.6, +4.4
+  to +4.8). The LSTM arms' +33 to +57% splits into that shared component and an excess of
+  their own; on this panel every 3-year LSTM arm is supported worse than the 3-year
+  Pareto/NBD on |bias| (bounded32 +12.2, +7.5 to +16.8) and MAPE (bounded32 +3.4, +1.1 to
+  +5.9), where at two years bounded32 held the lower MAPE (−2.6, on a worse level).
+- **Electronics' −65.2% is the unit mismatch, not a failed fit** — occasions against line
   items, as in "Reading" above. Its bias and its aggregate MAPE are not comparable with the
   LSTM rows on that panel; its Spearman is, and the 2-year → 3-year movement within the
   Pareto/NBD rows is, since both sides carry the same mismatch.
@@ -789,9 +898,10 @@ Reading:
 
 ## Pareto/NBD on electronic_5y
 
-`scripts/run_real_panel_benchmarks.py --calibration 5y --pareto`, 2026-09-26: one MCMC fit
-on electronic_5y, the split Valendin et al. (2022) use for electronics, so the row can
-be set beside their Table 4. Suite `real_panel_benchmarks_cal5y__ParetoNBD__electronics`.
+`scripts/run_real_panel_benchmarks.py --calibration 5y --pareto`: 20 seeded MCMC fits on
+electronic_5y (the first on 2026-09-26, the other 19 on 2026-09-28), the split Valendin et
+al. (2022) use for electronics, so the row can be set beside their Table 4. Suites
+`real_panel_benchmarks_cal5y__ParetoNBD__electronics__r00` … `r19`.
 
 electronic_5y is not the 829-household line-item `electronics` panel of the tables
 above. It is `Dataset_full_clean/electronics_5y_customer_week_panel.csv` (`docs/datasets.md`): the
@@ -805,32 +915,36 @@ the holdout against 72%.
 | | cohort | holdout weeks | RMSE (customer total) | bias % | MAPE |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Valendin et al., Table 4 — Pareto/NBD | 3,782 | 53 | 1.26 | −14.8 | 32.2 |
-| **this package — Pareto/NBD** | 3,755 | 52 | **1.23** | **−15.6** | **27.7** |
+| **this package — Pareto/NBD, mean of 20 fits** | 3,755 | 52 | **1.228** | **−16.6** | **27.7** |
 | Valendin et al., Table 4 — Base LSTM | 3,782 | 53 | 1.18 | +2.7 | 16.9 |
 | all-zero forecast, electronic_5y | 3,755 | 52 | 1.56 | −100.0 | 100.0 |
 
 The paper's RMSE is on each customer's holdout total, so it is compared with
-`rmse_customer_total`; the per-cell `rmse` of this fit is 0.1115 (all-zero: 0.1131).
-Spearman of per-customer totals is 0.394. The holdout holds 2,153 transactions.
+`rmse_customer_total`; the per-cell `rmse` is 0.1115 (all-zero: 0.1131). Spearman of
+per-customer totals is 0.395. Across the 20 fits bias ranges −17.7 to −15.3 and MAPE
+27.69 to 27.79. The holdout holds 2,153 transactions.
 
 Reading:
 
-- **The benchmark reproduces.** Bias is within 0.8 points of the published figure and
-  customer-level RMSE within 0.03, on a cohort 27 households smaller (those whose first
-  purchase fell on 1 Dec 1998, before the first complete week). A single fit on electronics
-  moves bias by about ±0.35 points across seeds (`docs/p-slstm.md` §10), so 0.8 is close to
-  that noise.
+- **The benchmark is close to the published one, not identical.** Mean bias over the 20
+  fits is −16.6 (95% CI −16.9 to −16.3) against the published −14.8, and customer-level
+  RMSE 1.228 against 1.26, on a cohort 27 households smaller (those whose first purchase
+  fell on 1 Dec 1998, before the first complete week). The published bias lies outside
+  the 20 fits' whole range (−17.7 to −15.3), so the 0.8-point agreement of the seed-42
+  fit first reported here was partly the draw of that seed. The published figure is one
+  fit on a slightly different cohort and week grid; this is a description of closeness,
+  not an equivalence test.
 - **MAPE is 4.5 points lower than published.** MAPE is computed on the weekly aggregate,
   so it depends on how weeks are cut. This panel uses `dayofyear // 7` capped at 51
   (ADR-0009), which gives 52 holdout buckets with week 51 absorbing the year's last days;
   the paper has 53 weeks. The difference in week cutting is the likely cause, but it has
   not been measured.
 - **The published gap to the LSTM stands.** On this split Pareto/NBD under-forecasts by
-  about 15% while the paper's Base LSTM sits at +2.7% with half the MAPE. A ValendinLSTM
+  about 17% while the paper's Base LSTM sits at +2.7% with half the MAPE. A ValendinLSTM
   run on the same windows (`--calibration 5y --worker`) has not been done.
-- **Why the `2y` electronics rows read −63%.** The −63.0 / −65.0 biases in the tables above
+- **Why the `2y` electronics rows read −63%.** The −63.1 / −65.2 biases in the tables above
   are the line-item panel's unit mismatch. On electronic_5y (trip-level, the paper's
-  cohort) the same model gives −15.6, as published.
+  cohort) the same model gives −16.6, near the published −14.8.
 
 ### ValendinLSTM on electronic_5y
 
@@ -847,29 +961,32 @@ capped at 51, embedded as `Embedding(52, 8)` (sqrt(n)+1); the count is `Embeddin
 | **ValendinLSTM, 20 studies: mean ± sd** | **1.163 ± 0.011** | **+13.8 ± 11.1** | **20.5 ± 6.9** |
 | median | 1.161 | +13.1 | 18.1 |
 | min … max | 1.148 … 1.193 | −7.9 … +37.4 | 14.3 … 38.5 |
-| Pareto/NBD, this package | 1.230 | −15.6 | 27.7 |
+| Pareto/NBD, this package (20 fits) | 1.228 | −16.6 | 27.7 |
 | Valendin et al., Table 4 — Pareto/NBD | 1.26 | −14.8 | 32.2 |
 
-Spearman of per-customer totals: 0.405 ± 0.003 (Pareto/NBD 0.394). Per-cell `rmse`:
+Spearman of per-customer totals: 0.405 ± 0.003 (Pareto/NBD 0.395). Per-cell `rmse`:
 0.1111 ± 0.0001 (all-zero 0.1131).
 
 Reading:
 
-- **RMSE and ranking reproduce, and beat the benchmark in every study.** Every one of the
-  20 has a lower customer-level RMSE than Pareto/NBD (max 1.193 against 1.230), and the
-  mean, 1.163, sits just under the paper's 1.18.
+- **Ranking and MAPE beat the benchmark; RMSE reproduces.** Against Pareto/NBD's 20 fits
+  (independent, n = 20 / 20; `.scratch/feature-engineering-5y/lstm_vs_pareto.py`) the
+  searched ValendinLSTM ranks higher (Δ Spearman +0.010, +0.009 to +0.011) and has the lower MAPE (Δ
+  −7.2, −9.8 to −4.0). Customer-level RMSE, descriptive only, averages 1.163 against Pareto/NBD's
+  1.228 and the paper's 1.18.
 - **MAPE is close in the median, bias is not.** The median MAPE, 18.1, is near the
   published 16.9, but the mean bias is +13.8% against +2.7%, with an sd of 11 points. The
   paper reports one model; three of these 20 (−2.0, +3.6, +3.8) land in its range and
   two (+37.3, +37.4) over-forecast by more than a third.
-- **The search does not choose the bias.** 18 of 20 winners picked batch 32 and learning
-  rates between 0.0011 and 0.0030; every winning validation loss lies in
+- **The search does not visibly choose the bias.** 18 of 20 winners picked batch 32 and
+  learning rates between 0.0011 and 0.0030; every winning validation loss lies in
   0.05721–0.05732. Learning rate and batch size barely rank with bias (Spearman +0.15
-  and −0.14). The least and most biased studies were trained with practically the same
-  settings, so the spread is the unseeded training, not the hyperparameters.
-- **The one weak signal is the epoch the weights come from.** The selected epoch is
-  early (median 14, range 8–40) and a later one goes with a lower bias (Spearman −0.30).
-  That is weak over 20 studies. It is tested directly by
+  and −0.14 across the 20 studies; descriptive, no interval). The least and most biased
+  studies were trained with practically the same settings, which points at the unseeded
+  training rather than the hyperparameters.
+- **The epoch the weights come from is a candidate, not a finding.** The selected epoch
+  is early (median 14, range 8–40) and a later one goes with a lower bias (Spearman
+  −0.30 across 20 studies; descriptive, no interval). It is tested directly by
   `scripts/run_epoch_floor_5y.py`, which pins the least-biased study's hyperparameters
   and keeps only weights from epoch 20 or 30 onward.
 - **Two boxes ran out of GPU memory** in the Monte Carlo warm-up, which pushes all
@@ -895,19 +1012,27 @@ The restriction held: the kept epoch was 20–27 in `from20` and 30–37 in `fro
 
 Reading:
 
-- **Longer training mostly tightens the spread.** From the searched family to `from20`
-  the sd of bias falls from 11.1 to 7.4 points and of MAPE from 6.9 to 3.2; the worst
-  study goes from +37.4% to +23.9%. The means move less: bias +13.8 → +10.2, MAPE
-  20.5 → 17.8, now close to the published 16.9.
-- **Thirty is not better than twenty.** `from30` is worse than `from20` on bias and MAPE,
-  and within it a later kept epoch goes with *more* bias (Spearman +0.43). Training
-  longer stabilises the forecast; it does not remove the over-forecast.
-- **What remains is a systematic over-forecast of about 10%.** It appears in nearly
-  every study; 4 of 20 per arm are within ±5%. The published +2.7% is a single model and
-  could be a draw from a spread like this one.
-- **The gain is the floor, not the pinning.** The `nofloor` control below — the same
-  pinned settings with every epoch a candidate — reproduces the searched family
-  (+13.2 ± 16.7 bias, 21.5 ± 11.7 MAPE), so what `from20` gains is the floor.
+Every comparison below is Δ with a 95% percentile-bootstrap interval, 20 / 20 independent
+studies (`benchmarks_real_panels_effects.py`).
+
+- **Longer training tightens the spread; the means show no clear difference.** From the
+  searched family to `from20` the sd of bias falls from 11.1 to 7.4 points and of MAPE
+  from 6.9 to 3.2, and the worst study goes from +37.4% to +23.9% (description). The
+  means move less and not clearly: MAPE 20.5 → 17.8 (Δ −2.7, −6.2 to +0.3), bias
+  +13.8 → +10.2 (−3.6, −9.4 to +2.1).
+- **Thirty and twenty show no clear difference.** `from30` − `from20`: MAPE +1.5 (−0.5 to
+  +3.5), bias +2.5 (−2.0 to +6.9). Within `from30` a later kept epoch goes with *more*
+  bias (Spearman +0.43 across 20 studies; descriptive). Training longer does not remove
+  the over-forecast.
+- **What remains is a systematic over-forecast of about 10%.** `from20`'s mean bias is
+  +10.2 (95% CI +7.1 to +13.2; `docs/feature_engineering.md` §4); 4 of 20 studies per arm
+  are within ±5%. The published +2.7% is a single model and could be a draw from a spread
+  like this one.
+- **Neither the pinning nor the floor moves the mean clearly.** The `nofloor` control
+  below — the same pinned settings with every epoch a candidate — shows no clear
+  difference from the searched family in MAPE (+1.0, −4.2 to +7.4) or bias (−0.7, −8.9
+  to +8.4), and `from20` none from `nofloor` (MAPE −3.7, −9.6 to +0.5). What the floor
+  changes visibly is the spread.
 
 ### Adding bounded flags or a cluster label, with and without the floor
 
@@ -936,29 +1061,34 @@ sampled path in the holdout; `kmeans_8` is a static k-means label (K=8) on (t_x,
 
 Reading:
 
-- **Pinning the hyperparameters alone does nothing.** ValendinLSTM `nofloor` matches the
-  searched family (+13.2 vs +13.8) with a wider spread (one study at +66.7%). What
-  `from20` gains over the searched family is therefore the floor, and it is mostly a
-  tighter spread.
-- **No input or floor removes the ~10% over-forecast.** No cell's mean comes near the
-  published +2.7%.
-- **The flags steady the forecast without the floor.** `ar_bounded_52` / `nofloor` has
-  the lowest mean bias (+8.7) and the tightest MAPE (±2.4), at a worse customer-level RMSE
-  (1.183). Under a floor they make no clear difference.
-- **The cluster label hurts under every floor.** `kmeans_8` raises the customer-level RMSE
-  to 1.27 — worse than Pareto/NBD's 1.230 — and lowers Spearman to 0.35–0.36. This is the
-  opposite of its effect in the CDNOW cluster ablation
+Effects of each input, per rule, are in `docs/feature_engineering.md` §4 (same data,
+`effect()`, n = 20 / 20).
+
+- **Pinning the hyperparameters alone shows no clear difference in level.** ValendinLSTM
+  `nofloor` against the searched family: bias +13.2 vs +13.8, MAPE +1.0 (−4.2 to +7.4),
+  with a wider spread (one study at +66.7%); its Spearman is lower by 0.003 (−0.006 to
+  −0.000), supported and far below the refit noise.
+- **No input or floor removes the ~10% over-forecast.** Every cell's mean-bias interval
+  excludes zero (lowest lower bound +4.9% among these cells).
+- **The flags narrow the spread without the floor, and move no mean clearly.**
+  `ar_bounded_52` / `nofloor` has the lowest mean bias (+8.7) and the tightest MAPE
+  (±2.4) as description, but against input "none" its MAPE (−4.0, −9.7 to +0.2) and
+  |bias| (−5.2, −12.4 to +0.8) show no clear difference; under a floor, none either.
+- **The cluster label lowers ranking under every rule.** Spearman −0.044 to −0.051,
+  supported; customer-level RMSE rises to 1.27 (descriptive). This is the opposite of its
+  effect on the collapsed panels of the cluster ablation
   (`docs/insights-cluster-ablation.md`) and has not been investigated.
 
-**Replication noise, measured by accident.** The four floored feature cells were trained
+**A second draw of four cells, lost.** The four floored feature cells were trained
 twice: on 2026-09-26/27, and again on 2026-09-27 when the `nofloor` workers, started
 without the finished suites on their disks, retrained every cell and their results
 replaced the first set on the orchestrator. The first set's forecasts are lost; its
 summaries were: `ar_bounded_52` `from20` 1.154 / +14.0 ± 7.5 / 19.8, `from30` 1.146 /
 +10.7 ± 5.4 / 18.3; `kmeans_8` `from20` 1.264 / +12.4 ± 8.5 / 18.8, `from30` 1.266 /
-+14.0 ± 9.0 / 19.8 (RMSE / bias / MAPE). Two draws of 20 studies with identical settings
-differ by up to 0.011 in customer-level RMSE and 4 points in mean bias, so differences
-between cells smaller than that are not results.
++14.0 ± 9.0 / 19.8 (RMSE / bias / MAPE). The two draws differ by up to 0.011 in
+customer-level RMSE and 4 points in mean bias. With the per-study values gone, this
+comparison is **not re-tested under the statistical protocol**; it is description only,
+and no threshold is drawn from it.
 
 ### The same procedure for two attention models
 
@@ -979,7 +1109,7 @@ both on the `valendin` embedder with the embedded week:
 
 | cell (20 studies) | ValendinLSTM (above) | LSTMAttention | Transformer |
 | --- | --- | --- | --- |
-| Pareto/NBD, this package (one fit, no cells) | 1.230 / −15.6 / 27.7 | *(same)* | *(same)* |
+| Pareto/NBD, this package (20 fits, no cells) | 1.228 / −16.6 / 27.7 | *(same)* | *(same)* |
 | Valendin et al., Table 4 — Base LSTM | 1.18 / +2.7 / 16.9 | — | — |
 | Valendin et al., Table 4 — Pareto/NBD | 1.26 / −14.8 / 32.2 | — | — |
 | searched | 1.163 / +13.8 ± 11.1 / 20.5 | 1.208 / +16.0 ± 11.8 / 21.4 | 1.325 / +51.7 ± 23.6 / 54.2 |
@@ -996,8 +1126,8 @@ both on the `valendin` embedder with the embedded week:
 Each entry is customer-level RMSE / bias % (mean ± sd) / MAPE. The ValendinLSTM column's
 feature cells are `models.MultinomialLSTMModel` in the benchmark's shape. Spearman is
 0.40 in every cell without `kmeans_8` and 0.35–0.37 with it, for all three models
-(Pareto/NBD 0.394). Pareto/NBD has no search, epochs or inputs to vary, so its one fit
-stands against every cell.
+(Pareto/NBD 0.395). Pareto/NBD has no search, epochs or inputs to vary, so its 20 fits
+stand against every cell.
 
 `searched` and `nofloor` share inputs (count and embedded week) and training rule
 (patience 7, best-by-validation epoch kept); they differ in how the hyperparameters are
@@ -1009,23 +1139,38 @@ are added.
 
 Reading:
 
-- **Attention does not help the LSTM.** LSTMAttention matches the plain LSTM on bias and
-  MAPE but is ~0.04 worse on customer-level RMSE in every cell, four times the
-  replication noise measured above. It still beats Pareto/NBD on RMSE.
-- **The Transformer is the weakest model on this split.** Without features it
-  over-forecasts by +34 to +52% (MAPE 43–54) with an sd of ~20 points, and its RMSE
-  (1.29–1.33) is worse than Pareto/NBD's. Its least-biased searched study was +20%, so
-  the pinned settings start from a biased model.
-- **The bounded flags matter most for the Transformer.** `ar_bounded_52` cuts its bias
-  from ~+40% to ~+13% and its MAPE from ~44 to 22–32 under every floor — a far larger
-  effect than on either LSTM — and gives its best RMSE (1.246 at `from30`).
-- **`kmeans_8` lowers ranking for every model** (Spearman 0.40 → 0.35–0.37) and raises
-  the LSTMs' RMSE; for the Transformer it helps bias as much as the flags but not RMSE.
-- **Against Pareto/NBD.** Both LSTMs beat it on customer-level RMSE in every cell but
-  the `kmeans_8` ones; the Transformer only with `ar_bounded_52`. Pareto/NBD
-  under-forecasts (−15.6%) where every neural cell over-forecasts.
-- **No model reaches the published LSTM's bias.** Every cell's mean over-forecasts by
-  at least +9%.
+Model contrasts are from `.scratch/feature-engineering-5y/results/effects.csv`
+(independent, n = 20 / 20, each model against the LSTM on the same input and rule);
+contrasts with Pareto/NBD from `lstm_vs_pareto.py` beside it.
+
+- **Attention does not help the LSTM.** Against the plain LSTM, LSTMAttention shows no
+  clear difference in MAPE, |bias| or Spearman in any cell without the label; with
+  `kmeans_8` it ranks slightly higher (+0.008 to +0.018, supported) and under `nofloor`
+  its |bias| is higher (+6.3, +1.3 to +11.2). Its customer-level RMSE is higher by 0.013
+  to 0.054 in every cell (descriptive).
+- **The Transformer is the weakest model on this split.** Without features its MAPE is
+  higher than the LSTM's by 22.0 to 26.6 under every rule, and its |bias| by 18.6 to
+  29.0, all supported; it over-forecasts by +34 to +52% with an sd of ~20 points. Its
+  least-biased searched study was +20%, so the pinned settings start from a biased model.
+- **The bounded flags matter most for the Transformer.** `ar_bounded_52` lowers its MAPE
+  by 12.1 to 22.3 and its |bias| by 15.2 to 27.3 under every rule, supported
+  (`docs/feature_engineering.md` §4), where neither LSTM shows a clear change; its MAPE
+  stays above the LSTM's with the same input (+3.3 to +13.9, supported).
+- **`kmeans_8` lowers ranking for every model** (Spearman 0.40 → 0.35–0.37, supported
+  under every rule); for the Transformer it lowers MAPE and |bias| about as much as the
+  flags (the direct flags → label MAPE contrast shows no clear difference).
+- **Against Pareto/NBD** (20 fits; `lstm_vs_pareto.py`, n = 20 / 20). Both LSTMs rank
+  higher than it in every cell without `kmeans_8` (+0.004 to +0.010, supported and small)
+  and lower in every `kmeans_8` cell (−0.025 to −0.044); their MAPE is lower in every
+  cell (−6.2 to −10.7). The Transformer's MAPE is higher without features (+15.8 to
+  +26.5); with the flags it shows no clear difference under `nofloor` and is lower under
+  `from20` and `from30` (−3.5, −6.0). Every neural cell over-forecasts relative to
+  Pareto/NBD, which under-forecasts (−16.6%). Customer-level RMSE, descriptive: both
+  LSTMs lower in every cell but the `kmeans_8` ones, the Transformer higher in every
+  cell.
+- **No model reaches the published LSTM's bias.** Every cell's mean-bias interval
+  excludes zero and lies above the published +2.7% (lowest lower bound +4.1%,
+  Transformer `ar_bounded_52` / `nofloor`).
 
 ## A few bad runs, or bad throughout?
 
@@ -1073,17 +1218,21 @@ CDNOW — read the two together.
   variation across the replications of one cell is 0.08–3.1%, and the median run has
   1–22 other trials within 0.5% of its best. Holdout bias across the same runs spans tens
   of points.
-- **It does not predict the forecast.** Within a cell, the rank correlation between a
-  run's validation loss and its holdout |bias| is within ±0.25 in 31 of 32 cells, and
-  at most 0.36 in magnitude. Against holdout Spearman it is at most 0.49.
+- **It does not visibly track the forecast.** Within a cell, the rank correlation between
+  a run's validation loss and its holdout |bias| is within ±0.25 in 31 of 32 cells, and
+  at most 0.36 in magnitude; against holdout Spearman it is at most 0.49. These are
+  descriptive correlations over 20–100 runs with no interval, not tested under the
+  statistical protocol.
 - **Why:** the search ranks trials by one-step cross-entropy on the validation window,
   but the forecast is a rollout of up to 52 weeks. Near-tied models get selected almost
-  at random and roll out very differently. **`docs/training-budget.md` §15.3 sharpens
-  this**: measured over 80 electronics and 10 CDNOW studies, cross-entropy ranks trials
-  correctly where a study's trials genuinely differ (CDNOW, ρ = +0.472 against holdout
-  Spearman, where the worst-loss quartile misses by +99% bias) and wrong-signed where they
-  do not (electronics, ρ = −0.141 against holdout MAPE, where every trial lands in the
-  same narrow band). The two panels where selection works below are the two that never
+  at random and roll out very differently. **`docs/training-budget.md` §15.3 and
+  `docs/model-selection.md` §3 sharpen this**, per model: cross-entropy ranks trials
+  correctly where a study's trials genuinely differ (CDNOW, mean per-study ρ against
+  holdout Spearman +0.367 for the LSTM and +0.577 for ValendinLSTM, both supported, n = 5
+  studies each; the worst-loss quartile misses by +99% bias) and wrong-signed where they
+  do not (electronics, ρ against holdout MAPE −0.181 for the LSTM and −0.101 for
+  ValendinLSTM, both supported, n = 40 each; every trial lands in the same narrow
+  band). The two panels where selection works below are the two that never
   collapsed, which is the same fact seen from the other side. This is the failure mode ADR-0003's
   rollout-based selection guarded against before it was retired (see
   `docs/insights-study.md` §4.2 and §5.4).
@@ -1091,7 +1240,8 @@ CDNOW — read the two together.
   or earlier in 55% of ValendinLSTM runs, 41% of LSTM + ratio and 22% of LSTM + log runs
   there, against 0–2% on every other panel. In multichannel log, the ten most biased
   runs' best trials stopped at epochs 1–4 (cell median 11), and earlier stopping goes with
-  worse ranking (rank correlation 0.59 between best epoch and Spearman). A model
+  worse ranking (rank correlation 0.59 between best epoch and Spearman; descriptive, no
+  interval). A model
   selected that early is barely trained; ADR-0008's refit fine-tunes it but starts from
   those weights.
 - **No trial crashed.** The 40–75% of trials that did not complete were all `PRUNED` by
@@ -1101,9 +1251,10 @@ CDNOW — read the two together.
 
 - **Mean ± sd remains the right summary for most cells**; multichannel log and
   electronics ratio need the median next to it.
-- **Much of the replication spread is selection noise, not model capacity.** More
-  Optuna trials will not narrow it, since the objective they optimise is flat where it
-  matters. Two remedies are already written up in `docs/insights-study.md`: select on
+- **Much of the replication spread plausibly comes from selection, not model capacity**
+  — an interpretation of the near-ties above, not a tested decomposition. More Optuna
+  trials would not be expected to narrow it, since the objective they optimise is flat
+  where it matters. Two remedies are already written up in `docs/insights-study.md`: select on
   rollout quality (§5.4), or score the ensemble of replications rather than their mean
   (§9).
 
@@ -1131,7 +1282,14 @@ archived run; the panel, windows, feature set, hyperparameters and simulation se
 study's own. Six rented boxes and the workstation, about three and a half hours from
 first rental to an empty fleet, and $1.02 of rental.
 
-### It selects well on two panels and not at all on the other two
+### It appears to select well on two panels and not at all on the other two
+
+This table carries no intervals, so it is descriptive and supports no claim on its own;
+electronics rests on 2 studies. The per-model tests with intervals, over a larger rescore
+of both models, are `docs/model-selection.md` §3: supported right-signed on CDNOW for
+ranking (both models) and wrong-signed on electronics for MAPE and |bias| (both models);
+gift and multichannel appear only here. The counts in brackets (studies whose correlation
+has the agreeing sign) are description, not evidence.
 
 Per study, the rank correlation between a trial's validation loss and its holdout error,
 signed so **positive means the validation loss agrees with the holdout**, and where the
@@ -1147,23 +1305,29 @@ trials; 653 trials in 36 studies.
 | multichannel | 7 | −0.29 (0/7) | +0.01 (3/7) | −0.21 | 0.52 | 0.65 | 0.55 |
 | all | 36 | +0.47 (27/36) | +0.49 (31/36) | +0.12 | 0.28 | 0.32 | 0.52 |
 
-- **On gift and CDNOW the objective is a real proxy for the rollout.** Every single study
-  agrees in sign on RMSE, and the selected trial lands in the best tenth (gift) or best
-  quarter (CDNOW) of its own study. This contradicts the flat reading the near-tie
-  measurement gives, and both are true: the loss orders trials that differ, and cannot
-  separate trials that do not.
-- **On multichannel it is worse than useless.** All seven studies correlate *negatively*
-  on RMSE, MAPE and |bias|, and the selected trial sits at the 52nd percentile for RMSE
-  and the 65th for ranking — behind a coin toss. Electronics points the same way on two
-  studies, which is too few to carry alone but agrees with multichannel.
-- **Aggregate bias is a coin toss everywhere.** Pooled rho is +0.12 and the winner's
-  place is 0.52. Even on gift and CDNOW, where RMSE selection works, bias lands at 0.49
-  and 0.46. The metric the arm tables lead with is the one selection does not control.
+- **On gift and CDNOW the objective looks like a proxy for the rollout.** The mean
+  correlations are positive for ranking (+0.56, +0.67), and the selected trial lands in
+  the best tenth (gift) or best quarter (CDNOW) of its own study for Spearman. On CDNOW
+  that is supported by `docs/model-selection.md` §3; on gift it is description. RMSE, the
+  column with the largest correlations, is descriptive only on these panels. This sits
+  beside the flat reading the near-tie measurement gives, and both can be true: the loss
+  orders trials that differ, and cannot separate trials that do not.
+- **On multichannel it points the wrong way, descriptively.** The mean correlations are
+  negative on RMSE and |bias|, and the selected trial sits at the 52nd percentile for
+  RMSE and the 65th for ranking. Over 7 studies without intervals this is not
+  established. Electronics points the same way here on two studies, and is supported
+  wrong-signed for level in `docs/model-selection.md` §3.
+- **Aggregate bias is not what it selects.** The all-panel mean rho is +0.12 and the
+  winner's place 0.52; on gift and CDNOW bias lands at 0.49 and 0.46. `docs/model-selection.md`
+  §5 has the per-model tests: supported wrong-signed on electronics, right-signed only for
+  CDNOW's LSTM.
 
 ### What selection is worth, against the oracle and the median trial
 
-Means over the same studies. "Oracle" is the best trial of that study on that metric,
-"median" the median trial — what picking at random would give.
+Means over the same studies, descriptive (no intervals). "Oracle" is the best trial of
+that study on that metric, "median" the median trial — roughly what picking at random
+would give. `docs/model-selection.md` §8 tests the pick against a random trial with
+intervals on the larger rescore.
 
 | panel | \|bias %\| selected / oracle / median | Spearman selected / oracle / median | RMSE selected / oracle / median |
 | --- | --- | --- | --- |
@@ -1172,18 +1336,18 @@ Means over the same studies. "Oracle" is the best trial of that study on that me
 | electronics | 64.7 / 12.2 / 37.8 | 0.043 / 0.045 / 0.007 | 0.3770 / 0.3758 / 0.3773 |
 | multichannel | 48.9 / 1.6 / 42.7 | −0.009 / 0.024 / −0.002 | 0.0570 / 0.0568 / 0.0570 |
 
-- **On gift the search earns its cost, and it is the ranking it earns.** The median trial
-  of a gift study ranks customers at 0.019 — nothing — and the selected one at 0.374,
-  within 0.005 of the study's best. Picking at random there would throw the model's whole
-  ranking ability away.
+- **On gift the search appears to earn its cost, and it is the ranking it earns.** The
+  median trial of a gift study ranks customers at 0.019 — nothing — and the selected one
+  at 0.374, within 0.005 of the study's best (14 studies, descriptive).
 - **The RMSE it optimises so well is worth almost nothing in absolute terms.** Selected
   and median differ in the fourth decimal, because these panels are mostly zeros and RMSE
-  is dominated by them. A rho of +0.83 on a quantity that moves by 0.0006 is a reliable
-  ranking of a prize that is not there.
-- **Every study contains a trial with near-zero bias, and selection never finds it.** The
-  oracle's |bias| is 1.6–12.2 against a selected 16.9–64.7, and the median trial is no
-  worse than the selected one on three panels of four. What is on the table for bias is
-  large; the objective simply does not point at it.
+  is dominated by them. A rho of +0.83 on a quantity that moves by 0.0006 ranks a prize
+  that is not there — and RMSE is descriptive only under the statistical protocol.
+- **Every study contains a trial with near-zero bias, and selection does not find it.**
+  The oracle's |bias| is 1.6–12.2 against a selected 16.9–64.7, and the median trial's
+  mean is no higher than the selected one's on three panels of four (descriptive). The
+  oracle is optimistic — the minimum of many draws each carrying refit noise — but what is
+  on the table for bias is large, and the objective does not point at it.
 
 ### The refit noise, and the stopping epoch
 
@@ -1199,28 +1363,30 @@ the pair measures what an unseeded refit moves on its own (80 studies, one pair 
 
 - **Refitting one checkpoint twice moves aggregate bias by 6–14 points of sd, up to 51
   points at worst**, with the panel, windows, weights, feature set and simulation seed all
-  held fixed. RMSE moves by less than 0.001. That is the refit noise any two trials must clear
-  to be distinguishable, and on gift the spread across a study's trials (19.4) barely
-  clears one trial's spread against itself (14.4).
-- **The stopping epoch carries what the loss does not.** Within a study, its rank
-  correlation with holdout Spearman averages +0.48 on both CDNOW and gift, and with
-  |bias| −0.30 on CDNOW and −0.26 on multichannel: trials that trained longer rank better
-  and are less biased. The epoch is recorded already (`user_attrs_best_epoch`) and is not
-  part of the objective.
+  held fixed. RMSE moves by less than 0.001. That is the magnitude a reader should hold
+  any bias difference against, and on gift the spread across a study's trials (19.4) is
+  of the same order as one trial's spread against itself (14.4).
+- **The stopping epoch appears to carry what the loss does not.** Within a study, its
+  rank correlation with holdout Spearman averages +0.48 on both CDNOW and gift, and with
+  |bias| −0.30 on CDNOW and −0.26 on multichannel: trials that trained longer tend to rank
+  better and be less biased (descriptive means, no interval). The epoch is recorded
+  already (`user_attrs_best_epoch`) and is not part of the objective.
 
 ### What follows
 
 - **The claim "validation loss cannot pick a good forecaster" holds for bias and for the
-  two panels where the model collapses, and is false for RMSE and ranking on gift and
-  CDNOW.** Rollout-based selection (`docs/insights-study.md` §5.4) is therefore not a
+  panels where the model collapses, and is false for ranking on CDNOW** (supported,
+  `docs/model-selection.md` §3), with gift pointing the same way descriptively.
+  Rollout-based selection (`docs/insights-study.md` §5.4) is therefore not a
   replacement for the current objective but an addition aimed at bias, which is the part
   it does not reach.
 - **Where the model cannot forecast, no selection rule helps.** On multichannel the
   oracle's Spearman is 0.024. Selecting better inside a study whose best trial cannot rank
   customers buys nothing, which is the ordering `docs/insights-study.md` §5.2 already
   argues for: give the model an absorbing state first, select on the rollout second.
-- **A bias number from one refit is not reproducible to better than ~±12 points.** Runs
-  are compared in tens of points throughout this document; that is the resolution.
+- **A bias number from one refit moves by ~±12 points on its own.** That is the
+  magnitude context for every bias comparison in this document; the comparisons
+  themselves rest on intervals over replications.
 
 ## The run
 
