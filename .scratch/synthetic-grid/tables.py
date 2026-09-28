@@ -1,7 +1,7 @@
 """Mean and 95% t-interval over panels from results/per_study.csv: per tree and rate
 (churn pooled, n = 40) and per tree and rate x churn cell (n = 10). Writes the two CSVs
 and results/tables.md, the markdown the insights doc's Results section is pasted from. In
-those tables each metric's best tree is bold and every tree tied with it carries a †."""
+those tables each metric's best tree is bold and every tree tied with it is underlined."""
 from pathlib import Path
 
 import numpy as np
@@ -94,7 +94,7 @@ def name(model, arm):
 
 
 def marked(text, mark):
-    return {"best": f"**{text}**", "tie": f"{text} †"}.get(mark, text)
+    return {"best": f"**{text}**", "tie": f"<ins>{text}</ins>"}.get(mark, text)
 
 
 def table(frame, wins=None, mk=None):
