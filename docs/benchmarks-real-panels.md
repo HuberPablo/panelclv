@@ -951,6 +951,59 @@ summaries were: `ar_bounded_52` `from20` 1.154 / +14.0 ± 7.5 / 19.8, `from30` 1
 differ by up to 0.011 in customer-level RMSE and 4 points in mean bias, so differences
 between cells smaller than that are not results.
 
+### The same procedure for two attention models
+
+`scripts/run_attention_models_5y.py`, 2026-09-27/28: the procedure above — 20 searched
+studies, then the least-biased one's settings pinned under `nofloor` / `from20` /
+`from30` x none / `ar_bounded_52` / `kmeans_8`, 20 studies per cell — for two models,
+both on the `valendin` embedder with the embedded week:
+
+- **LSTMAttention** (`models.MultinomialLSTMAttentionModel`): the LSTM whose head also
+  reads single-head causal attention over its own past outputs. Pinned from r17 (bias
+  −0.2%): hidden 64, dense 64, dropout 0.007, learning rate 0.0025, batch 32.
+- **Transformer** (`models.MultinomialTransformerModel`), forecast through the key/value
+  cache (`forward_cached`, same logits and paths as re-reading the context). Pinned from
+  r08 (bias +20.1%, the least biased of 20): d_model 64, 4 heads, 3 layers, dropout
+  0.145, learning rate 0.0027, batch 32.
+
+400 studies, $19.20 on vast.ai.
+
+| cell (20 studies) | ValendinLSTM (above) | LSTMAttention | Transformer |
+| --- | --- | --- | --- |
+| searched | 1.163 / +13.8 ± 11.1 / 20.5 | 1.208 / +16.0 ± 11.8 / 21.4 | 1.325 / +51.7 ± 23.6 / 54.2 |
+| none, `nofloor` | 1.178 / +13.2 ± 16.7 / 21.5 | 1.205 / +14.1 ± 8.9 / 19.6 | 1.290 / +34.1 ± 20.5 / 43.5 |
+| `ar_bounded_52`, `nofloor` | 1.183 / +8.7 ± 8.2 / 17.5 | 1.221 / +9.1 ± 11.0 / 18.3 | 1.257 / +12.5 ± 19.6 / 31.5 |
+| `kmeans_8`, `nofloor` | 1.279 / +9.0 ± 10.1 / 18.5 | 1.294 / +15.7 ± 6.6 / 20.2 | 1.330 / +16.4 ± 10.9 / 32.2 |
+| none, `from20` | 1.159 / +10.2 ± 7.4 / 17.8 | 1.199 / +14.8 ± 8.3 / 20.1 | 1.298 / +39.8 ± 16.4 / 44.4 |
+| `ar_bounded_52`, `from20` | 1.154 / +13.5 ± 7.3 / 19.5 | 1.208 / +9.3 ± 8.7 / 17.6 | 1.251 / +13.7 ± 12.2 / 24.2 |
+| `kmeans_8`, `from20` | 1.270 / +12.4 ± 8.0 / 18.7 | 1.283 / +13.7 ± 7.4 / 19.1 | 1.314 / +11.6 ± 8.6 / 26.2 |
+| none, `from30` | 1.157 / +12.7 ± 7.3 / 19.4 | 1.200 / +10.8 ± 6.7 / 18.1 | 1.294 / +40.1 ± 18.6 / 44.0 |
+| `ar_bounded_52`, `from30` | 1.157 / +10.0 ± 7.1 / 18.4 | 1.202 / +9.3 ± 5.1 / 17.0 | 1.246 / +12.5 ± 8.8 / 21.7 |
+| `kmeans_8`, `from30` | 1.266 / +11.5 ± 9.4 / 18.3 | 1.289 / +15.5 ± 7.0 / 19.9 | 1.306 / +10.6 ± 9.5 / 24.4 |
+
+Each entry is customer-level RMSE / bias % (mean ± sd) / MAPE. The ValendinLSTM column's
+feature cells are `models.MultinomialLSTMModel` in the benchmark's shape. Spearman is
+0.40 in every cell without `kmeans_8` and 0.35–0.37 with it, for all three models.
+Published (Valendin et al., Table 4): Base LSTM 1.18 / +2.7 / 16.9, Pareto/NBD 1.26 /
+−14.8 / 32.2; this package's Pareto/NBD 1.230 / −15.6 / 27.7.
+
+Reading:
+
+- **Attention does not help the LSTM.** LSTMAttention matches the plain LSTM on bias and
+  MAPE but is ~0.04 worse on customer-level RMSE in every cell, four times the
+  replication noise measured above. It still beats Pareto/NBD on RMSE.
+- **The Transformer is the weakest model on this split.** Without features it
+  over-forecasts by +34 to +52% (MAPE 43–54) with an sd of ~20 points, and its RMSE
+  (1.29–1.33) is worse than Pareto/NBD's. Its least-biased searched study was +20%, so
+  the pinned settings start from a biased model.
+- **The bounded flags matter most for the Transformer.** `ar_bounded_52` cuts its bias
+  from ~+40% to ~+13% and its MAPE from ~44 to 22–32 under every floor — a far larger
+  effect than on either LSTM — and gives its best RMSE (1.246 at `from30`).
+- **`kmeans_8` lowers ranking for every model** (Spearman 0.40 → 0.35–0.37) and raises
+  the LSTMs' RMSE; for the Transformer it helps bias as much as the flags but not RMSE.
+- **No model reaches the published LSTM's bias.** Every cell's mean over-forecasts by
+  at least +9%.
+
 ## A few bad runs, or bad throughout?
 
 The tables above report mean ± sd, and several SDs are large. So the question is whether a
