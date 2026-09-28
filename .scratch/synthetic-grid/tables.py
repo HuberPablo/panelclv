@@ -91,3 +91,29 @@ for rate in sorted(d.rate.unique()):
         md.append(f"##### Rate {rate:.2f}, churn {churn:.0%} ({panels(f.n)})\n\n"
                   + table(f, w))
 (OUT / "tables.md").write_text("\n\n".join(md) + "\n")
+
+
+# The three best trees per rate x churn cell, by MAPE (lowest) and by Spearman (highest).
+def top3(metric, ascending):
+    lines = [f"| Rate | Churn | Rank | Model | Arm | {'**MAPE**' if metric == 'mape' else 'MAPE'} | "
+             f"{'**Spearman**' if metric == 'spearman' else 'Spearman'} | RMSE | Bias % | Val. CE | p vs rank 1 |",
+             "| --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | ---: |"]
+    for (rate, churn), f in by_cell.groupby(["rate", "churn"]):
+        best = f.sort_values(metric, ascending=ascending).head(3)
+        # Paired Wilcoxon of each runner-up against the cell's leader, on the same panels.
+        panel = d[(d.rate == rate) & (d.churn == churn)].pivot_table(
+            index="dataset", columns=["model", "arm"], values=metric)
+        leader = panel[(best.iloc[0].model, best.iloc[0].arm)]
+        for rank, (_, r) in enumerate(best.iterrows(), 1):
+            model, arm = name(r.model, r.arm).split(" | ")
+            vals = [cell(r, m) if m == metric else
+                    ("—" if pd.isna(r.get(m)) else FMT[m].format(r[m]).replace("-", "−"))
+                    for m in ("mape", "spearman", "rmse", "bias", "ce")]
+            lead = f"{rate:.2f} | {churn:.0%}" if rank == 1 else " | "
+            p = "—" if rank == 1 else f"{stats.wilcoxon((panel[(r.model, r.arm)] - leader).dropna()).pvalue:.3f}"
+            lines.append(f"| {lead} | {rank} | {model} | {arm} | " + " | ".join(vals) + f" | {p} |")
+    return "\n".join(lines)
+
+
+(OUT / "top3_mape.md").write_text(top3("mape", True) + "\n")
+(OUT / "top3_spearman.md").write_text(top3("spearman", False) + "\n")
