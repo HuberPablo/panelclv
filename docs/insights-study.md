@@ -19,7 +19,7 @@ panel and one model at a time. The numbers are printed by
 differences and p-values are gone. Verdicts that moved:
 
 - §4.1: P-sLSTM "worse on all three forecast metrics" → no clear difference from the LSTM
-  on MAPE, |bias| or RMSE at n = 8 (paired by seed). Its validation-CE advantage is not
+  on MAPE, |bias| or RMSE at n = 8 / 8 (independent runs). Its validation-CE advantage is not
   re-tested: the per-seed values were never stored.
 - §5.4: the selection result is now reported per model rather than pooled over 80 studies,
   matching `docs/training-budget.md` §14; "rollout beats CE in 66 of 80 studies,
@@ -229,16 +229,17 @@ of the eight; seeds 3 and 4 scrolled out of the run log), by a consistent ~0.004
 converges in fewer epochs. Because the per-seed values were never stored, that advantage
 is **not re-tested under the statistical protocol**; the two ranges above do not overlap.
 
-On the forecast, run *k* of both models was driven by the same seed *k* (`compare.py` sets
-`torch.manual_seed(k)` before each model's training and passes *k* to its Monte Carlo
-forecast), so the runs are paired by seed. P-sLSTM minus LSTM, 95% bootstrap interval,
-n = 8:
+On the forecast, run *k* of both models called `torch.manual_seed(k)` (and passed *k* to its
+Monte Carlo forecast), but two different architectures consume that random stream
+differently, so seed *k* is not a shared experimental unit. The runs are compared as
+independent replications, as in `docs/p-slstm.md`. P-sLSTM minus LSTM, 95% bootstrap
+interval, n = 8 / 8:
 
 | metric | LSTM | P-sLSTM | Δ | 95% CI | supported |
 | --- | ---: | ---: | ---: | :---: | :---: |
-| MAPE | 54.14 | 56.93 | +2.79 | −3.13 to +8.38 | no |
-| \|bias\| | 19.80 | 26.62 | +6.82 | −3.00 to +17.12 | no |
-| RMSE (descriptive) | 0.3807 | 0.3815 | +0.0009 | −0.0007 to +0.0023 | no |
+| MAPE | 54.14 | 56.93 | +2.79 | −3.01 to +8.21 | no |
+| \|bias\| | 19.80 | 26.62 | +6.82 | −3.84 to +17.66 | no |
+| RMSE (descriptive) | 0.3807 | 0.3815 | +0.0009 | −0.0005 to +0.0023 | no |
 
 Every mean is worse for P-sLSTM, but none of the differences is clear at n = 8: **no clear
 difference in the forecast**, which is not the same as equal. It costs ~14× as much to

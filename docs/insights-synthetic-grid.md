@@ -25,8 +25,10 @@ and whole-grid results are now described, not tested, and the pooled tables carr
   churn 20–40% and loses at churn 80%.
 - Claim 9: the LSTM leaks more than Pareto/NBD at rate 0.10, churn 80% (was "equal"); the
   Transformer leaks more in 15 of 16 cells (was 13).
-- Claim 11: from "not supported" to weakly supported for two hyperparameters (Transformer
-  layer count, LSTM `ar_bounded` dense width).
+- Claim 11: was "not supported" by within-cell tests with FDR control; it is now described
+  per cell with no test (a correlation over panels is not a difference of means), and the
+  verdict stays "not supported". The Transformer layer count is the one consistent pattern
+  (positive in 13 of 16 cells).
 - Claim 12: the LSTM `no_ar` at rate 0.01 goes from "no change" to mixed (worse at churn
   20%, better at churn 80%).
 - Results: the MAPE leader is clearly ahead of the runner-up in 7 of 16 cells (was 6; rate
@@ -923,7 +925,7 @@ by week 52), 10 panels per cell, 40 per rate, 160 over the grid.
 | 8 | Pareto/NBD's low bias means it is accurate per customer. | **Not supported** | — | In every cell R_A < 1 and L_D > 0 are both supported: it serves living customers only 51–87% of their volume and leaks 11–104% onto dead ones. |
 | 9 | Neural models cannot detect a customer who has stopped. | **Partly** | Transformer: more leakage than Pareto/NBD in 15 of 16 cells. LSTM: every cell at rates 0.01–0.10, and rate 0.30 with churn 20–40%. | LSTM `ar_bounded` at rate 0.30 with churn 60–80%: no clear difference from Pareto/NBD. |
 | 10 | A bigger hyperparameter search helps. | **Partly** | Level at rate 0.30 (3 LSTM cells, 2 Transformer); the Transformer's ranking in 11 of 16 cells. | Level at rates 0.01–0.10 (a few scattered cells, one of them worse). |
-| 11 | Specific hyperparameters drive the error. | **Weakly, for two** | Transformer `no_ar` layer count (more layers, worse \|bias\| and MAPE); LSTM `ar_bounded` dense width (wider, better MAPE). Mean within-cell ρ about ±0.2. | The other 37 of 40 tested within-cell intervals include 0. |
+| 11 | Specific hyperparameters drive the error. | **Not supported** (described, not tested) | Only as a pattern: the Transformer `no_ar` layer count correlates positively with \|bias\| and MAPE in 13 of 16 cells. | Within cells nearly every hyperparameter's correlation splits in sign across cells; the large pooled correlations are the regime choosing both variables. |
 | 12 | More customers improve the neural forecast. | **Supported, conditionally** | LSTM `ar_bounded`: every cell at rates 0.01–0.10. LSTM `no_ar`: every cell at rates 0.05–0.10, most at 0.30. | LSTM `no_ar` at rate 0.01 (mixed: worse at churn 20%, better at 80%); LSTM `ar_bounded` at rate 0.30 above churn 40%. The Transformer was not run at 3,000. |
 | 13 | RMSE can rank these models. | **Not supported** for per-week RMSE; **supported** within one rate for customer-total RMSE (described, not tested) | Customer-total RMSE ranks trees like MAPE (ρ +0.88 to +0.97 within each rate). | Per-week RMSE puts 4–10 of 13 trees on the same value to two decimals. |
 
@@ -2190,43 +2192,43 @@ run did not record its embedder, so the two runs may also differ in that.
 
 ### 11. Specific hyperparameters drive the error
 
-**Verdict: weakly supported for two hyperparameters, not for the rest.** The pooled
-correlations over the grid are description only: they mix cells, and there the rate and
-churn choose both the hyperparameter and the error. For example, the LSTM `no_ar` batch size
-correlates with |bias| at +0.48 over the grid and +0.05 within cells: the search picks
-larger batches on sparse panels, where |bias| is large anyway. Within cells, each cell gives
-one rank correlation over its 10 panels, and the cells' correlations are tested against 0
-by the one-statistic rule with the cell as the unit (n = the cells where the search's
-choice varies; fewer than 5 is not tested). Three of the 40 tested intervals exclude 0: the
-Transformer `no_ar` layer count, against |bias| (+0.20) and MAPE (+0.22), so more encoder
-layers go with a worse level; and the LSTM `ar_bounded` dense width against MAPE (−0.20),
-so wider layers go with a better one. All three are weak, a few hundredths of rank variance
-per cell.
+**Verdict: not supported; described only, no test.** A correlation between a chosen
+hyperparameter and the error, over a cell's 10 panels, is not a difference of means, so
+the protocol's interval cannot be put on it; and pooling the 16 cells into one test is not
+allowed. The table therefore describes the correlations. Pooled over the grid, they mix
+cells, and there the rate and churn choose both the hyperparameter and the error: the LSTM
+`no_ar` batch size correlates with |bias| at +0.48 over the grid, but within cells it is
+positive in 5 of 12 cells and negative in 7. Within cells almost every hyperparameter
+splits roughly evenly between positive and negative, with cell values spread from about
+−0.7 to +0.7. The one consistent pattern is the Transformer `no_ar` layer count: positive
+in 13 of 16 cells against both |bias| and MAPE (more encoder layers with a worse level).
+The LSTM `ar_bounded` dense width leans negative (10 of 15 cells). Neither pattern is a
+tested effect.
 
-| Tree | Hyperparameter | ρ with \|bias\|, pooled (descriptive) | ρ with \|bias\|, mean within-cell [95% CI], cells | ρ with MAPE, pooled (descriptive) | ρ with MAPE, mean within-cell [95% CI], cells |
+| Tree | Hyperparameter | ρ with \|bias\|, pooled | ρ with \|bias\| within cells: positive / negative of cells, range | ρ with MAPE, pooled | ρ with MAPE within cells: positive / negative of cells, range |
 | --- | --- | --- | --- | --- | --- |
-| LSTM `no_ar` | `batch_size` | +0.48 | +0.05 [−0.15, +0.26], 12 | +0.49 | +0.07 [−0.13, +0.28], 12 |
-| LSTM `no_ar` | `learning_rate` | −0.15 | +0.12 [−0.09, +0.35], 16 | −0.16 | +0.12 [−0.10, +0.35], 16 |
-| LSTM `no_ar` | `lstm_hidden_size` | −0.20 | +0.11 [−0.09, +0.30], 15 | −0.21 | +0.08 [−0.11, +0.25], 15 |
-| LSTM `no_ar` | `dense_units` | +0.28 | −0.02 [−0.24, +0.18], 15 | +0.28 | −0.03 [−0.24, +0.17], 15 |
-| LSTM `no_ar` | `dropout` | −0.05 | +0.14 [−0.06, +0.32], 16 | −0.05 | +0.12 [−0.07, +0.30], 16 |
-| LSTM `ar_bounded` | `batch_size` | +0.07 | +0.07 [−0.09, +0.23], 13 | +0.06 | +0.10 [−0.04, +0.26], 13 |
-| LSTM `ar_bounded` | `learning_rate` | −0.02 | +0.10 [−0.02, +0.21], 16 | −0.10 | +0.03 [−0.06, +0.12], 16 |
-| LSTM `ar_bounded` | `lstm_hidden_size` | 0 | +0.04 [−0.13, +0.20], 16 | −0.04 | +0.08 [−0.10, +0.25], 16 |
-| LSTM `ar_bounded` | `dense_units` | −0.28 | −0.15 [−0.34, +0.02], 15 | −0.22 | **−0.20 [−0.37, −0.02], 15** |
-| LSTM `ar_bounded` | `dropout` | −0.02 | +0.09 [−0.08, +0.25], 16 | +0.03 | +0.10 [−0.08, +0.27], 16 |
-| Transformer `no_ar` | `batch_size` | −0.04 | −0.07 [−0.26, +0.14], 13 | −0.03 | −0.05 [−0.25, +0.17], 13 |
-| Transformer `no_ar` | `learning_rate` | −0.09 | −0.03 [−0.18, +0.12], 16 | +0.05 | +0.03 [−0.14, +0.20], 16 |
-| Transformer `no_ar` | `d_model` | −0.01 | not tested: varies in 2 of 16 cells | −0.03 | not tested: varies in 2 of 16 cells |
-| Transformer `no_ar` | `nhead` | +0.08 | +0.03 [−0.14, +0.18], 16 | +0.05 | +0.02 [−0.15, +0.19], 16 |
-| Transformer `no_ar` | `num_encoder_layers` | +0.24 | **+0.20 [+0.08, +0.31], 16** | +0.29 | **+0.22 [+0.13, +0.32], 16** |
-| Transformer `no_ar` | `dropout` | +0.17 | +0.08 [−0.05, +0.22], 16 | +0.13 | +0.09 [−0.05, +0.23], 16 |
-| Transformer `ar_bounded` | `batch_size` | +0.03 | +0.07 [−0.09, +0.21], 16 | +0.04 | +0.04 [−0.12, +0.19], 16 |
-| Transformer `ar_bounded` | `learning_rate` | −0.05 | −0.14 [−0.30, +0.03], 16 | +0.13 | −0.07 [−0.24, +0.09], 16 |
-| Transformer `ar_bounded` | `d_model` | −0.13 | not tested: varies in 1 of 16 cells | −0.13 | not tested: varies in 1 of 16 cells |
-| Transformer `ar_bounded` | `nhead` | −0.05 | −0.04 [−0.20, +0.11], 16 | −0.01 | −0.06 [−0.22, +0.08], 16 |
-| Transformer `ar_bounded` | `num_encoder_layers` | −0.01 | +0.01 [−0.17, +0.20], 16 | −0.10 | +0.02 [−0.15, +0.21], 16 |
-| Transformer `ar_bounded` | `dropout` | −0.01 | −0.05 [−0.23, +0.12], 16 | +0.03 | −0.07 [−0.23, +0.11], 16 |
+| LSTM `no_ar` | `batch_size` | +0.48 | 5 / 7 of 12, −0.63 to +0.62 | +0.49 | 5 / 5 of 12, −0.60 to +0.62 |
+| LSTM `no_ar` | `learning_rate` | −0.15 | 9 / 7 of 16, −0.61 to +0.93 | −0.16 | 8 / 8 of 16, −0.61 to +0.87 |
+| LSTM `no_ar` | `lstm_hidden_size` | −0.20 | 9 / 6 of 15, −0.66 to +0.64 | −0.21 | 9 / 6 of 15, −0.66 to +0.57 |
+| LSTM `no_ar` | `dense_units` | +0.28 | 8 / 7 of 15, −0.73 to +0.57 | +0.28 | 8 / 7 of 15, −0.78 to +0.43 |
+| LSTM `no_ar` | `dropout` | −0.05 | 12 / 4 of 16, −0.76 to +0.66 | −0.05 | 11 / 5 of 16, −0.76 to +0.66 |
+| LSTM `ar_bounded` | `batch_size` | +0.07 | 7 / 6 of 13, −0.43 to +0.59 | +0.06 | 6 / 6 of 13, −0.32 to +0.71 |
+| LSTM `ar_bounded` | `learning_rate` | −0.02 | 10 / 6 of 16, −0.44 to +0.47 | −0.10 | 10 / 6 of 16, −0.39 to +0.32 |
+| LSTM `ar_bounded` | `lstm_hidden_size` | 0 | 9 / 7 of 16, −0.69 to +0.54 | −0.04 | 9 / 7 of 16, −0.45 to +0.62 |
+| LSTM `ar_bounded` | `dense_units` | −0.28 | 5 / 10 of 15, −0.85 to +0.51 | −0.22 | 5 / 10 of 15, −0.62 to +0.49 |
+| LSTM `ar_bounded` | `dropout` | −0.02 | 12 / 4 of 16, −0.61 to +0.59 | +0.03 | 11 / 5 of 16, −0.61 to +0.56 |
+| Transformer `no_ar` | `batch_size` | −0.04 | 5 / 8 of 13, −0.50 to +0.70 | −0.03 | 5 / 8 of 13, −0.52 to +0.70 |
+| Transformer `no_ar` | `learning_rate` | −0.09 | 8 / 8 of 16, −0.54 to +0.54 | +0.05 | 8 / 8 of 16, −0.54 to +0.57 |
+| Transformer `no_ar` | `d_model` | −0.01 | 1 / 1 of 2, −0.17 to +0.17 | −0.03 | 1 / 1 of 2, −0.06 to +0.09 |
+| Transformer `no_ar` | `nhead` | +0.08 | 10 / 6 of 16, −0.76 to +0.66 | +0.05 | 10 / 6 of 16, −0.72 to +0.78 |
+| Transformer `no_ar` | `num_encoder_layers` | +0.24 | 13 / 3 of 16, −0.29 to +0.57 | +0.29 | 13 / 2 of 16, −0.05 to +0.57 |
+| Transformer `no_ar` | `dropout` | +0.17 | 10 / 6 of 16, −0.35 to +0.60 | +0.13 | 10 / 6 of 16, −0.44 to +0.65 |
+| Transformer `ar_bounded` | `batch_size` | +0.03 | 11 / 5 of 16, −0.61 to +0.57 | +0.04 | 11 / 5 of 16, −0.61 to +0.53 |
+| Transformer `ar_bounded` | `learning_rate` | −0.05 | 4 / 12 of 16, −0.75 to +0.52 | +0.13 | 7 / 9 of 16, −0.70 to +0.58 |
+| Transformer `ar_bounded` | `d_model` | −0.13 | 0 / 1 of 1, −0.52 to −0.52 | −0.13 | 0 / 1 of 1, −0.52 to −0.52 |
+| Transformer `ar_bounded` | `nhead` | −0.05 | 8 / 7 of 16, −0.76 to +0.44 | −0.01 | 8 / 7 of 16, −0.76 to +0.32 |
+| Transformer `ar_bounded` | `num_encoder_layers` | −0.01 | 8 / 8 of 16, −0.54 to +0.80 | −0.10 | 9 / 7 of 16, −0.49 to +0.79 |
+| Transformer `ar_bounded` | `dropout` | −0.01 | 8 / 8 of 16, −0.70 to +0.62 | +0.03 | 7 / 9 of 16, −0.66 to +0.68 |
 
 ### 12. More customers improve the neural forecast
 

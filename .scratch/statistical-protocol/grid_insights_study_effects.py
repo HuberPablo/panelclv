@@ -4,12 +4,11 @@ Every comparison goes through `panelclv.evaluation.effects.effect`
 (`docs/statistical-protocol.md`); this script only decides what is paired with what.
 
 §4.1  P-sLSTM against the LSTM on electronics, 8 runs each (`.scratch/p-slstm/`). Run k of
-      both models was driven by the same seed k: `compare.py` calls `torch.manual_seed(k)`
-      before training each model and passes seed k to its Monte Carlo forecast, so the two
-      arms share the seed list that sets their initialisation, batch order and sampling.
-      That is the "same seed list driving both arms" case of the protocol, so the runs are
-      paired by seed. The per-seed validation CE was never stored (only a range for six of
-      the eight seeds), so the CE comparison cannot be re-tested.
+      both models called `torch.manual_seed(k)`, but two different architectures consume
+      that random stream differently, so seed k is not a shared experimental unit: the
+      runs are independent replications, `paired=False` (as in `docs/p-slstm.md`). The
+      per-seed validation CE was never stored (only a range for six of the eight seeds),
+      so the CE comparison cannot be re-tested.
 
 §5.4  Selection criteria on the `selection_rescore` studies (`scripts/run_selection_rescore.py`).
       One study (one Optuna search) is one replication; each gives one rank correlation
@@ -36,19 +35,19 @@ REPO = Path(__file__).resolve().parents[2]
 
 # --- §4.1 ---------------------------------------------------------------------------------
 runs = json.loads((REPO / ".scratch/p-slstm/comparison-results.json").read_text())
-print("## §4.1 — P-sLSTM against the LSTM, electronics, paired by seed (8 seeds)\n")
+print("## §4.1 — P-sLSTM against the LSTM, electronics, independent (8 / 8)\n")
 eff = []
 for metric in ("mape_aggregate", "bias_percent", "rmse"):
     a = np.array(runs["lstm"][metric]["runs"])
     b = np.array(runs["p_slstm"][metric]["runs"])
     if metric == "bias_percent":          # calibration accuracy is judged on |bias|
         a, b, metric = np.abs(a), np.abs(b), "abs_bias"
-    eff.append(effect(b, a, paired=True, metric=metric, panel=f"electronics: {metric}"))
+    eff.append(effect(b, a, paired=False, metric=metric, panel=f"electronics: {metric}"))
 print(table(eff, "metric (LSTM → P-sLSTM)"))
 b = np.array(runs["p_slstm"]["bias_percent"]["runs"])
 a = np.array(runs["lstm"]["bias_percent"]["runs"])
 print("\nsigned bias:\n")
-print(table([effect(b, a, paired=True, metric="bias", panel="electronics: bias")], "metric"))
+print(table([effect(b, a, paired=False, metric="bias", panel="electronics: bias")], "metric"))
 
 # --- §5.4 ---------------------------------------------------------------------------------
 files = sorted((REPO / "Studies").glob("selection_rescore__*/selection_rescore.csv"))

@@ -312,14 +312,16 @@ def volume_split(frame):
 
 # 11. Hyperparameters: Spearman of each chosen hyperparameter with |bias| and MAPE.
 #     Pooled over the grid it is descriptive only: it mixes cells, and a correlation across
-#     cells is the rate/churn regime choosing both variables. Within cells, each of the 16
-#     cells gives one rank correlation over its 10 panels; those 16 values are tested
-#     against 0 by the one-statistic rule, with the CELL as the unit.
+#     cells is the rate/churn regime choosing both variables. Within a cell there is one
+#     rank correlation over the cell's 10 panels. A correlation over panels is not a
+#     difference of means, so `effect` cannot put an interval on it, and pooling the 16
+#     cells into one test is forbidden (protocol §7). The per-cell correlations are
+#     therefore described only: their signs and range across cells. No verdict is drawn.
 HP = {"LSTM": ["batch_size", "learning_rate", "lstm_hidden_size", "dense_units", "dropout"],
       "Transformer": ["batch_size", "learning_rate", "d_model", "nhead", "num_encoder_layers", "dropout"]}
-head = ["Tree", "Hyperparameter", "ρ with \\|bias\\|, pooled (descriptive)",
-        "ρ with \\|bias\\|, mean within-cell [95% CI], cells", "ρ with MAPE, pooled (descriptive)",
-        "ρ with MAPE, mean within-cell [95% CI], cells"]
+head = ["Tree", "Hyperparameter", "ρ with \\|bias\\|, pooled",
+        "ρ with \\|bias\\| within cells: positive / negative of cells, range", "ρ with MAPE, pooled",
+        "ρ with MAPE within cells: positive / negative of cells, range"]
 lines = ["| " + " | ".join(head) + " |", "|" + " --- |" * len(head)]
 for m, arm in product(("LSTM", "Transformer"), ("no_ar-no_cluster", "ar_bounded-no_cluster")):
     f = select(N, m, arm)
@@ -333,13 +335,12 @@ for m, arm in product(("LSTM", "Transformer"), ("no_ar-no_cluster", "ar_bounded-
             # A cell where the search chose one value throughout has no correlation (NaN).
             rho = np.array([stats.spearmanr(g[col], g[out]).statistic if g[col].nunique() > 1 else np.nan
                             for _, g in f.groupby(["rate", "churn"])])
-            # Fewer than 5 cells with a varying choice is too few units to resample.
-            if np.isfinite(rho).sum() < 5:
-                row.append(f"not tested: varies in {np.isfinite(rho).sum()} of 16 cells")
+            rho = rho[np.isfinite(rho)]
+            if not len(rho):
+                row.append("never varies within a cell")
                 continue
-            e = effect(rho, np.zeros_like(rho), paired=True, metric=out, panel="")
-            s = minus(f"{e.delta:+.2f} [{e.lo:+.2f}, {e.hi:+.2f}], {e.n_b}")
-            row.append(f"**{s}**" if e.supported else s)
+            row.append(minus(f"{int((rho > 0).sum())} / {int((rho < 0).sum())} of {len(rho)}, "
+                             f"{rho.min():+.2f} to {rho.max():+.2f}"))
         lines.append("| " + " | ".join(row) + " |")
 (CLAIMS / "11_hyperparameters.md").write_text("\n".join(lines) + "\n")
 
