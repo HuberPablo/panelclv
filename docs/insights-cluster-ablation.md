@@ -24,8 +24,9 @@ median shifts and the "outside the across-replication SD" heuristic are gone. Wh
   level metric, and on CDNOW `cluster_16` is worse on MAPE (+6.1, where |bias| shows no
   clear difference).
 - §5.1: the Spearman gain is now a tested effect (Δ +0.22 to +0.23 at every K, intervals
-  excluding 0) rather than "3 to 15 SDs wide". The comparison with Pareto/NBD, a single fit
-  on this panel, is not tested: it waits for seeded Pareto/NBD refits on these windows.
+  excluding 0) rather than "3 to 15 SDs wide". Against 20 seeded Pareto/NBD refits on the
+  same windows, the labelled arms go from "level with Pareto/NBD" to clearly behind it
+  (by 0.04–0.06).
 - §6 now quotes the per-cell version of `docs/insights-arm-sweep.md` §4.
 
 ## Contents
@@ -164,9 +165,9 @@ part of the result.
 
 **And the one thing they move decisively is the ranking.** On electronics Spearman goes
 from **0.039** without a label to **0.257–0.270** with one — a sevenfold rise, supported at
-every K (§5.1: Δ +0.22 to +0.23, each 95% interval excluding 0). Pareto/NBD scores 0.297 on
-that panel in a single fit; whether the labelled arms differ from it is not tested until
-seeded refits exist (§5.1).
+every K (§5.1: Δ +0.22 to +0.23, each 95% interval excluding 0). It still falls short of
+Pareto/NBD on that panel: 0.314 over 20 seeded refits, clearly ahead of every labelled arm
+by 0.04–0.06 (§5.1).
 This is the measurement §8 of the first draft of this document listed as missing, and it
 does not point the same way as the level does: on the metric the rest of this document
 scores, clusters are indistinguishable from nothing; on the metric it never computed, they
@@ -219,13 +220,24 @@ against `no_cluster` (independent, 40 vs 40, 95% bootstrap interval):
 | `cluster_4` | 0.264 ± 0.015 | **+0.226 [+0.199, +0.248]** | 19.8 |
 | `cluster_8` | 0.270 ± 0.055 | **+0.232 [+0.200, +0.259]** | 19.0 |
 | `cluster_16` | 0.257 ± 0.043 | **+0.219 [+0.189, +0.244]** | 21.0 |
-| Pareto/NBD (benchmark, n = 1) | 0.297 | not tested (below) | 63.0 |
+| Pareto/NBD (benchmark, 20 seeded refits) | 0.314 ± 0.010 | +0.275 [+0.249, +0.297] | 63.1 |
 
-> **TODO — vs Pareto/NBD: pending seeded refits.** Pareto/NBD ran once on this panel and
-> these windows, so it has no replication to resample. Twenty seeded refits on the same
-> panel and windows are being produced under
-> `Studies/real_panel_benchmarks__ParetoNBD__electronics__rNN`; the comparison of the
-> labelled arms with Pareto/NBD will be tested (independent, 40 vs 20) once they exist.
+**Against Pareto/NBD.** Twenty seeded Pareto/NBD refits on the same panel and windows
+(`Studies/real_panel_benchmarks__ParetoNBD__electronics__r00`–`r19`, scored against this
+family's cohort with the customer ids checked) are the benchmark's replications. Each arm
+against them, independent, 40 vs 20, Δ = mean(arm) − mean(Pareto/NBD):
+
+| arm | Δ Spearman vs Pareto/NBD [95% CI] |
+|---|---:|
+| `no_cluster` | **−0.275 [−0.297, −0.249]** |
+| `cluster_4` | **−0.049 [−0.056, −0.043]** |
+| `cluster_8` | **−0.043 [−0.062, −0.027]** |
+| `cluster_16` | **−0.056 [−0.070, −0.043]** |
+| `ar_plus_cluster_8` | **−0.035 [−0.053, −0.021]** |
+
+The label closes most of the gap but not all of it: Pareto/NBD ranks customers clearly
+better than every arm, labelled or not. (An earlier version quoted a single Pareto/NBD fit
+at 0.297 and called the labelled arms "level" with it.)
 
 The gain is supported at every K, and every interval sits far from 0, so unlike the level
 effect it is not a coin toss at n = 40. **It is bought for nothing on the level** — §4

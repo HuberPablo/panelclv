@@ -86,3 +86,22 @@ for arm, v in sp.items():
     print(f"{arm}: n {len(v)}, mean {v.mean():.3f}, sd {v.std(ddof=1):.3f}")
 print()
 print(table(compare("no_cluster", CLUSTER_AND_AR, "spearman", {"electronics": sp}), "panel: arm"))
+
+# --- §5.1 against Pareto/NBD ----------------------------------------------------------------
+# Twenty seeded Pareto/NBD refits on the same electronics panel and windows
+# (`scripts/run_real_panel_benchmarks.py`, default calibration). Each refit is one
+# replication; scored against the family's own rebuilt cohort, with the ids checked, so
+# row i of every forecast is the same customer. Independent of the LSTM studies.
+panel_path, build = rca.PANELS["electronics"]
+data = rca.panel_dataset.prepare_dataset(pd.read_csv(panel_path), build(rca.ARMS["no_cluster"]), verbose=False)
+actual_totals = rca.holdout_actuals(data).sum(axis=1)
+pnbd = []
+for root in sorted((REPO / "Studies").glob("real_panel_benchmarks__ParetoNBD__electronics__r*")):
+    values, ids = rca.load_model_predictions(root / "ParetoNBD", study=1)
+    if ids is not None and not (len(ids) == len(data["ids"]) and (pd.Series(ids).values == pd.Series(data["ids"]).values).all()):
+        raise ValueError(f"{root.name}: forecast ids do not match the family-F cohort")
+    pnbd.append(rca.spearman(values.sum(axis=1), actual_totals))
+pnbd = pd.Series(pnbd)
+print(f"\nPareto/NBD refits: n {len(pnbd)}, mean {pnbd.mean():.3f}, sd {pnbd.std(ddof=1):.3f}\n")
+print(table([effect(sp[arm], pnbd, paired=False, metric="spearman", panel=f"electronics: Pareto/NBD → {arm}")
+             for arm in ["no_cluster", "cluster_4", "cluster_8", "cluster_16", "ar_plus_cluster_8"]], "panel: arm"))
