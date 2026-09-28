@@ -7,16 +7,15 @@ recomputed from the stored forecasts under `Studies/seasonal_4x4x10*`.
 **Revised under the statistical protocol (2026-09-28).** Every test now follows
 `docs/statistical-protocol.md`: Δ is the difference of means with a 95% percentile-bootstrap
 interval (`evaluation.effects.effect`), run per rate × churn cell only (paired by panel;
-independent for 1,000 vs 3,000 customers). Wilcoxon, Mann–Whitney, Hodges–Lehmann,
-Benjamini–Hochberg, McNemar and t-intervals are gone, and so are all p-values. Rate, churn
+independent for 1,000 vs 3,000 customers). Rate, churn
 and whole-grid results are now described, not tested, and the pooled tables carry no marks.
-Δ values changed throughout because they are now means, not medians. Verdicts that moved:
+Δ values changed throughout because they are now differences of means. Verdicts that moved:
 
 - Claim 1: Pareto/NBD ranks better in 94 of 96 cell comparisons, not all of them. At 3,000
   customers, rate 0.30, churn 20%, both LSTM arms rank slightly better (+0.003, supported).
   At 3,000 customers and rate 0.05, the LSTM's MAPE lead over Pareto/NBD (supported
   rate-pooled before) is clear in no cell.
-- Claim 2: was tested by a churn correlation with FDR control; it is now a described pattern.
+- Claim 2: was a tested trend; it is now a described pattern across cells.
 - Claim 4: the Transformer is also hurt at rate 0.10 (two cells), not only at rate 0.30.
 - Claim 5: with the unbounded counters, the label no longer "helps whenever": it hurts the
   LSTM badly in two rate-0.01 cells.
@@ -25,7 +24,7 @@ and whole-grid results are now described, not tested, and the pooled tables carr
   churn 20–40% and loses at churn 80%.
 - Claim 9: the LSTM leaks more than Pareto/NBD at rate 0.10, churn 80% (was "equal"); the
   Transformer leaks more in 15 of 16 cells (was 13).
-- Claim 11: was "not supported" by within-cell tests with FDR control; it is now described
+- Claim 11: it is now described
   per cell with no test (a correlation over panels is not a difference of means), and the
   verdict stays "not supported". The Transformer layer count is the one consistent pattern
   (positive in 13 of 16 cells).
@@ -898,8 +897,7 @@ by week 52), 10 panels per cell, 40 per rate, 160 over the grid.
   (`panelclv.evaluation.effects.effect`). **Paired** comparisons (two trees on the same
   panels) resample the panels with their pairs intact. **Independent** comparisons (1,000
   vs 3,000 customers, claim 12) resample each side separately.
-- **Bold** means supported: the cell's interval excludes 0. There is no multiple-testing
-  correction and no p-value. An interval containing 0 means no clear difference at n = 10,
+- **Bold** means supported: the cell's interval excludes 0. An interval containing 0 means no clear difference at n = 10,
   never "no difference".
 - **Pooled entries are description.** In each grid, the "churn pooled" column and the "all"
   row (in italics) are pooled mean differences over 40 or 160 panels, with no interval and

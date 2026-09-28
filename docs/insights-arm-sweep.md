@@ -22,17 +22,16 @@ printed by `.scratch/synthetic-grid/arm_sweep_effects.py`).
 **Revised under the statistical protocol (2026-09-28).** §4, §5 and §7 now follow
 `docs/statistical-protocol.md`: a paired difference of means with its 95% percentile-bootstrap
 interval (`evaluation.effects.effect`), run inside each rate × churn cell of 10 panels and
-never over the 160 panels pooled. The Wilcoxon tests, median differences and p-values are
-gone. §4's per-cell tests read `per_study.csv`, which leaves out two Transformer
+never over the 160 panels pooled. §4's per-cell tests read `per_study.csv`, which leaves out two Transformer
 `ar_unbounded` studies whose recomputed forecasts disagree with their stored results, so
 those contrasts rest on 158 panels. Verdicts that moved:
 
-- §4 `ar_unbounded` vs `no_ar`, Transformer: "not significant" → worse in 5 of 16 cells
+- §4 `ar_unbounded` vs `no_ar`, Transformer: "no difference" → worse in 5 of 16 cells
   (rates 0.10–0.30), better in 1.
-- §4 `kmeans_8` under `ar_unbounded`, LSTM: "significantly helps" → mixed: better in 5
+- §4 `kmeans_8` under `ar_unbounded`, LSTM: "helps" → mixed: better in 5
   cells, worse in 2 (rate 0.01, by more than 1,000 points), and the pooled mean |bias| rises.
 - §4 `ar_bounded` vs `no_ar`, Transformer, and `kmeans_8` under `ar_bounded`, Transformer:
-  "significant" over 160 panels → supported in only 5 and 4 of 16 cells.
+  "supported" over 160 pooled panels → supported in only 5 and 4 of 16 cells.
 - §5: "the LSTM wins twelve of sixteen cells" → the LSTM is clearly closer to the truth in 7
   cells, the Transformer in 3, and 6 show no clear difference.
 - §7 is unchanged in substance: at rate 0.30, churn 0.6–0.8, no clear difference from

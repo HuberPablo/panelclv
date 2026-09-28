@@ -13,9 +13,9 @@ epochs, roughly 2,300 gradient updates, and our benchmark winners receive about 
 that comparison, and the rest of the document is the evidence that it matters.
 
 **Tested, §9.** On electronics, 20 independent replications per arm: training the frozen
-benchmark for the paper's own 90 epochs moves MAPE by −22.3 (95% CI −28.2 to −16.2) and
-per-customer Spearman by +0.150 (95% CI +0.108 to +0.191). Copying the paper's *settings*
-without the epochs moves neither. **The electronics collapse reported in
+benchmark for the paper's own 90 epochs moves MAPE by −22.3 (95% CI −28.3 to −16.2) and
+per-customer Spearman by +0.150 (95% CI +0.107 to +0.191). Copying the paper's *settings*
+without the epochs shows no clear difference in either at n = 20. **The electronics collapse reported in
 `docs/benchmarks-real-panels.md` is substantially a training artefact** — that row is
 ours, not a published result of Valendin et al.
 
@@ -38,14 +38,12 @@ sections each revision covers:
 
 ### Selection: §6, §14, §15.3 (register rows 9–13)
 
-- **Method.** The §14 test against the status quo was a paired Wilcoxon over 80 studies,
-  with ±1.96·SE intervals on the mean correlation; the §14.1/§15.3 intervals were BCa. All
-  are now `effect()` percentile intervals from 10,000 resamples — one statistic per study
+- **Method.** Every interval is now an `effect()` percentile interval from 10,000 resamples — one statistic per study
   against 0, and paired differences against validation CE. The 80 electronics studies
   pooled two models and are now split into LSTM and ValendinLSTM (40 each), CDNOW's 10 into
-  5 and 5. §6's across-study correlation moved from a 5,000-resample BCa to the
-  protocol's percentile interval; its two verdicts are unchanged. The "66 of 80, highly
-  significant" sentence is now a per-model count given as description.
+  5 and 5. §6's across-study correlation now uses the
+  protocol's percentile interval; its two verdicts are unchanged. The "66 of 80" sentence
+  is now a per-model count given as description.
 - **Flipped.** Row 10b (rollout MAPE's own correlation with holdout MAPE not supported):
   holds for the LSTM, **overturned for ValendinLSTM** (+0.107, supported). CE against
   holdout Spearman on electronics: *not supported* → supported and weakly right-signed for
@@ -77,8 +75,8 @@ on; none generalises.
 | 2 | With early stopping off, validation CE keeps falling to epoch 88–247 | mechanism | cdnow, electronics, multichannel (n=3) | val CE | established | 2 |
 | 3 | The reference notebook's training recipe differs from ours in optimizer, weight decay, learning-rate selection, batch size, patience and epoch budget | descriptive | — | — | established | 4 |
 | 4 | Under patience 7 the search prefers the batch size that trains least | descriptive | electronics | val CE | established | 5 |
-| 5 | Training to the paper's epoch count improves level and discrimination | superiority | electronics | MAPE, Spearman | established | 9 |
-| 6 | The paper's settings without the floor change nothing | bounded | electronics | MAPE, Spearman | bounded | 9 |
+| 5 | Training to the paper's epoch count improves level and discrimination | superiority | electronics (n = 20 / 20) | MAPE, Spearman | established (ValendinLSTM MAPE −22.3, −28.3 to −16.2; Spearman +0.150, +0.107 to +0.191) | 9 |
+| 6 | The paper's settings without the floor show no clear difference | descriptive | electronics (n = 20 / 20) | MAPE, Spearman | no clear difference on both models (**was `bounded`**; not an equivalence); ValendinLSTM's \|bias\| is supported lower (−11.8) | 9 |
 | 7 | The paper's rule stops early under our split and not under theirs | mechanism | electronics (n=3) | epochs | established | 10 |
 | 8 | The temporal curve gains 5.4×10⁻⁵/epoch against a 10⁻⁴ threshold | mechanism | electronics (n=1/split) | val CE | established | 13.2 |
 | 9 | Validation CE is wrong-signed against the holdout | superiority | electronics (LSTM, ValendinLSTM; n = 40 studies each) | MAPE, \|bias\| | established, both models | 14.1 |
@@ -88,17 +86,17 @@ on; none generalises.
 | 11 | A composite of three criteria is worse than whichever matches the target | superiority (negative) | electronics (n = 40 per model) | MAPE, Spearman | established for MAPE on both models and Spearman on LSTM; ValendinLSTM Spearman not supported | 14.3 |
 | 12 | *The wrong sign comes from a calibration/holdout rate shift* | mechanism | — | — | **retracted** | 14.2, 15.3 |
 | 13 | CE selects well where a study's trials differ and badly where they do not | mechanism | cdnow, electronics | — | described on two panels, not a tested mechanism | 15.3 |
-| 14 | A cluster label improves discrimination | superiority | electronics, multichannel | Spearman | established | 15.1 |
+| 14 | A cluster label improves discrimination | superiority | electronics, multichannel (n = 20 / 20) | Spearman | established | 15.1 |
 | 14b | …on cdnow, and on gift's benchmark | superiority | cdnow, gift | Spearman | **not supported** | 15.1 |
 | 14c | A cluster label added to an already-floored model improves discrimination | superiority | all four, separately (8/8 cells) | Spearman | established | 15.1 |
 | 15 | A training floor improves discrimination | superiority | electronics, multichannel | Spearman | established | 15.1 |
-| 16 | A training floor has no detectable effect on discrimination | descriptive | cdnow | Spearman | established | 15.1 |
+| 16 | A training floor shows no clear difference in discrimination | descriptive | cdnow (n = 20 / 20) | Spearman | no clear difference at n = 20 (not an absence) | 15.1 |
 | 16b | A training floor **worsens** discrimination | superiority (negative) | gift | Spearman | established | 15.1 |
-| 17 | Adding the floor on top of the label adds nothing beyond ±0.012 | bounded | electronics | Spearman | bounded | 15.1 |
-| 18 | The floored paper-recipe arm triples CDNOW's LSTM error | superiority (negative) | cdnow | MAPE | established | 15.2 |
+| 17 | Adding the floor on top of the label shows no clear difference | descriptive | electronics (n = 20 / 20) | Spearman | no clear difference (ValendinLSTM −0.011 to +0.012, LSTM −0.005 to +0.035); **was `bounded` within ±0.012 — the refit-noise margin ±0.0105 is not met** | 15.1 |
+| 18 | The floored paper-recipe arm triples CDNOW's LSTM error | superiority (negative) | cdnow (n = 20 / 20) | MAPE | established (+126.2, +77.2 to +173.2) | 15.2 |
 | 18b | *…and the floor is what causes it* | mechanism | cdnow | MAPE | **not identified** (E1) | 15.2 |
-| 19 | The best cell reaches approximately Pareto/NBD's Spearman | descriptive | electronics, multichannel | Spearman | established (interval contains or exceeds it) | 15.1 |
-| 19b | …and remains below it | descriptive | cdnow, gift | Spearman | established | 15.1 |
+| 19 | The best cell ranks within about ±0.01 of Pareto/NBD (20 seeded fits) | superiority, both directions | electronics, multichannel (n = 20 / 20) | Spearman | electronics: **below**, supported, on both models (−0.009, −0.012; was "contains or exceeds"); multichannel: ValendinLSTM above (+0.010), LSTM no clear difference | 15.1 |
+| 19b | …and remains below it | superiority (negative) | cdnow, gift (n = 20 / 20) | Spearman | established (−0.015 to −0.047, every interval below 0) | 15.1 |
 | 20 | The replication RNG coupling does not reach the archive | mechanism | all four | val CE | established | 7 |
 
 ## How claims are made
@@ -493,29 +491,38 @@ replications on electronics, 100 trials for the searched arms, 200 Monte Carlo p
 | `paper90` | +31.1 ± 31.7 | 54.7 | 0.174 ± 0.075 | 0.24 ± 0.14 |
 | **`floor50`** | **+0.3 ± 18.2** | **50.1** | 0.074 ± 0.049 | 0.11 ± 0.04 |
 
-Each arm against `archive`, as Δ of condition means with a 95% bootstrap CI, 20
-independent replications each. Electronics' refit noise is 3.63 MAPE and 0.0105 Spearman.
+Each arm against `archive`, as Δ of condition means with a 95% percentile-bootstrap CI
+(`effect()`, independent bootstrap), 20 replications each. Electronics' refit noise is
+3.63 MAPE and 0.0105 Spearman. Regenerated by `.scratch/training-budget/family_t_stats.py`
+from `results/family_t_scores.csv`.
 
 | model | arm | Δ MAPE | 95% CI | Δ Spearman | 95% CI |
 | --- | --- | ---: | :---: | ---: | :---: |
 | ValendinLSTM | `paper` | −0.6 | −6.3 to +5.0 | −0.011 | −0.034 to +0.011 |
-| | `paper90` | **−22.3** | **−28.2 to −16.2** | **+0.150** | **+0.108 to +0.191** |
-| | `floor50` | **−21.2** | **−26.8 to −15.6** | **+0.141** | **+0.099 to +0.180** |
-| LSTM | `paper` | +4.3 | −0.3 to +9.0 | −0.011 | −0.034 to +0.012 |
-| | `paper90` | −4.5 | −12.9 to +4.5 | **+0.144** | **+0.105 to +0.180** |
-| | `floor50` | **−9.2** | **−13.4 to −4.5** | **+0.043** | **+0.014 to +0.071** |
+| | `paper90` | **−22.3** | **−28.3 to −16.2** | **+0.150** | **+0.107 to +0.191** |
+| | `floor50` | **−21.2** | **−26.8 to −15.5** | **+0.141** | **+0.100 to +0.180** |
+| LSTM | `paper` | +4.3 | −0.2 to +9.0 | −0.011 | −0.034 to +0.011 |
+| | `paper90` | −4.5 | −12.9 to +4.6 | **+0.144** | **+0.106 to +0.180** |
+| | `floor50` | **−9.2** | **−13.3 to −4.5** | **+0.043** | **+0.015 to +0.070** |
 
-Bold rows are the supported ones — interval excludes zero. Two readings the earlier
-p-value version of this table obscured: **the LSTM's level gain under `paper90` is not
+Bold rows are the supported ones — interval excludes zero. Two readings stand out:
+**the LSTM's level gain under `paper90` is not
 supported** (−4.5, interval spanning zero), and **the LSTM's discrimination gain under
-`floor50`, though supported, is +0.043 against a refit noise of 0.0105** — real, and four
-times the noise rather than fourteen times it as for the benchmark.
+`floor50`, though supported, is +0.043 against a refit noise of 0.0105** — about four
+times the refit noise, where the benchmark's is about fourteen times it.
+
+The secondary metric, |bias|, says one thing the primary ones do not: **`paper` lowers the
+frozen benchmark's |bias|** (Δ −11.8, 95% CI −21.2 to −2.3; `paper90` −16.4, −26.0 to
+−6.6; `floor50` −14.5, −24.3 to −4.5). For the LSTM only `floor50` does (−17.6, −25.9 to
+−8.8); `paper` (+4.0, −5.2 to +13.6) and `paper90` (+3.7, −9.8 to +17.8) show no clear
+difference.
 
 **Three things follow, and the first is the one to remember.**
 
 **The settings were never the point; the epochs were.** `paper` — the notebook's optimizer,
-batch size and patience, pinned exactly — is indistinguishable from `archive` on every
-metric, because it keeps the checkpoint from **epoch 1** and terminates after 7:
+batch size and patience, pinned exactly — shows no clear difference from `archive` in MAPE
+or Spearman at n = 20 (it moves the benchmark's |bias|, above, and nothing else), because
+it keeps the checkpoint from **epoch 1** and terminates after 7:
 copying the recipe copies its stopping rule, and that rule quits immediately here (§10
 shows why). Best epoch and stop epoch are not the same number — §1 — and the one that
 matters for how much training happened is the 7. Add the floor and
@@ -539,7 +546,8 @@ better of the two on level (LSTM bias +0.3 ± 18.2 against `archive`'s +30.4).
 ### What it does not overturn
 
 Inputs still dominate ranking. A `kmeans_8` cluster label reaches Spearman 0.27
-(`docs/insights-cluster-ablation.md` §5.1) and Pareto/NBD 0.297, against 0.177 here; §6's
+(`docs/insights-cluster-ablation.md` §5.1) and Pareto/NBD 0.314 (mean of 20 seeded fits),
+against 0.177 here; §6's
 ordering holds, with training length worth more than it looked at five replications
 (0.178 at n = 20 against the pilot's 0.09) and still less than one persistent
 per-customer channel.
@@ -547,9 +555,9 @@ per-customer channel.
 RMSE separates nothing, as everywhere on these panels: every arm sits between 0.3763 and
 0.3774 against the all-zero forecast's 0.3775.
 
-Bias moves a lot and means less: `paper90`'s −5.7 ± 27.0 is a better centre than
-`archive`'s +39.8 ± 20.4, but the across-replication spread grows and the refit noise
-on this panel is 8.9 points of sd (§3). Read MAPE and Spearman.
+Bias is the secondary metric: `paper90`'s −5.7 ± 27.0 is a better centre than
+`archive`'s +39.8 ± 20.4, and its |bias| is supported lower (above), but the
+across-replication spread grows. The claims of this section rest on MAPE and Spearman.
 
 ## 10. Why the paper's rule keeps epoch 1 here: the split, not the panel
 
@@ -978,17 +986,18 @@ replications a cell. 640 suites on vast.ai, 21 September 2026, $1.68.
 
 ### 15.1 Ranking: the label does most of the work, and the floor adds little on top of it
 
-Per-customer Spearman, mean over 20 replications:
+Per-customer Spearman, mean over 20 replications (Pareto/NBD: mean of 20 seeded fits on
+the same windows, `real_panel_benchmarks__ParetoNBD__<panel>__r00`–`r19`):
 
 | panel | model | archive / no_cluster | archive / kmeans_8 | floored / no_cluster | **floored / kmeans_8** | Pareto/NBD |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | cdnow | ValendinLSTM | 0.364 | 0.403 | 0.383 | **0.406** | 0.450 |
 | | LSTM | 0.386 | 0.398 | 0.352 | **0.403** | |
-| electronics | ValendinLSTM | 0.021 | 0.305 | 0.178 | **0.305** | 0.297 |
+| electronics | ValendinLSTM | 0.021 | 0.305 | 0.178 | **0.305** | 0.314 |
 | | LSTM | 0.029 | 0.289 | 0.182 | **0.302** | |
-| gift | ValendinLSTM | 0.349 | 0.359 | 0.280 | **0.363** | 0.383 |
+| gift | ValendinLSTM | 0.349 | 0.359 | 0.280 | **0.363** | 0.378 |
 | | LSTM | 0.326 | 0.356 | 0.263 | **0.359** | |
-| multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.189 |
+| multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.185 |
 | | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
 
 Forecast CV of the same forecasts, mean over 20 replications:
@@ -1010,30 +1019,28 @@ measures do not always move together — cdnow's floored LSTM without a label ha
 flatter than any other cdnow cell, yet ranks at 0.352.
 
 **Every contrast the 2×2 supports, under the standard** — Δ of condition means with a 95%
-bootstrap CI, 20 independent replications a cell, beside that panel's Spearman refit
-noise. `label alone` and `floor alone` are measured against `archive / no_cluster`;
+percentile-bootstrap CI (`effect()`, independent), 20 replications a cell, beside that
+panel's Spearman refit noise; regenerated by `.scratch/training-budget/all_effects.py`
+into `results/effects_spearman.csv`. `label alone` and `floor alone` are measured against `archive / no_cluster`;
 `+label` and `+floor` are measured against the other lever already applied.
 
 | panel | model | label alone | floor alone | +floor (on label) | +label (on floor) |
 | --- | --- | ---: | ---: | ---: | ---: |
-| cdnow | ValendinLSTM | +0.039 (−0.003, +0.088) | +0.019 (−0.019, +0.065) | +0.003 (−0.024, +0.032) | **+0.023 (+0.000, +0.047)** |
-| | LSTM | +0.012 (−0.013, +0.040) | −0.034 (−0.097, +0.019) | +0.004 (−0.014, +0.024) | **+0.051 (+0.001, +0.111)** |
-| electronics | ValendinLSTM | **+0.283 (+0.265, +0.302)** | **+0.157 (+0.119, +0.193)** | +0.001 (−0.010, +0.012) | **+0.127 (+0.094, +0.163)** |
-| | LSTM | **+0.260 (+0.235, +0.282)** | **+0.153 (+0.116, +0.188)** | +0.013 (−0.005, +0.035) | **+0.120 (+0.087, +0.156)** |
-| gift | ValendinLSTM | +0.010 (−0.005, +0.026) | **−0.069 (−0.118, −0.027)** | +0.004 (−0.005, +0.014) | **+0.084 (+0.044, +0.130)** |
-| | LSTM | **+0.030 (+0.005, +0.061)** | **−0.063 (−0.117, −0.012)** | +0.003 (−0.005, +0.011) | **+0.096 (+0.053, +0.143)** |
-| multichannel | ValendinLSTM | **+0.182 (+0.162, +0.199)** | **+0.123 (+0.099, +0.148)** | **+0.018 (+0.004, +0.035)** | **+0.077 (+0.054, +0.100)** |
-| | LSTM | **+0.173 (+0.158, +0.186)** | **+0.076 (+0.051, +0.100)** | +0.014 (−0.003, +0.031) | **+0.111 (+0.085, +0.137)** |
+| cdnow | ValendinLSTM | +0.039 (−0.003, +0.086) | +0.019 (−0.019, +0.065) | +0.003 (−0.023, +0.033) | **+0.023 (+0.001, +0.047)** |
+| | LSTM | +0.012 (−0.013, +0.039) | −0.034 (−0.095, +0.019) | +0.004 (−0.014, +0.024) | **+0.051 (+0.001, +0.113)** |
+| electronics | ValendinLSTM | **+0.283 (+0.264, +0.302)** | **+0.157 (+0.119, +0.193)** | +0.001 (−0.011, +0.012) | **+0.127 (+0.094, +0.162)** |
+| | LSTM | **+0.260 (+0.235, +0.282)** | **+0.153 (+0.114, +0.188)** | +0.013 (−0.005, +0.035) | **+0.120 (+0.088, +0.156)** |
+| gift | ValendinLSTM | +0.010 (−0.005, +0.026) | **−0.069 (−0.118, −0.027)** | +0.004 (−0.005, +0.014) | **+0.084 (+0.043, +0.130)** |
+| | LSTM | **+0.030 (+0.005, +0.061)** | **−0.063 (−0.118, −0.011)** | +0.003 (−0.005, +0.011) | **+0.096 (+0.055, +0.144)** |
+| multichannel | ValendinLSTM | **+0.182 (+0.163, +0.199)** | **+0.123 (+0.099, +0.147)** | **+0.018 (+0.003, +0.035)** | **+0.077 (+0.054, +0.100)** |
+| | LSTM | **+0.173 (+0.158, +0.186)** | **+0.076 (+0.051, +0.101)** | +0.014 (−0.004, +0.031) | **+0.111 (+0.083, +0.137)** |
 
 Bold = interval excludes zero. Three readings, and the first corrects an earlier claim:
 
 **The label's effect is supported on two panels, not four.** On electronics and
-multichannel it is large and certain. On cdnow it is not supported for either model
-(+0.039 and +0.012, both intervals spanning zero) and on gift only for the LSTM, by
-+0.030. An earlier version of this section said the label "lifts ranking on every panel,
-decisively on two and marginally on two", resting on a Mann-Whitney p of 0.008 for cdnow;
-under the standard this document now holds itself to, that comparison is **not
-supported**.
+multichannel it is large and supported. On cdnow there is no clear difference for either
+model at n = 20 (+0.039 and +0.012, both intervals spanning zero) and on gift it is
+supported only for the LSTM, by +0.030. The label does not lift ranking on every panel.
 
 **What is supported on all eight cells is the label added to an already-floored model**
 (+0.023 to +0.127). That is the robust form of the claim: whatever the floor does, adding
@@ -1042,26 +1049,27 @@ a per-customer channel on top of it helps everywhere.
 **The floor alone is the heterogeneous one** — large and positive on electronics and
 multichannel, **negative and supported on gift**, and not supported on cdnow.
 
-**Crossing them adds little, and how little is now bounded.** Δ from adding the floor on
-top of the label, 95% bootstrap CI, 20 replications a cell, beside that panel's Spearman
-refit noise:
+**Crossing them adds little.** Δ from adding the floor on top of the label, 95%
+percentile-bootstrap CI, 20 replications a cell, beside that panel's Spearman refit noise:
 
 | panel | model | Δ | 95% CI | supported | refit noise |
 | --- | --- | ---: | :---: | :---: | ---: |
-| cdnow | ValendinLSTM | +0.003 | −0.024 to +0.033 | no | 0.0159 |
+| cdnow | ValendinLSTM | +0.003 | −0.023 to +0.033 | no | 0.0159 |
 | | LSTM | +0.004 | −0.014 to +0.024 | no | |
-| electronics | ValendinLSTM | +0.001 | −0.010 to +0.012 | no | 0.0105 |
+| electronics | ValendinLSTM | +0.001 | −0.011 to +0.012 | no | 0.0105 |
 | | LSTM | +0.013 | −0.005 to +0.035 | no | |
-| gift | ValendinLSTM | +0.005 | −0.005 to +0.014 | no | 0.0116 |
+| gift | ValendinLSTM | +0.004 | −0.005 to +0.014 | no | 0.0116 |
 | | LSTM | +0.003 | −0.005 to +0.011 | no | |
-| multichannel | ValendinLSTM | **+0.018** | **+0.004 to +0.035** | **yes** | 0.0152 |
-| | LSTM | +0.014 | −0.003 to +0.031 | no | |
+| multichannel | ValendinLSTM | **+0.018** | **+0.003 to +0.035** | **yes** | 0.0152 |
+| | LSTM | +0.014 | −0.004 to +0.031 | no | |
 
 So: **in one of eight cells the increment is supported, and everywhere the interval rules
 out a gain larger than about +0.035** — the same order as what an unseeded refit moves on
-its own. That is the honest statement, and it is weaker than "they do not add": a
-non-significant difference is not an established absence, and only gift/LSTM meets the
-equivalence margin outright. The label reaches most of what is reachable by itself, the
+its own. That is the honest statement, and it is weaker than "they do not add": an
+interval containing zero is no clear difference at n = 20, not an established absence.
+Only gift/LSTM meets the equivalence margin fixed in "How claims are made" (the panel's
+refit noise): no difference larger than ±0.0116 is detectable there at n = 20. On
+electronics neither model meets it (ValendinLSTM −0.011 to +0.012 against ±0.0105). The label reaches most of what is reachable by itself, the
 floor reaches a little over half of it by itself, and stacking them buys at most a few
 hundredths.
 
@@ -1071,7 +1079,7 @@ another** — Δ Spearman from adding the floor with no label, ValendinLSTM:
 | panel | Δ | 95% CI | supported | refit noise |
 | --- | ---: | :---: | :---: | ---: |
 | electronics | **+0.157** | +0.119 to +0.193 | yes | 0.0105 |
-| multichannel | **+0.123** | +0.099 to +0.148 | yes | 0.0152 |
+| multichannel | **+0.123** | +0.099 to +0.147 | yes | 0.0152 |
 | cdnow | +0.019 | −0.019 to +0.065 | no | 0.0159 |
 | gift | **−0.069** | −0.118 to −0.027 | yes (**worse**) | 0.0116 |
 
@@ -1081,49 +1089,56 @@ matters because it needs no extra input — it is the fix available when no clus
 is allowed — but it is not the better of the two, and it is not safe everywhere.
 
 **Against the statistical benchmark, the collapse is closed and nothing more.** The best
-cell's mean with its 95% interval, against Pareto/NBD's single deterministic fit:
+cell (`floored / kmeans_8`) against Pareto/NBD, which is now a replicated condition: 20
+seeded MCMC fits per panel on the same 2-year windows (every factorial suite's
+`config.json` names the benchmark's windows). Δ = best cell − Pareto/NBD, independent
+bootstrap, n = 20 / 20; `all_effects.py`:
 
-| panel | model | best cell | 95% CI | Pareto/NBD | reading |
-| --- | --- | ---: | :---: | ---: | --- |
-| electronics | ValendinLSTM | 0.305 | 0.298 to 0.312 | 0.297 | interval **above** it |
-| | LSTM | 0.302 | 0.289 to 0.310 | 0.297 | interval contains it |
-| multichannel | ValendinLSTM | 0.195 | 0.187 to 0.204 | 0.189 | interval contains it |
-| | LSTM | 0.189 | 0.170 to 0.200 | 0.189 | interval contains it |
-| cdnow | ValendinLSTM | 0.406 | 0.394 to 0.416 | 0.450 | **below** |
-| | LSTM | 0.403 | 0.390 to 0.415 | 0.450 | **below** |
-| gift | ValendinLSTM | 0.363 | 0.358 to 0.368 | 0.383 | **below** |
-| | LSTM | 0.359 | 0.353 to 0.365 | 0.383 | **below** |
+| panel | model | best cell | Pareto/NBD (20 fits) | Δ | 95% CI | supported | refit noise |
+| --- | --- | ---: | ---: | ---: | :---: | :---: | ---: |
+| electronics | ValendinLSTM | 0.305 | 0.314 | −0.009 | −0.017 to −0.000 | yes (**below**, small) | 0.0105 |
+| | LSTM | 0.302 | 0.314 | −0.012 | −0.023 to −0.002 | yes (**below**) | |
+| multichannel | ValendinLSTM | 0.195 | 0.185 | +0.010 | +0.000 to +0.020 | yes (above, small) | 0.0152 |
+| | LSTM | 0.189 | 0.185 | +0.004 | −0.012 to +0.018 | no | |
+| cdnow | ValendinLSTM | 0.406 | 0.450 | −0.044 | −0.056 to −0.032 | yes (**below**) | 0.0159 |
+| | LSTM | 0.403 | 0.450 | −0.047 | −0.060 to −0.034 | yes (**below**) | |
+| gift | ValendinLSTM | 0.363 | 0.378 | −0.015 | −0.021 to −0.009 | yes (**below**) | 0.0116 |
+| | LSTM | 0.359 | 0.378 | −0.019 | −0.025 to −0.013 | yes (**below**) | |
 
-Pareto/NBD has **no interval of its own** — it is one deterministic fit — so these are
-comparisons of an interval against a point, not equivalence tests. On that basis: the
-frozen benchmark's interval sits marginally above Pareto/NBD on electronics, contains it
-on the other two collapsed cells, and sits clearly below on the two panels that never
-collapsed. One caveat belongs beside every one of those
-comparisons: `kmeans_8` is k-means over the Pareto/NBD sufficient statistics, so the cell
-that draws level has been handed the benchmark's own summary.
+Pareto/NBD's electronics mean over 20 fits is 0.314 (range 0.297–0.334; the seed-42 fit
+earlier versions of this document quoted alone is the lowest of them), and **both models' best cell sits below Pareto/NBD on electronics**, by
+about the refit noise; on multichannel the frozen benchmark sits above it by a similarly
+small margin and the LSTM shows no clear difference; on the two panels that never
+collapsed both sit clearly below. So the collapse is closed on both collapsed panels in
+the sense that the best cell ranks within about ±0.01 of Pareto/NBD there — not in the
+sense of an equivalence, which none of these intervals was tested for. One caveat
+belongs beside every one of those comparisons: `kmeans_8` is k-means over the Pareto/NBD
+sufficient statistics, so the cell that draws level has been handed the benchmark's own
+summary.
 
 ### 15.2 Level: the floor is the lever, and on one panel it is a disaster
 
 Aggregate MAPE, same cells:
 
-Δ MAPE from the floored arm against `archive`, no cluster label, 95% bootstrap CI:
+Δ MAPE from the floored arm against `archive`, no cluster label, 95% percentile-bootstrap
+CI (`effect()`, independent, n = 20 / 20; `results/effects_mape.csv`):
 
 | panel | model | archive | floored | Δ | 95% CI | supported | refit noise |
 | --- | --- | ---: | ---: | ---: | :---: | :---: | ---: |
-| multichannel | LSTM | 140.9 | **52.8** | **−88.1** | −112.3 to −66.3 | yes | 7.71 |
-| multichannel | ValendinLSTM | 84.9 | **56.0** | **−28.9** | −37.9 to −20.1 | yes | 7.71 |
-| electronics | ValendinLSTM | 69.1 | **46.3** | **−22.8** | −28.2 to −17.2 | yes | 3.63 |
-| electronics | LSTM | 56.9 | 51.7 | −5.2 | −12.4 to +2.5 | no | 3.63 |
-| gift | ValendinLSTM | 32.2 | 28.9 | −3.3 | −7.0 to −0.1 | yes (below refit noise) | 5.89 |
-| gift | LSTM | 30.3 | 29.9 | −0.5 | −4.1 to +3.2 | no | 5.89 |
-| cdnow | ValendinLSTM | 51.7 | 56.5 | +4.8 | −20.8 to +30.8 | no | 5.83 |
-| **cdnow** | **LSTM** | **57.7** | **183.9** | **+126.2** | +78.6 to +174.0 | yes (**worse**) | 5.83 |
+| multichannel | LSTM | 140.9 | **52.8** | **−88.1** | −111.4 to −66.1 | yes | 7.71 |
+| multichannel | ValendinLSTM | 84.9 | **56.0** | **−28.9** | −37.8 to −20.2 | yes | 7.71 |
+| electronics | ValendinLSTM | 69.1 | **46.3** | **−22.8** | −28.1 to −17.4 | yes | 3.63 |
+| electronics | LSTM | 56.9 | 51.7 | −5.2 | −12.3 to +2.5 | no | 3.63 |
+| gift | ValendinLSTM | 32.2 | 28.9 | −3.3 | −6.9 to −0.1 | yes (below refit noise) | 5.89 |
+| gift | LSTM | 30.3 | 29.9 | −0.5 | −4.0 to +3.3 | no | 5.89 |
+| cdnow | ValendinLSTM | 51.7 | 56.5 | +4.8 | −19.8 to +30.8 | no | 5.83 |
+| **cdnow** | **LSTM** | **57.7** | **183.9** | **+126.2** | +77.2 to +173.2 | yes (**worse**) | 5.83 |
 
 Gift/ValendinLSTM is the case the refit-noise column exists for: the interval excludes zero, so
 the effect is supported, but Δ = −3.3 sits under that panel's 5.89 refit noise. Supported
 and small.
 
-**Something in the floored arm triples CDNOW's LSTM error** (Δ +126.2, +78.6 to +174.0).
+**Something in the floored arm triples CDNOW's LSTM error** (Δ +126.2, +77.2 to +173.2).
 That is the single most important line in this document for anyone about to act on §12.
 
 > **The cause is not identified, and an earlier draft of this paragraph claimed it was.**
@@ -1135,13 +1150,18 @@ That is the single most important line in this document for anyone about to act 
 > CDNOW's LSTM**; which ingredient does it is to-do E1, which runs `floor50` — the archive
 > recipe and search with `min_epochs` as the only change — on this panel.
 
-The frozen benchmark on the same panel is unharmed (Δ +4.8, −20.8 to +30.8), so whatever
-it is interacts with the developed model rather than with the panel alone.
+The frozen benchmark on the same panel shows no clear difference (Δ +4.8, −19.8 to
++30.8, n = 20 — a wide interval, not a demonstration that it is unharmed), so whatever it
+is appears with the developed model rather than with the panel alone. **With the cluster
+label the same floor shows no clear MAPE difference on CDNOW's LSTM** (Δ +4.5, −27.1 to
++34.4; `factorial_analysis.py`), nor on any other cell with the label — so the blow-up
+also depends on the input set, which E1 does not vary.
 
 **So `min_epochs` must not become an unconditional default.** §12's first item is hereby
 qualified: a floor pays where the panel is long and sparse and the model collapses
-(electronics, multichannel), does nothing where it already works (gift), and does real
-damage on a short window (cdnow + LSTM). It has to be chosen per panel, or scaled to the
+(electronics, multichannel), shows no clear MAPE difference or a supported-but-small one
+where the model already works (gift: LSTM no clear difference, ValendinLSTM −3.3), and
+does real damage on a short window (cdnow + LSTM). It has to be chosen per panel, or scaled to the
 calibration length rather than fixed in epochs.
 
 ### 15.3 Why cross-entropy selects well on CDNOW and badly on electronics
@@ -1203,8 +1223,8 @@ panel, and a collapsed panel is exactly where it gets used to justify a choice".
 ### 15.4 What follows
 
 1. **Give the model a per-customer channel.** The cluster label is worth more than
-   anything else measured here, and it closes the gap to Pareto/NBD on both collapsed
-   panels — while being, by construction, the benchmark's own summary fed back in. The
+   anything else measured here, and it brings the best cell to within about ±0.01 of
+   Pareto/NBD's 20 seeded fits on both collapsed panels (§15.1) — while being, by construction, the benchmark's own summary fed back in. The
    honest reading is that the architecture cannot build that signal from counts alone,
    which is the case `docs/absorbing-death-state.md` makes for a learned survival
    variable rather than a borrowed one.
@@ -1242,13 +1262,13 @@ top carries the resulting status of each claim.
 | T1 | `min_delta=0` described our loop; ours uses an **absolute 10⁻⁴** (`loop.py`). `min_delta=0` is the notebook's Keras setting. §13.2's mechanism is the correct one and is now used throughout | ✔ |
 | T2 | "stops at epoch 1" conflated best epoch with stop epoch, a distinction §1 sets up. The `paper` arm **keeps the checkpoint from epoch 1 and terminates after 7** | ✔ |
 | T3 | "a customer-wise split leaks time" contradicted §13.1 and was wrong: both splits stay inside calibration and neither touches the holdout. It measures cross-sectional rather than temporal generalisation | ✔ |
-| T4 | "they are substitutes" and "the ceiling is real" rested on non-significance, which is not equivalence. Now stated as a bounded increment with intervals, and as an apparent plateau | ✔ |
-| T5 | "matches Pareto/NBD" — the benchmark is a single deterministic fit with no interval, so no equivalence test exists. Now "reaches approximately the same Spearman" | ✔ |
+| T4 | "they are substitutes" and "the ceiling is real" read an interval containing zero as equivalence. Now stated as no clear difference with its interval, and as an apparent plateau | ✔ |
+| T5 | "matches Pareto/NBD" — the benchmark was a single fit with no interval. It is now 20 seeded fits per panel and compared with the independent bootstrap (§15.1); no equivalence is claimed | ✔ |
 | T6 | "Batch 32 is not the fix; 90 epochs is" claimed an invariant the evidence does not identify — `floor50` reaches the same place with a few hundred updates where `paper90` needs ~2,300 | ✔ |
 | T7 | "never leaves its initialisation" is contradicted by §13.2's own first epoch (CE 0.1303 → 0.0935) | ✔ |
 | T8 | "the published electronics collapse" reads as a Valendin et al. result. It is **our** benchmark row | ✔ |
 | T9 | The seeding protocol was inferable but unstated, and "independent replications" is what the bootstrap assumes | ✔ |
-| T10 | Comparisons were reported as bare p-values. Every effect is now Δ with a 95% bootstrap CI, computed by one implementation (`.scratch/training-budget/effects.py`) | ✔ |
+| T10 | Every effect is Δ with a 95% percentile-bootstrap CI, computed by one implementation (`panelclv.evaluation.effects`, via `.scratch/training-budget/effects.py`) | ✔ |
 
 ### C. Decisions deferred, and what unblocks them
 

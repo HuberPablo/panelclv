@@ -17,14 +17,13 @@ This document answers two questions that were never written down: **how K was ch
 `docs/statistical-protocol.md`: Δ = difference of means between two arms' 40 independent
 replications, with its 95% percentile-bootstrap interval (`evaluation.effects.effect`,
 `paired=False`), one panel at a time, printed by
-`.scratch/statistical-protocol/grid_cluster_ablation_effects.py`. The Mann–Whitney tests,
-median shifts and the "outside the across-replication SD" heuristic are gone. What moved:
+`.scratch/statistical-protocol/grid_cluster_ablation_effects.py`. What moved:
 
 - §4 and §5.2: every verdict on |bias| is unchanged. §4 now also tests MAPE, the primary
   level metric, and on CDNOW `cluster_16` is worse on MAPE (+6.1, where |bias| shows no
   clear difference).
 - §5.1: the Spearman gain is now a tested effect (Δ +0.22 to +0.23 at every K, intervals
-  excluding 0) rather than "3 to 15 SDs wide". Against 20 seeded Pareto/NBD refits on the
+  excluding 0) rather than a comparison of spreads. Against 20 seeded Pareto/NBD refits on the
   same windows, the labelled arms go from "level with Pareto/NBD" to clearly behind it
   (by 0.04–0.06).
 - §6 now quotes the per-cell version of `docs/insights-arm-sweep.md` §4.
@@ -285,9 +284,8 @@ right.** Δ Spearman from adding the label, 95% bootstrap CI, 20 replications a 
 On the two panels that collapse the label is decisive. On the two that do not, the
 interval spans zero — so this document's "sevenfold rise" is an electronics and
 multichannel result, and §5.1's expectation that CDNOW would not show the same effect is
-borne out. (An earlier version of this subsection reported cdnow as a marginal gain at
-p = 0.008; under `docs/statistical-protocol.md`, a
-difference of means with an interval spanning zero is not supported.)
+borne out. (An earlier version of this subsection reported cdnow as a marginal gain; its
+interval spans zero, so it is not supported.)
 
 **What *is* supported on all eight (panel, model) cells is the label added to a model
 that has already been trained past its early plateau** — Δ +0.023 to +0.127, every
