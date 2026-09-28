@@ -43,8 +43,10 @@ customer but never shown to a model.
 ## What was trained and how it was scored
 
 Three models ran on all 160 panels: an LSTM, a Transformer and the Pareto/NBD benchmark.
-The frozen ValendinLSTM could not run, because it refuses every input except count and
-week, and every arm below adds inputs (F11).
+The frozen ValendinLSTM did not run on this grid. It reads only embedded columns (count and
+week), and every arm here, the `no_ar` baseline included, carries the continuous calendar
+columns (year index, week sin/cos), which it refuses (F11). It did run without covariates
+on the real panels (CDNOW, electronics), where the calendar can be left out.
 
 **Architectures and search** (`grids/seasonal_4x4x10.py`). Each neural study is one
 100-trial Optuna search on one panel, then a refit and a 200-path Monte Carlo forecast.
