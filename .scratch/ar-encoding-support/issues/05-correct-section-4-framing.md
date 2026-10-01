@@ -4,7 +4,7 @@ Status: ready-for-agent
 
 ## Problem
 
-Two statements in `docs/feature_engineering.md` §4 are now known to be incomplete.
+Two statements in `docs/feature-engineering.md` §4 are now known to be incomplete.
 
 1. The escape-fraction table is presented as the measure of "which ones to prefer". It
    is invariant to every monotone transform, so it can compare *features* and cannot

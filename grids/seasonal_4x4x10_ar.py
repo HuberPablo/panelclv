@@ -24,7 +24,7 @@ one to avoid here: it is ≥ x whenever a week holds more than one purchase, and
 not what the likelihood conditions on.
 
 All three are recomputed from the SAMPLED count at every rollout step, so nothing
-leaks (`docs/feature_engineering.md`).
+leaks (`docs/feature-engineering.md`).
 
 Copy this file to declare another grid; the module name is the grid's name and every
 path derives from it.

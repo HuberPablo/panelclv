@@ -36,7 +36,7 @@ every call matches the current signature. The comment is now rewritten to descri
   the `_v2` pair), `august test.ipynb` (byte-identical to `Study.ipynb` — all 73 source
   cells match exactly), `dataset_building.ipynb` (imports nothing from `panelclv`).
 
-`README.md`, `docs/feature_engineering.md` and `data_preparation/__init__.py` each
+`README.md`, `docs/feature-engineering.md` and `data_preparation/__init__.py` each
 pointed at a notebook that moved, and now point at the archive.
 
 **Standing check.** `tests/test_notebooks_current_api.py` asserts that no live notebook

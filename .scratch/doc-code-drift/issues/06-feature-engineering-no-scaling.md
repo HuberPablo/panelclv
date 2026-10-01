@@ -1,4 +1,4 @@
-# 06 — `feature_engineering.md` §11 says "No per-feature scaling"; standardisation is unconditional
+# 06 — `feature-engineering.md` §11 says "No per-feature scaling"; standardisation is unconditional
 
 **Status:** ready-for-agent
 
@@ -7,7 +7,7 @@ once. A second instance survived, in the same file.
 
 ## Doc claim
 
-`docs/feature_engineering.md:541-542`, under "## 11. Limitations and open extensions":
+`docs/feature-engineering.md:541-542`, under "## 11. Limitations and open extensions":
 
 > - **No per-feature scaling.** Continuous channels are projected raw; prefer bounded AR
 >   features, or pre-scale in the panel, when magnitudes differ by orders of magnitude.
@@ -25,7 +25,7 @@ fitted on the calibration window:
 
 ## It also contradicts its own file
 
-`docs/feature_engineering.md` says the opposite twice elsewhere:
+`docs/feature-engineering.md` says the opposite twice elsewhere:
 
 - `:48` — the pipeline diagram: `├─ 10. standardise the numeric channels  (calibration-fitted; §5)`
 - `:289-319` — a whole subsection, "**Numeric channels are standardised, fitted on

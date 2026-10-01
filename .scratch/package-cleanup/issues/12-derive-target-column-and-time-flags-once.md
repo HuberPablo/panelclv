@@ -122,7 +122,7 @@ table also be the complete list of created columns.
 The write is deleted, and `tests/test_time_features.py` asserts the *difference* between
 the panel's columns before and after equals the table's `columns` — an extra write now
 fails rather than passing unnoticed. Inert today (no daily panel runs), which is why it
-survived. `docs/feature_engineering.md`'s column row is corrected and now says the table
+survived. `docs/feature-engineering.md`'s column row is corrected and now says the table
 is the source rather than restating it.
 
 One behaviour change: an unknown key in a hand-passed `time_features` dict used to be

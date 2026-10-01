@@ -1,5 +1,5 @@
 """Every neural cell on electronic_5y against Pareto/NBD. Backs "The LSTM against
-Pareto/NBD" and the Pareto/NBD sentences of `docs/feature_engineering.md` §4.
+Pareto/NBD" and the Pareto/NBD sentences of `docs/feature-engineering.md` §4.
 
 Pareto/NBD is 20 seeded MCMC fits on the same cohort and windows; each neural cell is 20
 studies with unseeded training. The two share no unit, so each comparison is the

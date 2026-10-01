@@ -427,7 +427,7 @@ one raw channel to the concatenated vector, untouched. Its only gradient path is
 corresponding column of the LSTM's input-to-hidden matrix `W_ih`. That single fact is why
 numeric channels must be standardised before they ever reach the model: the column's
 contribution to the pre-activation sum, and therefore the gradient arriving at its
-weights, scales with the column's raw magnitude. `docs/feature_engineering.md` develops
+weights, scales with the column's raw magnitude. `docs/feature-engineering.md` develops
 that argument, including why the following `LayerNorm` cannot repair it; this document
 does not restate it.
 
@@ -674,7 +674,7 @@ entry's builder must satisfy for the single training loop to work on it.
 4. **A rollout must be reconstructible from sampled history.** Every feature the model
    reads at holdout step *t* must be genuinely known in advance or computable from the
    model's own samples — otherwise the rollout cannot be run without leaking the answer.
-   `docs/feature_engineering.md` is the authority; the training-time consequence is that
+   `docs/feature-engineering.md` is the authority; the training-time consequence is that
    AR features are precomputed constants from the true past, and their forecast-time
    definitions must match exactly.
 5. **`to_rollout()` shares the backbone.** The trained model hands over its weights rather
@@ -695,7 +695,7 @@ here was measured.
 
 - **No claim is made about gradient magnitudes, vanishing or exploding gradients, or
   training stability** on either panel. The standardisation argument in §4 is a statement
-  about what the arithmetic implies, taken from `docs/feature_engineering.md`; it is not
+  about what the arithmetic implies, taken from `docs/feature-engineering.md`; it is not
   a measurement of observed gradient norms. Whether `grad_clip=1.0` ever actually binds
   during a run is **UNVERIFIED**.
 - **No claim is made about convergence** — how many epochs a fit typically runs, how often

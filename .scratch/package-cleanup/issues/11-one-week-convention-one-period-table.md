@@ -122,7 +122,7 @@ with the thing it gates.
   not weeks: on a daily panel it is 365, and dividing a 0..51 week index by it would
   compress the year into a seventh of the sine's period. The daily branch reads
   `WEEKS_PER_YEAR`, with a comment at the call site and a paragraph in
-  `docs/feature_engineering.md`, whose formula column was wrong about the daily case and is
+  `docs/feature-engineering.md`, whose formula column was wrong about the daily case and is
   now right. Removing the field is a `PanelConfig` change, and archived runs record it.
 - **The month (12) and day-of-year (365) divisors.** Neither is a duplicated table, and the
   365 leap-day case is not the week-52 bug: day 366 maps onto day 1, which is where it

@@ -73,7 +73,7 @@ one not produced by the original pass.
 | 03 | The frozen benchmark's widths are constructor-overridable | behaviour |
 | 04 | `scipy` is a hard import and an undeclared dependency | packaging |
 | 05 | `backpropagation.md` puts `emd_weight` in the registry search space | doc false |
-| 06 | `feature_engineering.md` §11 "No per-feature scaling" | doc false |
+| 06 | `feature-engineering.md` §11 "No per-feature scaling" | doc false |
 | 07 | ADR-0004 and the benchmark's docstring disagree on split and tuning | doc false |
 | 08 | `running-a-model.md` §3 gives the `prepare_dataset` order wrong | doc false |
 | 09 | The refit docstring's "typically the `best_epoch`" | doc false |

@@ -28,7 +28,7 @@ calibration target. Slicing is what creates the object the other three operate o
 
 ## The other doc has it right
 
-`docs/feature_engineering.md:42-48`:
+`docs/feature-engineering.md:42-48`:
 
 ```
 ├─ 5. slice calibration / holdout windows
@@ -42,7 +42,7 @@ tells you to read before touching features.
 
 ## Fix
 
-Correct `docs/running-a-model.md:195-198` to match the code and `feature_engineering.md`:
+Correct `docs/running-a-model.md:195-198` to match the code and `feature-engineering.md`:
 
 > … AR columns registered → **window slicing** → cohort filter → target clipping
 > (calibration only) → AR columns computed → `val_start_idx` → …

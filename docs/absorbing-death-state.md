@@ -5,10 +5,10 @@ every later period of that customer's path to zero — and, if it should, what t
 can possibly be, given that `D` is never observed in any panel.
 
 Read `CLAUDE.md` for the model contract and `CONTEXT.md` for the vocabulary first, and
-`docs/feature_engineering.md` before touching anything a rollout reads. This document
+`docs/feature-engineering.md` before touching anything a rollout reads. This document
 continues an argument those two started: `hurdle-model.md` §2 shows that
 zero-inflation and hurdle formulations are vacuous over a free softmax, and
-`feature_engineering.md` shows that the recency clock the BTYD literature leans on is
+`feature-engineering.md` shows that the recency clock the BTYD literature leans on is
 capped by the calibration window and drifts out of range during the holdout. An
 absorbing state is the first proposal in this package that answers both at once, and
 the one place where "add a class to the softmax" is *not* vacuous.
@@ -346,7 +346,7 @@ the attribution independent of the order one walks it:
 
 **A trap worth naming, because it invalidated the first attempt at this.**
 `prepare_dataset` leaves `data["holdout"]`'s AR columns as raw **zero placeholders** —
-documented at `docs/feature_engineering.md` §7 (3), *"The holdout's AR columns
+documented at `docs/feature-engineering.md` §7 (3), *"The holdout's AR columns
 are left at zero and never read"* — because the rollout always overwrites them and true
 values sitting there would be a standing leakage hazard. Reading them directly feeds a
 cohort that is 100% `has_transacted_before = 1` a value of 0, which is −4.11 after
@@ -662,9 +662,9 @@ Everything above is either measured here or cited from a document in this repo.
 | The four constraints a loss proposal must satisfy | `docs/loss-functions.md` §1 |
 | Unbounded recency blows the forecast up; bounded flags fix it; the failure is not exposure bias | `docs/insights-real-panels.md` §4.2 |
 | Bounded AR flags lift electronics ρ from about 0.04 to 0.26 | `docs/insights-real-panels.md` §4.1 |
-| Recency escapes its calibration range on 37.7% of electronics holdout cells | `docs/feature_engineering.md` §4.2 |
+| Recency escapes its calibration range on 37.7% of electronics holdout cells | `docs/feature-engineering.md` §4.2 |
 | Per-model rollout functions are declared in the registry | `docs/adr/` ADR-0006 |
-| Holdout AR columns are zero placeholders, never read | `docs/feature_engineering.md` §7 (3); `src/panelclv/data_preparation/panel_dataset.py:700-708` |
+| Holdout AR columns are zero placeholders, never read | `docs/feature-engineering.md` §7 (3); `src/panelclv/data_preparation/panel_dataset.py:700-708` |
 | The rollout rebuilds AR state from the sampled count via `ARFeatureState` | `src/panelclv/models/monte_carlo_forecasting.py:144-175` |
 | Bounded-flag arm definitions (`ar_bounded_32`, depths per panel) | `scripts/run_ar_encoding_ablation.py`, `bounded_flags` / `PANEL_DEPTHS` |
 | The non-flooring recency family proposed as the competitor | `.scratch/ar-encoding-support/spec.md` |

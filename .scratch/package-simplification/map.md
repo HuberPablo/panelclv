@@ -13,7 +13,7 @@ match. The map is done when nothing is left to decide. It writes no production c
 ## Notes
 
 **Domain.** Read `CONTEXT.md` for the vocabulary, `docs/adr/` for prior decisions and
-`docs/feature_engineering.md` before touching anything read during a rollout. HITL
+`docs/feature-engineering.md` before touching anything read during a rollout. HITL
 tickets invoke `/grilling` and `/domain-modeling`; the synthesis ticket also invokes
 `/codebase-design`.
 

@@ -4,7 +4,7 @@ A **behavioural cluster** is a per-customer categorical label: customers are gro
 by how they behaved across the calibration window, and the group index becomes a
 learned embedding the model reads at every period. It is *static* — computed once
 from calibration and constant for that customer through the whole holdout — which is
-what makes it leak-free without any rollout machinery (`docs/feature_engineering.md`).
+what makes it leak-free without any rollout machinery (`docs/feature-engineering.md`).
 
 This module holds the *names* half of the split, exactly as `ar_feature_names` does
 for `ar_features`, and for the same structural reason: `PanelConfig` validates every

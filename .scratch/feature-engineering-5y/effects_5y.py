@@ -1,4 +1,4 @@
-"""Every claim `docs/feature_engineering.md` makes about inputs on electronic_5y.
+"""Every claim `docs/feature-engineering.md` makes about inputs on electronic_5y.
 
 Scores each stored forecast of the 5y runs once, through the runners' own `score`
 (the single scoring authority plus per-customer Spearman), adds forecast CV, then
@@ -17,7 +17,7 @@ Pareto/NBD is 20 seeded MCMC fits (`real_panel_benchmarks_cal5y__ParetoNBD__elec
 
     PYTHONPATH=src:scripts python .scratch/feature-engineering-5y/effects_5y.py
         # writes results/per_forecast.csv, cells.csv, effects.csv, input_support.csv
-        # and prints the three cell tables of docs/feature_engineering.md
+        # and prints the three cell tables of docs/feature-engineering.md
 """
 from __future__ import annotations
 
@@ -184,7 +184,7 @@ def input_support() -> pd.DataFrame:
 
 
 def print_cell_tables(cells: pd.DataFrame) -> None:
-    """The three model tables of docs/feature_engineering.md, each closed by Pareto/NBD."""
+    """The three model tables of docs/feature-engineering.md, each closed by Pareto/NBD."""
     fmt = {"rmse_customer_total": "{:.3f}", "bias_percent": "{:+.1f}",
            "mape_aggregate": "{:.1f}", "spearman": "{:.3f}", "cv": "{:.2f}"}
     pn = cells[cells.model == "ParetoNBD"].iloc[0]

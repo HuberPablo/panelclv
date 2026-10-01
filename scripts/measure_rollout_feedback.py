@@ -25,7 +25,7 @@ arrives already quiet latches at once; this is a death model, not a horizon trun
 It is absorbing for free, because forced zeros keep the counter climbing.
 
 **Why the AR columns are rebuilt rather than read.** `prepare_dataset` leaves
-`data["holdout"]`'s AR columns as raw ZERO placeholders -- see `docs/feature_engineering.md`,
+`data["holdout"]`'s AR columns as raw ZERO placeholders -- see `docs/feature-engineering.md`,
 "Instead:" (3) -- because the rollout always overwrites them and true values sitting
 there would be a standing leakage hazard. Reading them directly feeds a cohort that is
 100% `has_transacted_before = 1` a value of 0, which is -4.11 standardized, and the LSTM

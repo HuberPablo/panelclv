@@ -1,6 +1,6 @@
 """How far outside its fitted range does each AR encoding put the holdout?
 
-`docs/feature_engineering.md` §4 ranks AR features by their **support-escape
+`docs/feature-engineering.md` §4 ranks AR features by their **support-escape
 fraction**: the share of holdout cells whose value falls outside the `[min, max]`
 the channel took anywhere in calibration. That number is the right diagnostic for
 choosing *whether* to carry a counter, and the wrong one for choosing *how to

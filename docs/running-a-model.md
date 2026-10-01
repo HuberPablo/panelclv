@@ -198,7 +198,7 @@ filter → target clipping (calibration only) → AR columns computed → window
 standardisation. **The target channel is never standardised** — it is a class index.
 
 For the AR feature contract and why leakage is the failure mode that matters here,
-read `docs/feature_engineering.md`. It is not repeated in this document.
+read `docs/feature-engineering.md`. It is not repeated in this document.
 
 ---
 
@@ -654,7 +654,7 @@ Three things this diagram is drawn to make unmissable:
   its target channel is overwritten by the previous sample every step.
 - **AR features are recomputed from the sampled history**, via `ARFeatureState`.
   Reading them from the holdout would be leakage — the exact failure
-  `docs/feature_engineering.md` exists for.
+  `docs/feature-engineering.md` exists for.
 - **The re-standardisation step is not decoration.** `ARFeatureState` returns raw
   units; the model was warmed up on standardised ones. Skipping the transform feeds
   a silent unit mismatch that no shape check can catch.

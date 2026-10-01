@@ -19,7 +19,7 @@ The features
 `ar_bounded_52`  nested flags active_in_last_{2,4,8,16,32,52}_periods plus
                  has_transacted_before (`run_real_panel_arms.bounded_flags`).
                  Recomputed each holdout week from the sampled path, so no true holdout
-                 value is read (`docs/feature_engineering.md`). Concatenated raw.
+                 value is read (`docs/feature-engineering.md`). Concatenated raw.
 `kmeans_8`       one static label per customer: k-means with K=8 on (t_x, x, T) at the
                  end of calibration. Embedded (8 classes).
 

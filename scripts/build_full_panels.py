@@ -39,7 +39,7 @@ calibration the data cannot cover raises an error rather than being trimmed.
 **Static covariates only.** These are demographics and facts fixed at the first
 purchase: its channel, its category and its spend (`log1p`). Weekly spend, channel
 mix, returns and contact or message counts are behaviour. A rollout cannot know them
-for weeks it simulates (`docs/feature_engineering.md`), so they are left out.
+for weeks it simulates (`docs/feature-engineering.md`), so they are left out.
 Categorical codes start at 0, and code 0 means "missing" wherever a value can be
 missing.
 

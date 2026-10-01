@@ -17,7 +17,7 @@ A **behavioural cluster** carries the same information in a form that **cannot e
 support**. Customers are partitioned by that identical (t_x, x, T) triple at the last
 calibration period, and the model reads the group index as a learned embedding. A cluster
 label takes exactly the same K values in the holdout as in calibration, by construction —
-there is no counter to run off the end (`docs/feature_engineering.md` §4).
+there is no counter to run off the end (`docs/feature-engineering.md` §4).
 
 So the question is sharp and falsifiable:
 

@@ -30,7 +30,7 @@ The features are causal functions of the calibration target only, and the label 
 frozen: a customer keeps it for every holdout period. `simulate_recurrent_path`
 overwrites only the target channel and the AR channels, so a static column rides
 through the rollout untouched, with no per-step recomputation and nothing to get wrong
-(`docs/feature_engineering.md`).
+(`docs/feature-engineering.md`).
 
 One deviation is worth stating plainly. The label is fitted on the **full calibration
 window**, which includes the temporal validation window (ADR-0001) that early stopping

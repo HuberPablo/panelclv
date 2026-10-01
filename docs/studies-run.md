@@ -39,7 +39,7 @@ not a result, because none of the five is recoverable from the number.
 | *frozen* | `ValendinLSTM` does not take an embedder parameter at all: ADR-0004 freezes the published raw sqrt(n)+1 embeddings, so `param_embedder` is empty in its rows. `ParetoNBD` is not a neural model and has none. |
 
 **Arm.** The feature set, named `<ar>-<cluster>-<embedder>[-<calendar>]`; §3 points to where
-each token is decoded (`docs/feature_engineering.md` §4.3 resolves a bare `ar_bounded`).
+each token is decoded (`docs/feature-engineering.md` §4.3 resolves a bare `ar_bounded`).
 
 **Metrics.** All three aggregate metrics come from
 `models.monte_carlo_forecasting.compute_forecast_metrics`, the single scoring authority.
@@ -127,7 +127,7 @@ customers, and its `Transactions` counts line items rather than purchase occasio
 
 AR-encoding and cluster tokens (`no_ar`, `ar_unbounded`, `ar_bounded_K`, `ar_log`,
 `ar_ratio`, `ar_saturating`, `ar_bounded32ratio`, `kmeans_K`), their columns, depths and
-why each was tested: `docs/feature_engineering.md` §4.3 and §5. `ar_plus_cluster_8` (the
+why each was tested: `docs/feature-engineering.md` §4.3 and §5. `ar_plus_cluster_8` (the
 cluster ablation only) is `ar_unbounded` + `kmeans_8`.
 
 ### Calendar encoding
@@ -462,7 +462,7 @@ Ordered by what a result depends on.
 9. **Extra shards** anywhere a comparison turns out to be within noise. Nothing beyond
    shard `a` exists in families B, G or H.
 10. **E2**: recompute `kmeans_8` before the validation window, and re-run electronics
-    `archive / kmeans_8` (`docs/feature_engineering.md` §5).
+    `archive / kmeans_8` (`docs/feature-engineering.md` §5).
 11. **E4 / E5**: a stopping rule that suits the flat temporal curve, and a floor scaled to
     calibration length (`docs/insight-training-efficiency.md` §7).
 12. **The CDNOW tripling under the floored paper recipe** is unexplained after E1. It needs

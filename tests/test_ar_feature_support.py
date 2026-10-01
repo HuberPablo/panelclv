@@ -1,6 +1,6 @@
 """Do the autoregressive channels stay inside the range the weights were fitted on?
 
-`docs/feature_engineering.md` §4 ("Which ones to prefer") warns in prose that
+`docs/feature-engineering.md` §4 ("Which ones to prefer") warns in prose that
 `cumulative_transactions`, `cumulative_count` and `period_since_first_transaction`
 "grow without bound and, over a long holdout, drift past the range the model ever
 saw in calibration". Nothing asserted it, so a config could opt into all three and
@@ -241,7 +241,7 @@ def test_running_counters_stay_in_support_because_a_heavy_buyer_sets_the_maximum
 ):
     """The cumulative counters are unbounded in principle and bounded in practice.
 
-    `docs/feature_engineering.md` §4 groups them with tenure. Measured, they behave
+    `docs/feature-engineering.md` §4 groups them with tenure. Measured, they behave
     quite differently: the calibration maximum is set by the panel's heaviest buyer and
     sits far above where an ordinary customer ends the holdout, so almost nothing
     escapes (0.04% on the real electronics panel). This test records that difference so

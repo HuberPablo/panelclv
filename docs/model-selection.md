@@ -276,7 +276,7 @@ Read from their notebook (`Original_paper_model/banking_transactions_demo.ipynb`
 | S7 | Average or seed the refit | refit noise | Untested. Redundant if S6 is used. |
 | S8 | Rolling-origin validation (2–3 cut points) | one flat window; CDNOW blow-ups | Untested. The one untried selection change aimed at S1's failure. |
 | S9 | Make trials worth distinguishing (a per-customer input) | collapsed panels | A precondition, not a rule (`docs/insights-real-panels.md`). |
-| E2 | Recompute `kmeans_8` before the validation window | possible label leak into selection | Owed. Until it runs, selection results on cluster arms carry this caveat (`docs/feature_engineering.md` §5). |
+| E2 | Recompute `kmeans_8` before the validation window | possible label leak into selection | Owed. Until it runs, selection results on cluster arms carry this caveat (`docs/feature-engineering.md` §5). |
 
 **Recommendation.**
 1. Keep CE for now. No single rollout criterion is safe on both panels.

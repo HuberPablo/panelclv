@@ -21,7 +21,7 @@ DOC_FILES = [
     REPO_ROOT / "CLAUDE.md",
     REPO_ROOT / "CONTEXT.md",
     REPO_ROOT / "docs" / "running-a-model.md",
-    REPO_ROOT / "docs" / "feature_engineering.md",
+    REPO_ROOT / "docs" / "feature-engineering.md",
     *sorted((REPO_ROOT / "docs" / "adr").glob("*.md")),   # 8 ADRs
 ]
 ```

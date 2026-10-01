@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Source: `docs/feature_engineering.md` §4, which measures that the unbounded AR set
+Source: `docs/feature-engineering.md` §4, which measures that the unbounded AR set
 forecasts +235% aggregate bias on electronics and +335% on CDNOW against ~22% and ~15%
 for the same model with no AR features, and that a bounded flag encoding removes it
 entirely. This spec asks the next question: **the flags fix the level by discarding

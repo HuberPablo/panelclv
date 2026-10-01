@@ -73,7 +73,7 @@ expecting this file to list modules.
 ## Working in this repo
 
 **Before touching features, autoregressive features, or anything read during a
-rollout, read `docs/feature_engineering.md`.** Leakage is silent and expensive.
+rollout, read `docs/feature-engineering.md`.** Leakage is silent and expensive.
 
 **Metrics.** `models.monte_carlo_forecasting.compute_forecast_metrics` is the single
 scoring authority — `rmse`, `bias_percent`, `mape_aggregate`, on per-customer

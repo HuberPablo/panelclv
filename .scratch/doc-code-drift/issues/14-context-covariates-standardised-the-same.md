@@ -45,7 +45,7 @@ about standardisation:
 
 > … both occupy a channel of the same tensor, both are read through the same embedder seam
 > (embedded if declared as categorical, standardised if numeric — see
-> `docs/feature_engineering.md` §5), and the covariate-subset search drops either.
+> `docs/feature-engineering.md` §5), and the covariate-subset search drops either.
 
 The entry's actual point — that the declared/derived distinction is about *provenance*, not
 about how the model consumes them — survives intact; it just should not rest on a claim that

@@ -51,9 +51,9 @@ Standardisation is still *right* under `ValendinEmbedder` (a raw channel of std 
 beside embedding outputs of order 1 is its own problem, and `embedders.py:208-211` says so),
 but that is a different argument from the one written down.
 
-## `docs/feature_engineering.md` has the same gap
+## `docs/feature-engineering.md` has the same gap
 
-`docs/feature_engineering.md:276-286`:
+`docs/feature-engineering.md:276-286`:
 
 > Inside the model, the two paths are:
 > - **Embedded columns** → `nn.Embedding(cardinality, √cardinality + 1)` → `LayerNorm` →
@@ -62,7 +62,7 @@ but that is a different argument from the one written down.
 
 That is `ProjectedEmbedder` (`src/panelclv/models/embedders.py:117-197`) and nothing else.
 The word **"embedder" does not appear anywhere in that chapter**, and neither does ADR-0005;
-`grep -ni "embedder\|ADR-0005" docs/feature_engineering.md` returns nothing. The same false
+`grep -ni "embedder\|ADR-0005" docs/feature-engineering.md` returns nothing. The same false
 rationale is repeated at `:304-305`.
 
 ## ADR-0005 has the mirror-image framing problem
@@ -85,7 +85,7 @@ sends a reader to the wrong class.
    through one shared `Linear` so raw magnitude decides the gradient; under `ValendinEmbedder`
    a covariate is one raw channel concatenated beside embedding outputs of order 1. Both need
    the inputs on a comparable scale, for related but distinct reasons.
-2. `docs/feature_engineering.md:276-286` — say up front that "inside the model" means "inside
+2. `docs/feature-engineering.md:276-286` — say up front that "inside the model" means "inside
    the *embedder*", name both strategies, point at ADR-0005, and mark which is the current
    registry default. Fix `:304-305` the same way.
 3. `docs/adr/0005-embedder-seam.md:4-5` — keep the sentence (it is the historical framing that

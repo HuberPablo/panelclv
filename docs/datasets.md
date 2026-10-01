@@ -102,7 +102,7 @@ Time-varying covariates in the raw files are **not** used:
 Each of these is either the customer's own behaviour or not available over the
 windows. A rollout simulates the holdout one week at a time from its own sampled
 counts, so any covariate the model reads there must be known in advance or computable
-from that simulated history (`docs/feature_engineering.md`). Behaviour covariates are
+from that simulated history (`docs/feature-engineering.md`). Behaviour covariates are
 `observed_past`, which `prepare_dataset` drops.
 
 ## Summary

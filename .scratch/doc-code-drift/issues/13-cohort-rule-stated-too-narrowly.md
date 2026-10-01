@@ -18,7 +18,7 @@ larger one, and on synthetic panels the difference is most of the cohort.
 > positive total over it is **exactly** "first purchase <= training_end". **Customers first
 > seen only in the holdout** sum to 0 here and are excluded …
 
-`docs/feature_engineering.md:410-414` states the equivalence outright:
+`docs/feature-engineering.md:410-414` states the equivalence outright:
 
 > Keeps only customers with at least one transaction during calibration — **equivalently**,
 > first purchase ≤ `training_end`. … Customers first seen in the holdout are unknown at

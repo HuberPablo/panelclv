@@ -743,7 +743,7 @@ these would be misleading:
 
 - **Inputs.** A persistent per-customer input matters more than any loss (bounded AR
   encodings, the cluster label): `docs/insights-real-panels.md` §3–§5. Unbounded recency
-  counters must not be used in a rollout (`docs/feature_engineering.md` §4.2).
+  counters must not be used in a rollout (`docs/feature-engineering.md` §4.2).
 - **Training length.** `docs/insight-training-efficiency.md`.
 - **`n_simulations`.** At 30 the Monte Carlo noise alone adds 3.33% to MSE, larger than
   the entire electronics oracle headroom. The archived suite used 100; the CDNOW ablation

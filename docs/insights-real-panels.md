@@ -7,7 +7,7 @@ Covered elsewhere:
 - benchmark rows and their reproduction: `docs/benchmarks.md`
 - training length: `docs/insight-training-efficiency.md`
 - model selection: `docs/model-selection.md`
-- what each input is and why it was tested: `docs/feature_engineering.md`
+- what each input is and why it was tested: `docs/feature-engineering.md`
 - the synthetic grid: `docs/insights-synthetic-grid.md`
 
 Conventions:
@@ -151,7 +151,7 @@ the collapse (`docs/insight-training-efficiency.md` §5.2).
 
 ### 4.1 Electronics and CDNOW: families E and H
 
-LSTM and Transformer with the encodings of `docs/feature_engineering.md` §4.3, against both
+LSTM and Transformer with the encodings of `docs/feature-engineering.md` §4.3, against both
 benchmarks.
 - `ar_encoding` (family E) and `real_panel_arms` (family H) run 50 trials and 200–300
   paths, against the benchmark's 100 / 500.
@@ -405,7 +405,7 @@ multichannel 0.13–0.15, against 1.14–2.16 with the label.
 count-only model gives every customer the same forecast. Elsewhere it is neutral or
 harmful, because it is frozen and cannot update when a simulated customer goes quiet.
 Experiment E2 is still owed: recompute the label before the validation window and re-run
-electronics `archive / kmeans_8` (`docs/feature_engineering.md` §5).
+electronics `archive / kmeans_8` (`docs/feature-engineering.md` §5).
 
 ## 6. Three-year calibration
 

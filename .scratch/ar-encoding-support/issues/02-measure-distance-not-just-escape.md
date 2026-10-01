@@ -4,7 +4,7 @@ Status: done
 
 ## Problem
 
-`docs/feature_engineering.md` §4 ranks AR features by support-escape fraction. That
+`docs/feature-engineering.md` §4 ranks AR features by support-escape fraction. That
 number **cannot rank two encodings of the same counter**: it is invariant to every
 order-preserving transform, so `log1p(recency)` scores identically to `recency`.
 
