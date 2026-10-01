@@ -313,8 +313,7 @@ checkpoints that survived `keep_only_best_checkpoint` in 30 of family N's 80 stu
 each through the ADR-0008 refit and the registry rollout at the study's own forecast seed,
 and scored it with `compute_forecast_metrics`. **698 refits, 17 September**, written to
 `Rescored/` and `Rescored_local/`. Only the refit's training RNG differs from the archived
-run. Reported in `docs/benchmarks-real-panels.md`, "Does the search select the best
-trial?".
+run. Reported in `docs/model-selection.md` §3.2.
 
 ---
 
@@ -416,7 +415,7 @@ target. The output is a per-trial table inside each suite, `selection_rescore.cs
 
 It exists because the archive cannot answer the question: every family T and U suite kept
 only its winner's checkpoint. 40 studies per model on electronics, 5 per model on CDNOW.
-Reported in `docs/training-budget.md` §14 and §15.3.
+Reported in `docs/model-selection.md` §3.3–3.6.
 
 ---
 

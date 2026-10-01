@@ -357,68 +357,7 @@ is the one to drop.
 
 ## 7. Calibration does not rank K
 
-This is the finding with consequences beyond family F, and it is the reason the next
-question — *can K be chosen from calibration alone?* — is harder than it looks.
-
-The `val. objective` column in §3 is the best validation cross-entropy any of 50 Optuna
-trials achieved, on the temporal validation window (ADR-0001). It is the natural
-calibration-only criterion: it is what early stopping monitors, what the architecture search
-minimises, and it never touches a holdout period. If a calibration-only rule for K exists,
-this is the obvious candidate.
-
-**It points the wrong way on both panels.** On CDNOW the objective falls monotonically as K
-rises — 0.0933 (no cluster) → 0.0705 → 0.0690 → 0.0668 for K = 4, 8, 16 — while holdout
-median |bias| goes 9.7 → 20.9 → 9.8 → 9.6. A rule that minimised validation loss would
-choose the *largest* K on offer, and would choose a cluster arm over no clusters on every
-panel here, at exactly the moment §4 shows the feature buys nothing.
-
-Ranking the six arms by each criterion. The right-hand column is the rank correlation
-*between the two orderings* — not the per-customer Spearman of §5.1, which is a metric, not
-a criterion:
-
-| panel | by calibration objective (best first) | by holdout median \|bias\| (best first) | agreement |
-|---|---|---|---:|
-| electronics | `cluster_4`, `cluster_8`, `ar_plus_cluster_8`, `cluster_16`, `ar_unbounded`, `no_cluster` | `cluster_8`, `cluster_4`, `cluster_16`, `no_cluster`, `ar_plus_cluster_8`, `ar_unbounded` | 0.66 |
-| CDNOW | `cluster_16`, `ar_plus_cluster_8`, `cluster_8`, `cluster_4`, `ar_unbounded`, `no_cluster` | `cluster_16`, `no_cluster`, `cluster_8`, `cluster_4`, `ar_unbounded`, `ar_plus_cluster_8` | 0.09 |
-
-On both panels the calibration criterion ranks `no_cluster` **last of six**, and on CDNOW
-the two rankings are essentially unrelated. Within a single arm it is no better: across an
-arm's 40 replications, the rank correlation between the validation objective and holdout
-|bias| is between −0.37 and +0.37, and is 0.00 for `cluster_8` on CDNOW.
-
-**But it is not ranking noise — it is ranking the other metric.** Order the same six
-electronics arms by holdout *discrimination* instead of by level and the calibration
-objective agrees at **0.77**, better than its 0.66 against |bias|, and it gets the bottom
-half exactly right:
-
-| arm | by calibration objective | by holdout Spearman |
-|---|---:|---:|
-| `cluster_4` | 1 | 3 |
-| `cluster_8` | 2 | 2 |
-| `ar_plus_cluster_8` | 3 | 1 |
-| `cluster_16` | 4 | 4 |
-| `ar_unbounded` | 5 | 5 |
-| `no_cluster` | 6 | 6 |
-
-That the objective puts `no_cluster` last is then correct rather than perverse: on
-electronics `no_cluster` really is last, by a factor of seven, on the metric the objective
-is measuring. Validation cross-entropy scores a *conditional density per customer-period*,
-so it rewards exactly what separates customers; the holdout level is a property of a
-52-step rollout, and it does not. **The objective is not blind — it is pointed at
-discrimination, and the arm tables lead with level.** That is the same split
-`docs/benchmarks-real-panels.md` finds across whole studies: validation loss is a real
-proxy for ranking and RMSE on two panels, and a coin toss for bias everywhere.
-
-The reason is structural rather than statistical. Validation cross-entropy scores
-**one-step-ahead conditional** predictions with the true history fed in; the holdout metric
-scores a **52-step free-running rollout** where the model consumes its own samples. A
-feature that sharpens the next-period conditional while going stale over a long rollout —
-which is exactly what a frozen label does — improves the first and degrades the second *by
-construction*. More clusters give the model a finer conditional lookup and a staler frozen
-assertion at once.
-
-Any calibration-only rule for K therefore has to be scored against something that shares the
-rollout's structure, not against the fitting loss. That is the thing to design next.
+Moved to `docs/model-selection.md` §3.7.
 
 ## 8. What this does not establish
 

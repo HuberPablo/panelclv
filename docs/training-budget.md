@@ -36,29 +36,9 @@ workstation. The scripts are in `.scratch/training-budget/` and are named at eac
 Every section was re-scored under `docs/statistical-protocol.md`. What changed, by the
 sections each revision covers:
 
-### Selection: §6, §14, §15.3 (register rows 9–13)
+### Selection
 
-- **Method.** Every interval is now an `effect()` percentile interval from 10,000 resamples — one statistic per study
-  against 0, and paired differences against validation CE. The 80 electronics studies
-  pooled two models and are now split into LSTM and ValendinLSTM (40 each), CDNOW's 10 into
-  5 and 5. §6's across-study correlation now uses the
-  protocol's percentile interval; its two verdicts are unchanged. The "66 of 80" sentence
-  is now a per-model count given as description.
-- **Flipped.** Row 10b (rollout MAPE's own correlation with holdout MAPE not supported):
-  holds for the LSTM, **overturned for ValendinLSTM** (+0.107, supported). CE against
-  holdout Spearman on electronics: *not supported* → supported and weakly right-signed for
-  the LSTM (+0.092), still not supported for ValendinLSTM. Rollout Spearman against
-  holdout Spearman: *supported* (+0.128) → supported for the LSTM (+0.202) only; its Δ over
-  CE (+0.083, *supported*) → **not supported on either model**. Row 9b on CDNOW: MAPE
-  *supported* → supported for the LSTM, **not for ValendinLSTM**; |bias| *not supported*
-  → **supported for the LSTM** (+0.356), not for ValendinLSTM. Row 11 (composite) was
-  asserted without a test; now tested, and established for MAPE on both models and for
-  Spearman on the LSTM only. §14.1's "a systematically worse choice than a random trial"
-  is withdrawn: at the argmin that holds only for ValendinLSTM's |bias|.
-- **Unchanged.** Row 9 (CE wrong-signed for MAPE and |bias| on electronics) holds on both
-  models; row 10 (rollout MAPE beats CE for MAPE) holds on both; all three §14.2 mechanism
-  correlations hold on both. Row 13 is relabelled as a description of two panels, not a
-  tested mechanism.
+Moved to `docs/model-selection.md`.
 
 ### Training length and inputs: §9, §15.1, §15.2 (register rows 5, 6, 14–19)
 
@@ -682,7 +662,7 @@ alternatives are all untested.
    not an opt-in" before those panels were run. The floor is also a patch: the real problem (§13.2) is an absolute 10⁻⁴ improvement threshold
    applied to a curve that gains 5.4×10⁻⁵ an epoch. A stopping criterion that suits
    that curve — a relative improvement threshold, or selection on the rollout
-   (`docs/insights-study.md` §5.4) — would be the principled fix, and is untested.
+   (`docs/model-selection.md` §5) — would be the principled fix, and is untested.
 2. **The published electronics rows are undertrained**, and by more than a footnote: MAPE
    70.8 against 46.8 on the same architecture and inputs. Whether family N is re-run under
    a floor is an ADR-level decision, taken in
@@ -763,30 +743,8 @@ direction ("Optuna's validation loss cannot see which runs forecast badly").
 
 ### 13.3 The menu
 
-**A. Change what is measured on the validation window** — the highest-value group, because
-it fixes stopping and selection at once.
-
-1. **Rollout-based validation.** Simulate the validation window the way the holdout is
-   simulated — warm up on the training prefix, sample forward, average paths — and score it
-   with `compute_forecast_metrics`. This is ADR-0003 restored, and `docs/insights-study.md`
-   §5.4 already specifies how: through the single scoring authority this time, and wired into
-   `StudySuiteConfig` rather than reachable only from notebooks. ADR-0003 was retired for
-   those two defects, not for the idea.
-2. **A composite selection score.** Cross-entropy alone ranks trials badly for level
-   (`benchmarks-real-panels.md`: "every study contains a trial with near-zero bias, and
-   selection never finds it"). A composite over the validation rollout — rank-normalised
-   MAPE, |bias| and (1 − Spearman), averaged — targets the three numbers the thesis reports.
-   Two constraints: keep the **training** loss plain cross-entropy, because it is a proper
-   scoring rule for the distribution the rollout samples from and the others are not (the
-   argument `models/losses.py` already makes for class weighting); and normalise per study,
-   since the components have different scales and a fixed weighting will not transfer
-   between panels.
-3. **Two-stage selection, which is nearly free.** Shortlist the trials within a small margin
-   of the best validation CE — the archive says 1 to 22 trials sit within 0.5% — then rank
-   only the shortlist by a validation rollout. One rollout per shortlisted trial instead of
-   one per trial, so it costs a few percent rather than multiplying the search.
-4. **Multi-objective search.** Optuna's NSGA-II over (CE, rollout MAPE) and a pick from the
-   Pareto front. More machinery than 3 for a similar answer; list it, try 3 first.
+**A. Change what is measured on the validation window** (rollout criterion, composite,
+two-stage, multi-objective): tested and reported in `docs/model-selection.md` §3 and §5.
 
 **B. Change the stopping rule so a flat curve does not read as convergence.**
 
@@ -804,14 +762,7 @@ it fixes stopping and selection at once.
 9. **Early-stop on the rollout metric** (A1 evaluated every k epochs). The most expensive
    option and the most aligned.
 
-**C. Change the validation window itself, keeping it temporal.**
-
-10. **Rolling-origin validation.** Average the criterion over two or three cut points instead
-    of one. More signal, less dependence on where the single cut happened to fall, and it is
-    the standard construction for out-of-time model selection.
-11. **Score only the cells that carry signal.** Selection-only CE restricted to positive
-    counts, or class-balanced. §13.2 tempers this: positive cells already carry 86% of the
-    loss, so the gain is mostly in removing the zero-cell counter-movement, not in reweighting.
+**C. Rolling-origin validation:** `docs/model-selection.md` §5 (S8).
 
 **D. Use both splits for different jobs.** Hold out a block of customers *and* a time window:
 early-stop on the customer-wise part, where the curve has slope, and select trials on the
@@ -819,20 +770,9 @@ temporal part, which matches the test. It is pragmatic and it is a hybrid — tw
 can disagree, and a model stopped on one may not be the one the other would pick. Listed for
 completeness, below A and B in priority.
 
-### 13.4 What to run first — run, and reported in §14
+### 13.4 What to run first
 
-**A measurement, not a training run.** `scripts/run_rescore_trials.py` already refits and
-scores archived non-winning trials through the production forecast path. Point it at the
-family-T `archive` studies and ask one question: does a validation-window **rollout**
-composite rank trials by holdout MAPE and Spearman better than validation CE does? The
-checkpoints exist, so this costs a refit per trial and no search.
-
-- If the composite ranks clearly better, A3 is the cheapest real fix and A1 is worth building.
-- If it ranks no better, selection is not the lever on this panel, and B (train longer,
-  sanely) is the whole story — which is what family T's floor already delivers.
-
-Then, and only then, pick one of B5-B8 and re-run family T's `archive` arm under it. One
-panel, 20 replications, about an hour of rented GPU at family T's measured cost.
+The selection test it proposed was run: `docs/model-selection.md` §3.3.
 
 ### 13.5 What not to do
 
@@ -844,163 +784,9 @@ panel, 20 replications, about an hour of rented GPU at family T's measured cost.
 - **Do not re-implement rollout metrics beside `compute_forecast_metrics`.** That is what
   cost ADR-0003 its credibility: its RMSE was 62x off the authority's, and only bias agreed.
 
-## 14. The selection test: cross-entropy is worse than useless, and nothing else is good
+## 14. The selection test
 
-§13.4 asked whether a rollout over the validation window ranks a study's trials better
-than validation cross-entropy does. Run on vast.ai on 21 September 2026: 80 electronics
-studies (40 per model), up to 40 trials sampled at random from each, **2,813 trials**
-scored twice over — once by a leak-free rollout over the validation window, once by the
-production path (the ADR-0008 refit and a holdout rollout), both through
-`compute_forecast_metrics`. 29 s a trial, $1.67 of rented GPU.
-`scripts/run_selection_rescore.py`, analysed by
-`.scratch/training-budget/selection_analysis.py` (§14.1, §14.3, §15.3) and
-`correlation_effects.py` (§14.2).
-
-Every criterion below is stated so **lower is better**, and so is every target, so a
-**positive** correlation means the criterion ranks trials correctly. The study — one
-complete Optuna search — is the replication; its trials are not. Each study therefore
-gives one rank correlation per criterion and target. Whether a criterion ranks trials
-correctly at all is that per-study statistic tested against 0; whether it ranks them
-better than validation CE is the paired difference, because both criteria are scored on
-the same study's trials. LSTM and ValendinLSTM are different conditions, so each is
-analysed on its own 40 studies and nothing is pooled across them.
-
-### 14.1 The status quo is not weak, it is wrong-signed
-
-One rank correlation per study, n = 40 studies per model; the mean with its 95% bootstrap
-interval, supported when the interval excludes zero.
-
-| target | LSTM: mean rho | 95% CI | supported | ValendinLSTM: mean rho | 95% CI | supported |
-| --- | ---: | :---: | :---: | ---: | :---: | :---: |
-| holdout MAPE | **−0.181** | −0.247 to −0.112 | yes, wrong-signed | **−0.101** | −0.162 to −0.038 | yes, wrong-signed |
-| holdout \|bias\| | **−0.266** | −0.323 to −0.207 | yes, wrong-signed | **−0.261** | −0.310 to −0.213 | yes, wrong-signed |
-| holdout Spearman | +0.092 | +0.013 to +0.168 | yes | −0.001 | −0.060 to +0.058 | no |
-
-`docs/benchmarks-real-panels.md` reports that the winning validation loss "does not
-predict the forecast". This is worse than that: on level accuracy the criterion orders a
-study's trials the **wrong way**, on both models. On ranking customers it is weakly
-right-signed for the LSTM and shows no clear signal for ValendinLSTM at n = 40.
-
-What the wrong-signed ordering costs at the argmin is a separate question, tested in
-`docs/model-selection.md` §8 against the study's average trial. There the CE pick's MAPE
-shows no clear difference from a random trial's for the LSTM (+0.37, −1.21 to +1.96) and
-is slightly *better* for ValendinLSTM (−3.38, −6.37 to −0.68); its |bias| is worse for
-ValendinLSTM (+4.39, +0.12 to +8.29) and not clearly different for the LSTM (+2.10,
-−1.64 to +5.65). An earlier version of this section concluded that the lowest-CE trial is
-"a systematically worse choice than one picked at random"; the argmin test supports that
-only for ValendinLSTM's |bias|.
-
-### 14.2 Why — the criterion fits the calibration era, and the holdout is a different era
-
-Within a study, validation CE does what it is supposed to do *inside the window it scores*:
-its rank correlation with **validation** MAPE is +0.406 for the LSTM (95% CI +0.350 to
-+0.464) and +0.337 for ValendinLSTM (+0.270 to +0.400), both supported. The failure is in
-the handover. Splitting each study's trials into quartiles by their own validation CE
-(descriptive means over all 80 studies, both models):
-
-| quartile | holdout bias % | holdout MAPE | spread of holdout forecast |
-| --- | ---: | ---: | ---: |
-| best CE | **+35.1** | 65.3 | 0.277 |
-| 2nd | +33.4 | 66.5 | 0.272 |
-| 3rd | +29.4 | 64.5 | 0.267 |
-| worst CE | **+22.0** | 62.7 | 0.258 |
-
-The trials cross-entropy likes best are the ones that **over-predict the holdout most**,
-and the spread of the holdout forecast tracks holdout MAPE at +0.868 for the LSTM (+0.842
-to +0.890) and +0.722 for ValendinLSTM (+0.680 to +0.761), while validation CE tracks
-that spread at −0.261 (−0.327 to −0.191) and −0.272 (−0.323 to −0.222) — all supported.
-
-> **The explanation first given here has been retracted.** It read: the best in-window fit
-> carries the calibration era's purchase rate forward into a holdout year whose rate is
-> lower, so fitting harder buys a forecast further above the truth. §15.3 tested that and
-> it is false — every panel's holdout rate is below its calibration rate (ratios 0.23 to
-> 0.63), CDNOW's decline is *steeper* than electronics', and CDNOW's sign is the right one.
-> What the table above describes is real on electronics; why is answered in §15.3, and the
-> answer is about how much the trials differ from each other, not about eras.
-
-### 14.3 The candidates beat it, and none of them is good
-
-Paired over the same 40 studies per model, so Δ is the mean paired difference in
-within-study rank correlation against validation CE, with its 95% bootstrap CI.
-
-**LSTM**, n = 40:
-
-| target | criterion | mean rho | 95% CI of rho | Δ vs val CE | 95% CI of Δ |
-| --- | --- | ---: | :---: | ---: | :---: |
-| holdout MAPE | val rollout MAPE | −0.041 | −0.112 to +0.032 (**not supported**) | **+0.140** | +0.068 to +0.213 |
-| | val rollout Spearman | −0.076 | −0.151 to −0.002 | +0.105 | −0.002 to +0.208 (not supported) |
-| | composite of three | −0.180 | −0.247 to −0.115 | +0.001 | −0.093 to +0.092 |
-| | val rollout \|bias\| | −0.249 | −0.331 to −0.165 | −0.068 | −0.180 to +0.049 |
-| holdout Spearman | val rollout Spearman | **+0.202** | **+0.124 to +0.279** | +0.110 | −0.003 to +0.224 (not supported) |
-| | composite of three | +0.035 | −0.038 to +0.109 | −0.057 | −0.140 to +0.025 |
-| | val rollout MAPE | −0.123 | −0.185 to −0.058 | **−0.215** | −0.281 to −0.147 (**worse**) |
-
-**ValendinLSTM**, n = 40:
-
-| target | criterion | mean rho | 95% CI of rho | Δ vs val CE | 95% CI of Δ |
-| --- | --- | ---: | :---: | ---: | :---: |
-| holdout MAPE | val rollout MAPE | **+0.107** | **+0.046 to +0.168** | **+0.208** | +0.138 to +0.281 |
-| | val rollout Spearman | +0.053 | −0.014 to +0.116 | **+0.154** | +0.065 to +0.240 |
-| | composite of three | +0.041 | −0.036 to +0.119 | **+0.142** | +0.052 to +0.230 |
-| | val rollout \|bias\| | −0.103 | −0.173 to −0.031 | −0.002 | −0.089 to +0.083 |
-| holdout Spearman | val rollout Spearman | +0.055 | −0.016 to +0.122 | +0.056 | −0.039 to +0.150 |
-| | composite of three | +0.043 | −0.007 to +0.095 | +0.044 | −0.031 to +0.125 |
-| | val rollout MAPE | +0.011 | −0.046 to +0.073 | +0.013 | −0.065 to +0.098 |
-
-The two interval columns answer different questions and both matter: the first asks
-whether a criterion ranks trials correctly at all, the second whether it ranks them better
-than validation CE does. **For level accuracy, val rollout MAPE does the second on both
-models, and the first only for ValendinLSTM.** For the LSTM it improves on CE by +0.140
-while its own correlation with holdout MAPE, −0.041, has an interval spanning zero; for
-ValendinLSTM it improves by +0.208 and its own correlation, +0.107, is supported.
-
-Three things to take from this.
-
-**For the LSTM the improvement is a removal; for ValendinLSTM it is a small addition.**
-Swapping validation CE for a validation-window rollout MAPE moves the correlation with
-holdout MAPE from −0.181 to −0.041 for the LSTM and from −0.101 to +0.107 for
-ValendinLSTM. (The rollout's correlation is the higher one in 31 of 40 LSTM studies and
-35 of 40 ValendinLSTM studies — a count, given as description only.) For the LSTM what
-it buys is the deletion of a harmful signal; for ValendinLSTM it also adds a weak useful
-one.
-
-**The best number in the whole table is +0.202** — the LSTM's validation rollout
-Spearman against the holdout's Spearman, about 4% of the rank variance. For ValendinLSTM
-no criterion's own correlation with holdout Spearman is supported, and none beats CE on it
-at n = 40. **Selection is a weak lever on this panel**: family T moved MAPE by 22 points
-by training longer, and at the pick no validation criterion here moves MAPE by more than
-about 5 (`docs/model-selection.md` §8).
-
-**The composite is worse than its parts, which answers the question §13.3 asked of it.**
-Tested directly — composite minus the single rollout criterion matching the target,
-paired over studies — it ranks trials worse for holdout MAPE on both models (LSTM −0.139,
-−0.194 to −0.083; ValendinLSTM −0.066, −0.115 to −0.018) and for holdout Spearman on the
-LSTM (−0.166, −0.245 to −0.083); for ValendinLSTM's Spearman there is no clear difference
-(−0.012, −0.078 to +0.054). **Match the criterion to the metric you are reporting, or
-pick one metric and own it** — do not average them and hope.
-
-### 14.4 What this changes
-
-1. **Stop treating validation cross-entropy as a selection criterion for level accuracy.**
-   Its correlation with holdout MAPE is −0.181 (−0.247 to −0.112) for the LSTM and −0.101
-   (−0.162 to −0.038) for ValendinLSTM, and with holdout \|bias\| −0.266 (−0.323 to −0.207)
-   and −0.261 (−0.310 to −0.213), every interval excluding zero on the wrong side. Keep it
-   as the *training* loss — it is the proper scoring rule and §13.5 still applies — but
-   the argmin over trials should not be taken on it for a level claim.
-2. **If one criterion has to be picked now, it is the validation-window rollout scored on
-   the metric being reported**, with a model-dependent caveat. For level, rollout MAPE
-   beats CE on both models (Δ +0.140, +0.068 to +0.213; +0.208, +0.138 to +0.281) but has a
-   supported correlation of its own only for ValendinLSTM (+0.107, +0.046 to +0.168). For
-   ranking, rollout Spearman has a supported correlation of its own only for the LSTM
-   (+0.202, +0.124 to +0.279), and on neither model does it clearly beat CE (+0.110,
-   −0.003 to +0.224; +0.056, −0.039 to +0.150).
-3. **Do not build the composite.** §13.3 A2 is answered and the answer is no.
-4. **Expect little.** Selection is worth a few MAPE points here against training
-   length's twenty. §12's ordering stands: fix the training budget first, and treat
-   selection as the cheaper, smaller follow-up it is.
-5. **Tested on CDNOW, and the prediction failed — see §15.3.** The sign does flip, but not
-   for the reason given: no panel has a holdout rate above its calibration rate. The real
-   discriminator is whether a study's trials differ from each other at all.
+Moved to `docs/model-selection.md` §3.3–3.5.
 
 ## 15. Family U: crossing the two levers adds little, and one of them may be dangerous
 
@@ -1193,59 +979,7 @@ calibration length rather than fixed in epochs.
 
 ### 15.3 Why cross-entropy selects well on CDNOW and badly on electronics
 
-§14 measured validation CE as wrong-signed on electronics and §14.4 predicted the sign
-would flip where the holdout era's rate exceeds the calibration era's. **The sign flips on
-CDNOW and the prediction is wrong.** Ten CDNOW studies (5 per model), 229 trials, same
-method and `selection_analysis.py`; one rank correlation per study, mean with its 95%
-bootstrap interval, each panel and model separately:
-
-| target | electronics LSTM (n = 40) | electronics ValendinLSTM (n = 40) | cdnow LSTM (n = 5) | cdnow ValendinLSTM (n = 5) |
-| --- | ---: | ---: | ---: | ---: |
-| holdout MAPE | −0.181 (−0.247, −0.112) | −0.101 (−0.162, −0.038) | **+0.338 (+0.112, +0.553)** | +0.149 (−0.050, +0.392) |
-| holdout \|bias\| | −0.266 (−0.323, −0.207) | −0.261 (−0.310, −0.213) | **+0.356 (+0.128, +0.594)** | −0.004 (−0.257, +0.255) |
-| holdout Spearman | +0.092 (+0.013, +0.168) | −0.001 (−0.060, +0.058) | **+0.367 (+0.190, +0.549)** | **+0.577 (+0.479, +0.718)** |
-
-Two qualifications the bare correlations hid. **The flip is supported on all three
-targets for the LSTM, and only on Spearman for ValendinLSTM** — ValendinLSTM's MAPE
-(+0.149) and \|bias\| (−0.004) intervals span zero. And **CDNOW rests on 5 studies per
-model against electronics' 40**, and a percentile interval over five values runs narrow,
-so the signs are clear on Spearman for both models and the magnitudes are not. On
-electronics the Spearman row is weakly right-signed for the LSTM and shows no clear signal
-for ValendinLSTM.
-
-But no panel meets the stated condition — every holdout rate is *below* its calibration
-rate, and CDNOW's decline is the steeper one:
-
-| panel | calibration rate | holdout rate | ratio |
-| --- | ---: | ---: | ---: |
-| cdnow | 0.0522 | 0.0206 | 0.40 |
-| electronics | 0.0543 | 0.0340 | 0.63 |
-| gift | 0.0196 | 0.0107 | 0.54 |
-| multichannel | 0.0138 | 0.0031 | 0.23 |
-
-What actually separates them is **how much the trials differ from each other**. Splitting
-each study's trials into quartiles by their own validation CE (descriptive means, both
-models, `correlation_effects.py`):
-
-| quartile | electronics bias / MAPE / rho | cdnow bias / MAPE / rho |
-| --- | ---: | ---: |
-| best CE | +35.1 / 65.3 / 0.02 | +14.3 / 65.1 / 0.34 |
-| 2nd | +33.4 / 66.5 / 0.02 | +10.2 / 55.4 / 0.34 |
-| 3rd | +29.4 / 64.5 / 0.02 | +50.4 / 97.9 / 0.29 |
-| worst CE | +22.0 / 62.7 / 0.02 | **+98.7 / 114.2 / 0.16** |
-
-On CDNOW a study contains genuinely broken trials — the worst quartile misses by +99% —
-and cross-entropy finds them. On electronics every trial lands in the same narrow band
-(bias 22 to 35, MAPE 63 to 67, rank correlation flat at 0.02), because that is what the
-collapse *is*: nothing to choose between. With no real quality variation to detect, what
-is left is a small systematic tilt, and it happens to point the wrong way.
-
-**Cross-entropy selects well where the trials differ and badly where they do not.** That
-reconciles this document with `docs/benchmarks-real-panels.md`, which reports selection
-working "on two panels and not at all on the other two" — the two where it works are the
-two that never collapsed. It also means the §14 finding is narrower than it looked: not
-"the criterion is broken", but "the criterion has nothing to work with on a collapsed
-panel, and a collapsed panel is exactly where it gets used to justify a choice".
+Moved to `docs/model-selection.md` §3.4.
 
 ### 15.4 What follows
 

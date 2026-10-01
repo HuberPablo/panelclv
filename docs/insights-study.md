@@ -251,20 +251,7 @@ and no forecast gain was detectable at n = 8.
 
 ### 4.2 ADR-0003's retirement left the failure mode unguarded
 
-`docs/adr/0003-rollout-composite-selection.md` records that selection on rollout quality
-was removed, and says so in its own words: "selection on rollout quality is gone, so a
-model that scores well next-step and drifts over a long horizon is unguarded against
-again."
-
-§4.1 is that sentence, measured. Optuna currently selects on teacher-forced validation
-cross-entropy, which is precisely the metric P-sLSTM won and the forecast ignored.
-
-The ADR was retired for two good reasons — it was never reachable from the production
-path, and `tuning.weekly_aggregate_rollout_metrics` disagreed with
-`models.monte_carlo_forecasting.compute_forecast_metrics` by 62× on RMSE, which made the
-single-scoring-authority claim false. Neither reason is an argument that the idea is
-wrong; both are arguments that the implementation was. Reinstating it now has empirical
-support the original decision never had.
+See `docs/model-selection.md` §1.
 
 ### 4.3 Out-of-range AR features, and what they say about the rollout
 
@@ -378,32 +365,7 @@ Optuna trial — so it competes with §5.2 for compute. §5.2 first: selection c
 the best available model, and if none of them can represent death, better selection picks
 the least-bad drifter.
 
-> **Measured, 21 September 2026 — and the ordering above was right.**
-> `docs/training-budget.md` §14 built exactly this and scored 2,813 electronics trials
-> both ways: a leak-free rollout over the validation window against the holdout the trial
-> actually produces. One study (one Optuna search) is one replication and gives one rank
-> correlation per criterion; LSTM and ValendinLSTM are separate conditions, 40 studies
-> each. Two results.
->
-> Validation cross-entropy is not weak on that panel, it is **wrong-signed** on level for
-> both models — mean rank correlation with holdout MAPE −0.181 (95% CI −0.247 to −0.112)
-> for the LSTM and −0.101 (−0.162 to −0.038) for ValendinLSTM, and with holdout |bias|
-> −0.266 and −0.261, all intervals excluding 0. A validation rollout scored on MAPE ranks
-> trials better than CE does on both models, paired by study: Δ +0.140 (+0.068 to +0.213)
-> for the LSTM and +0.208 (+0.138 to +0.281) for ValendinLSTM. (It is the higher
-> correlation in 31 and 35 of 40 studies, a count given as description only.) **For the
-> LSTM it lands on zero** — its own correlation, −0.041 (−0.112 to +0.032), shows no clear
-> signal — so there restoring rollout selection removes a harmful signal rather than
-> supplying a useful one; for ValendinLSTM it adds a weak one (+0.107, +0.046 to +0.168).
-> The largest correlation anywhere in the test is +0.202, the LSTM's validation rollout
-> Spearman against holdout Spearman.
->
-> §15.3 then found why, and it sharpens this section's premise: cross-entropy selects
-> well where a study's trials genuinely differ (CDNOW, mean ρ with holdout Spearman +0.367
-> for the LSTM and +0.577 for ValendinLSTM, 5 studies each, both supported) and badly where
-> they do not (electronics, where every trial lands in the same narrow band). Better
-> selection cannot help on a panel whose trials are indistinguishable — which is §5.2's
-> argument, arrived at from the selection side.
+Measured since: `docs/model-selection.md` §3.3–3.5.
 
 ### 5.5 Skip the architecture papers, or spend one on a negative result
 
@@ -740,39 +702,4 @@ to it.
 
 ## 9. Score the ensemble, not the mean of the runs
 
-A comparison in §8 looked wrong at first: Pareto/NBD's MAPE of 18.70 beat every neural
-arm, whose means started at 22.3. The gap was an artefact of the reporting convention.
-
-`mape_aggregate` is `100 · Σ|actual_t − pred_t| / Σ actual_t` — a positive magnitude, so
-it is **convex** in the prediction. By Jensen, the error of the averaged forecast is at
-most the average of the errors, and the slack is exactly the run-to-run scatter.
-Pareto/NBD is a single deterministic MCMC fit with no scatter; every neural row was the
-mean of 20 independent fits. The two are not comparable on a convex metric.
-
-Averaging the 20 forecasts first, then scoring once — which is both what one would
-deploy and what Pareto/NBD gets for free. Same run as §8 throughout: family G, CDNOW,
-**20 studies × 50 trials × 50 paths** (25 trials for ValendinLSTM), embedder `valendin`
-(frozen on ValendinLSTM), 39 / 38 weeks on the pre-ADR-0009 window:
-
-| CDNOW MAPE | mean of 20 | ensemble |
-|---|---|---|
-| ValendinLSTM `no_ar-no_cluster` | 22.54 | **18.13** |
-| LSTM `ar_bounded-no_cluster` | 22.34 | **18.29** |
-| LSTM `no_ar-no_cluster` | 24.39 | 21.64 |
-| Transformer `no_ar-no_cluster` | 49.62 | 37.31 |
-| Pareto/NBD (n=1) | 18.70 | 18.70 |
-
-The benchmark's apparent lead disappears. **`bias_percent` is unchanged in every row** —
-it is linear in the prediction, so averaging forecasts and averaging biases agree
-exactly. Only the magnitude metrics move, which is a clean check that the ensembling is
-doing what is claimed here and nothing else.
-
-This is the ensembling §6 named as "the obvious untried thing", now measured: averaging
-20 fits cuts CDNOW MAPE by 3 to 12 points, most where the scatter is worst. It costs
-nothing — the fits already exist.
-
-**Report both.** The distribution across replications is what says a single fit is
-unreliable (bias sd of 10 to 40 points), and that is a real property of these models
-that a thesis must not hide. The ensemble is what a practitioner would deploy and the
-only figure comparable to a deterministic benchmark. Picking whichever flatters is how
-this section's mistake happened in the first place.
+Moved to `docs/model-selection.md` §3.8.
