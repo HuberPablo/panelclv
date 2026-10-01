@@ -45,32 +45,8 @@ replications, with its 95% percentile-bootstrap interval (`evaluation.effects.ef
 
 ## 1. How K has been chosen so far
 
-**There is no elbow method in this package, and no other unsupervised selection rule.** No
-inertia curve, no silhouette, no gap statistic — `compute_cluster_labels` reads K out of
-the feature name and calls `KMeans(n_clusters=K, n_init=10, random_state=0)` on the
-standardised triple. K is *declared*, never *fitted*.
-
-Two constraints shaped that.
-
-**K is an architecture dimension, not only a partition size.** The label is embedded, with
-cardinality pinned to K (`docs/feature_engineering.md` §4). Choosing K chooses the width of
-a learned embedding table at the same time as the coarseness of the partition, and those
-two pull in opposite directions: a larger K describes a customer more finely and gives each
-group fewer customers to learn from.
-
-**K is an arm, never an Optuna knob** (`scripts/run_cluster_ablation.py`). Had the search
-tuned K per trial, arms would stop being comparable and no difference could be attributed
-to the encoding. So K was fixed per suite and swept *between* suites.
-
-The sweep declared was a geometric ladder, `kmeans_4 / kmeans_8 / kmeans_16`, on the
-grounds that K is the sensitive knob of the design — the same criticism `docs/p-slstm.md`
-§11 makes of never sweeping P-sLSTM's patch size. Everywhere outside family F, K is frozen
-at **8** as the single representative rung: the arm sweep (family B) and the real-panel arms
-(family H) both use a binary cluster axis `{no_cluster, kmeans_8}`.
-
-So the honest statement of provenance is: **8 is the mid-rung of a declared ladder, and the
-ladder was tested downstream rather than in feature space.** The rest of this document is
-that test.
+Declared, never fitted, as the ladder 4 / 8 / 16, with 8 used everywhere else:
+`docs/feature_engineering.md` §5. This document is the downstream test of that ladder.
 
 ## 2. What ran
 

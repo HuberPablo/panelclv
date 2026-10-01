@@ -101,7 +101,7 @@ Model Forecasting Performance"; the measures are those two MAPEs and nothing els
 ## 3. The cohort, rebuilt to their window
 
 The repo's committed CDNOW panel is already bucketed by the package's own calendar
-(`docs/feature_engineering.md` §4 records the convention and its one-day divergence
+(`docs/feature_engineering.md` §3 records the convention and its one-day divergence
 from a plain seven-day grid), and it carries counts, not dates. A replication needs
 the dates, so this starts from the canonical 1/10th sample rather than from
 `Datasets/Dataset_clean/`.
@@ -459,7 +459,7 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 | Pareto/NBD at −53.4% aggregate bias on electronics | `docs/loss-functions.md` §4.1, from the archived study suite |
 | Pareto/NBD at −63.7% ± 0.35 on electronics, n=3 | `docs/p-slstm.md` §10 |
 | Pareto/NBD at +2.2% to +15.8% on the synthetic seasonal grid | `docs/insights-study.md` §2 |
-| CDNOW panel trimmed to complete weeks under the package calendar | `scripts/build_cdnow_panel.py`; convention in `docs/feature_engineering.md` §4 |
+| CDNOW panel trimmed to complete weeks under the package calendar | `scripts/build_cdnow_panel.py`; convention in `docs/feature_engineering.md` §3 |
 
 ---
 

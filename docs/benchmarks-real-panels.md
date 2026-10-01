@@ -413,7 +413,7 @@ Reading:
   0.23, against the bounded ratio triple's CV 0.43 at 0.30. CV says whether a model
   distinguishes customers at all; past that threshold it says nothing about whether it is
   right, and the unbounded channels' extra spread is the extrapolation
-  `docs/feature_engineering.md` §4 measures.
+  `docs/feature_engineering.md` §4.2 explains.
 - **The Transformer collapses less completely than the LSTM.** Its count-only rows sit at
   CV 0.16–0.19 and Spearman 0.09–0.15 against the LSTM's 0.07–0.09 and 0.04–0.05 (22 of
   its 54 count-only forecasts escape, CV > 0.2, against 10 of the LSTM's 204, as
@@ -1025,7 +1025,7 @@ studies (`benchmarks_real_panels_effects.py`).
   bias (Spearman +0.43 across 20 studies; descriptive). Training longer does not remove
   the over-forecast.
 - **What remains is a systematic over-forecast of about 10%.** `from20`'s mean bias is
-  +10.2 (95% CI +7.1 to +13.2; `docs/feature_engineering.md` §4); 4 of 20 studies per arm
+  +10.2 (95% CI +7.1 to +13.2; "AR flags and the cluster label on electronic_5y" below); 4 of 20 studies per arm
   are within ±5%. The published +2.7% is a single model and could be a draw from a spread
   like this one.
 - **Neither the pinning nor the floor moves the mean clearly.** The `nofloor` control
@@ -1061,7 +1061,7 @@ sampled path in the holdout; `kmeans_8` is a static k-means label (K=8) on (t_x,
 
 Reading:
 
-Effects of each input, per rule, are in `docs/feature_engineering.md` §4 (same data,
+Effects of each input, per rule, are in "AR flags and the cluster label on electronic_5y" below (same data,
 `effect()`, n = 20 / 20).
 
 - **Pinning the hyperparameters alone shows no clear difference in level.** ValendinLSTM
@@ -1154,7 +1154,7 @@ contrasts with Pareto/NBD from `lstm_vs_pareto.py` beside it.
   least-biased searched study was +20%, so the pinned settings start from a biased model.
 - **The bounded flags matter most for the Transformer.** `ar_bounded_52` lowers its MAPE
   by 12.1 to 22.3 and its |bias| by 15.2 to 27.3 under every rule, supported
-  (`docs/feature_engineering.md` §4), where neither LSTM shows a clear change; its MAPE
+  ("AR flags and the cluster label on electronic_5y" below), where neither LSTM shows a clear change; its MAPE
   stays above the LSTM's with the same input (+3.3 to +13.9, supported).
 - **`kmeans_8` lowers ranking for every model** (Spearman 0.40 → 0.35–0.37, supported
   under every rule); for the Transformer it lowers MAPE and |bias| about as much as the
@@ -1394,3 +1394,353 @@ the pair measures what an unseeded refit moves on its own (80 studies, one pair 
 locally. About 70 minutes from first rental to an empty fleet, and roughly $1 of rental.
 Half the fleet failed to start first time; those failures and the start-up strategy they
 led to are `VastAI/known_failures.md` F28–F33.
+
+## Moved from feature_engineering.md (to be merged into insights-real-panels.md)
+
+Feature definitions and the reason each was tested are in `docs/feature_engineering.md`; these are the measurements that used to sit beside them.
+
+### The first AR-encoding ablation (40 replications per arm)
+
+A configuration carrying `(period_since_last_transaction, cumulative_transactions,
+period_since_first_transaction)` was ablated against a bounded replacement at two depths,
+40 replications per arm, by `scripts/run_ar_encoding_ablation.py`. The CDNOW rows predate ADR-0009:
+they were measured on the earlier 38-week holdout panel. `|bias|` is the mean
+per-replication magnitude; `rho` is the Spearman rank correlation between per-customer
+predicted and actual holdout totals, i.e. how well the forecast separates heavy customers
+from light ones.
+
+| panel | arm | `ar_features` | \|bias\|% | MAPE | rho |
+| --- | --- | --- | ---: | ---: | ---: |
+| electronics | no_ar | none | 22.4 | 56.1 | 0.027 |
+| `T_CAL`=104 | unbounded | recency + cum_txn + tenure | **235.5** | **240.7** | 0.227 |
+| `T_HOLD`=52 | bounded_32 | flags to K=32 | 22.5 | 48.6 | **0.267** |
+| | bounded_52 | flags to K=52 | **14.3** | **45.4** | 0.202 |
+| cdnow | no_ar | none | 14.6 | 24.1 | 0.437 |
+| `T_CAL`=39 | unbounded | recency + cum_txn + tenure | **335.0** | **345.7** | 0.255 |
+| `T_HOLD`=38 | bounded_16 | flags to K=16 | **14.5** | **22.0** | **0.438** |
+| | bounded_32 | flags to K=32 | 46.2 | 55.4 | 0.300 |
+
+Three things the two panels agree on:
+
+- **The unbounded set is catastrophic, and worse where the drift is worse.** CDNOW has the
+  higher recency escape fraction (56.9% vs 37.7%) and the steeper between-window rate drop
+  (2.52x vs 1.60x), and it is the panel with the larger blow-up. One CDNOW replication
+  reached +2530% bias.
+- **It is not exposure bias.** A teacher-forced pass on electronics — true counts *and*
+  true AR values fed at every step, so no sampling and no feedback — reproduces the bias at
+  +169%. The fitted conditional is wrong before any rollout happens. Beyond the fitted
+  range the predicted rate stops decaying and settles near 0.072 while the true rate at
+  long silence is 0.0153; because silence accumulates, that region holds 49.9% of holdout
+  cells against 7.7% of calibration cells, so 54% of the excess comes from it.
+- **A bounded encoding removes it entirely**, returning `|bias|` to the no-AR baseline or
+  below on both panels.
+
+They disagree on what the AR channels then *buy*, which is worth knowing before assuming
+the features earn their place. On electronics the bounded arms improve ranking sharply over
+no AR features at all (0.267 vs 0.027); on CDNOW they do not (0.438 vs 0.437), because the
+target's own history already ranks that panel well. The gain there is confined to MAPE
+(22.0 vs 24.1).
+
+
+### AR flags and the cluster label on electronic_5y
+
+electronic_5y is the paper's electronics cohort at trip level on Valendin et al.'s split:
+3,755 households, 260 calibration weeks (the last 52 are the validation window) and a
+52-week holdout from 2003-12-02, 2,153 holdout transactions, 99.0% zero cells, 6 count
+classes (`docs/benchmarks-real-panels.md`, "Pareto/NBD on electronic_5y"). It is a
+different panel from the 829-household `electronics` panel measured above, with a
+calibration window two and a half times as long. All numbers below are recomputed from the
+stored forecasts by `.scratch/feature-engineering-5y/effects_5y.py`, which writes
+`.scratch/feature-engineering-5y/results/per_forecast.csv`, `cells.csv`, `effects.csv` and
+`input_support.csv` beside it, and by `.scratch/feature-engineering-5y/lstm_vs_pareto.py`.
+
+**How claims are made here.** `docs/statistical-protocol.md`, computed by
+`panelclv.evaluation.effects.effect`:
+
+- A cell is the mean over its 20 studies with a **95% percentile-bootstrap interval**
+  (10,000 resamples). An effect is Δ = mean(B) − mean(A) with its 95% interval, each
+  condition resampled separately: training is unseeded, so studies are independent
+  replications even though replication *r* seeds both cells' Monte Carlo forecast from
+  the same value.
+- An effect is **supported when its interval excludes zero**; supported entries are
+  bold. An interval containing zero is "no clear difference at n = 20", never "no
+  effect".
+- One metric per claim. **Spearman** (per-customer holdout totals) carries claims about
+  ranking customers, **aggregate MAPE** claims about level, |bias| is secondary. A claim
+  that a cell over-forecasts needs its mean-bias interval to exclude zero.
+- **Forecast CV** — std / mean of the per-customer predicted holdout totals — sits beside
+  Spearman and is diagnostic: Spearman says whether customers are ordered correctly, CV
+  whether the forecast separates them at all. CV near 0 is a collapse.
+- **RMSE on customer totals** is printed because it is the paper's metric, and supports no
+  claim. Its intervals and effects are shown as description.
+- The refit noise has not been measured on electronic_5y; the `electronics` figures (MAPE
+  3.63, |bias| 5.94, Spearman 0.0105) come from another panel and are quoted only as a
+  borrowed sense of magnitude, never as a threshold.
+- **Pareto/NBD is 20 seeded MCMC fits** on the same cohort and windows, a replicated
+  condition like any cell, and every neural cell is compared with it by the independent
+  bootstrap.
+- Every result holds for electronic_5y. Where it disagrees with another panel, that is
+  heterogeneity, not a claim about panels in general.
+
+The ablation tables earlier in this section came before this standard and have no intervals.
+Under it they are descriptive.
+
+#### The input side: the long window shrinks the escape, and K = 52 is well populated
+
+Model: none — this is a property of the panel, a census of every cell rather than a
+sample, so it has no interval. Features computed from the **true** counts in both windows,
+on the benchmark's cohort (`scripts/run_epoch_floor_5y.py`, `build_data`), in the same way
+as `scripts/measure_ar_support.py`:
+
+| feature | escapes calibration range | z past the ceiling |
+| --- | ---: | ---: |
+| `period_since_first_transaction` | 60.6% | 0.70 |
+| `period_since_last_transaction` | 16.3% | 0.84 |
+| `cumulative_transactions` | 0.03% | 3.14 |
+| `transaction_rate`, `has_transacted_before`, `active_in_last_{32,52}_periods` | 0% | — |
+
+| share of cells after a customer's first purchase whose silence is ≥ K | calibration | holdout |
+| --- | ---: | ---: |
+| K = 32 | 65.4% | 79.7% |
+| K = 52 (the deepest flag of `ar_bounded_52`) | 51.5% | 71.7% |
+
+- The window-capped clocks still escape, but less often and less far than on the
+  104-week `electronics` panel (tenure 88.8% → 60.6%, recency 37.7% → 16.3%, both within
+  one calibration sd of the ceiling). A calibration window of 260 weeks leaves less of the
+  holdout outside it.
+- `cumulative_transactions` repeats the CDNOW pattern: it escapes rarely (0.03%) but
+  3.1 z past the ceiling.
+- The deepest flag is well populated: half of all post-first-purchase calibration cells
+  already lie past 52 weeks of silence. That is the opposite of the failed CDNOW K = 32
+  arm (3.5%), and more than either winning arm on the earlier panels (26.6%, 33.7%).
+- The unbounded counters were **not** trained on electronic_5y, so this table says only
+  that the precondition for their failure is weaker here. It does not say how they would
+  forecast.
+
+#### The forecasts: three models × three epoch rules × three inputs
+
+Setting shared by every table below. Scripts: `scripts/run_real_panel_benchmarks.py
+--calibration 5y` (the `searched` LSTM row), `scripts/run_epoch_floor_5y.py`,
+`scripts/run_epoch_floor_features_5y.py` and `scripts/run_attention_models_5y.py`.
+Suites: `Studies/{real_panel_benchmarks,epoch_floor,attention}_cal5y__*`.
+
+- **Inputs.** The baseline for every model (input "none") is the count, `Embedding(6, 3)`,
+  and the calendar week `dayofyear // 7` capped at 51, `Embedding(52, 8)`, both through the
+  `valendin` embedder. There are no static covariates and no continuous calendar columns.
+  Each other row adds **exactly one** input to that baseline:
+  - `ar_bounded_52`: `active_in_last_{2,4,8,16,32,52}_periods` +
+    `has_transacted_before`, seven 0/1 channels concatenated raw. They are recomputed from
+    the sampled path at every holdout step.
+  - `kmeans_8`: one static label per customer, k-means with K = 8 on (t_x, x, T) at the end
+    of calibration, embedded with 8 classes.
+- **Epoch rules.** In `searched`, each study runs its own 100-trial Optuna search, input
+  "none" only. `nofloor` pins the least-biased `searched` study's hyperparameters, runs
+  one trial, and keeps the best-validation epoch. `from20` and `from30` do the same but
+  keep only weights from epoch 20 or 30 on (`select_from_epoch`). Every rule uses patience
+  7, at most 100 epochs, the ADR-0008 refit and 500 Monte Carlo paths.
+- **Cells.** 20 studies each, seeds `BASE_SEED + r`, 600 forecasts in all.
+- **Pareto/NBD reference** (20 seeded MCMC fits, same cohort, mean): RMSE 1.228, bias
+  −16.6%, MAPE 27.7, Spearman 0.395, forecast CV 1.40.
+
+Each metric is the mean [95% percentile-bootstrap interval] over 20 studies. The
+Pareto/NBD row that closes each table repeats the reference above, with its interval over
+its 20 fits.
+
+**LSTM.** Hidden 128, dense 128, dropout 0, learning rate 0.002195, batch 32, weight decay 0,
+pinned from `searched` r13. With input "none" this is the frozen `ValendinLSTM` benchmark.
+With an added input it is `models.MultinomialLSTMModel` built in the benchmark's shape.
+`docs/benchmarks-real-panels.md` describes that shape as the same parameter shapes and
+forward pass, so within this model a none → input difference also crosses from one
+implementation to the other.
+
+| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `searched` | none | 1.163 [1.159, 1.168] | +13.8 [+9.3, +18.8] | 20.5 [17.9, 23.7] | 0.405 [0.404, 0.406] | 1.27 [1.24, 1.31] |
+| `nofloor` | none | 1.178 [1.164, 1.198] | +13.2 [+6.7, +20.8] | 21.5 [17.6, 27.3] | 0.402 [0.399, 0.404] | 1.24 [1.17, 1.29] |
+| `nofloor` | `ar_bounded_52` | 1.183 [1.174, 1.193] | +8.7 [+5.1, +12.1] | 17.5 [16.6, 18.6] | 0.399 [0.396, 0.402] | 1.14 [1.10, 1.17] |
+| `nofloor` | `kmeans_8` | 1.279 [1.268, 1.289] | +9.0 [+4.9, +13.5] | 18.5 [16.4, 21.0] | 0.358 [0.352, 0.364] | 1.62 [1.56, 1.68] |
+| `from20` | none | 1.159 [1.154, 1.164] | +10.2 [+7.1, +13.4] | 17.8 [16.6, 19.3] | 0.403 [0.400, 0.405] | 1.30 [1.27, 1.33] |
+| `from20` | `ar_bounded_52` | 1.154 [1.146, 1.161] | +13.5 [+10.5, +16.7] | 19.5 [17.9, 21.3] | 0.401 [0.399, 0.403] | 1.28 [1.24, 1.32] |
+| `from20` | `kmeans_8` | 1.270 [1.261, 1.279] | +12.4 [+9.0, +15.9] | 18.7 [17.0, 20.6] | 0.354 [0.349, 0.359] | 1.63 [1.58, 1.68] |
+| `from30` | none | 1.157 [1.151, 1.163] | +12.7 [+9.5, +15.7] | 19.4 [17.9, 20.8] | 0.402 [0.399, 0.405] | 1.31 [1.28, 1.34] |
+| `from30` | `ar_bounded_52` | 1.157 [1.149, 1.165] | +10.0 [+7.1, +13.1] | 18.4 [17.2, 19.9] | 0.400 [0.397, 0.402] | 1.23 [1.19, 1.26] |
+| `from30` | `kmeans_8` | 1.266 [1.257, 1.276] | +11.5 [+7.6, +15.7] | 18.3 [16.1, 20.9] | 0.351 [0.344, 0.357] | 1.66 [1.59, 1.72] |
+| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
+
+**LSTMAttention.** `models.MultinomialLSTMAttentionModel`: an LSTM whose head also reads
+single-head causal attention over its own past outputs. Hidden 64, dense 64, dropout 0.007,
+learning rate 0.0025, batch 32, weight decay 0, pinned from `searched` r17.
+
+| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `searched` | none | 1.208 [1.205, 1.213] | +16.0 [+11.2, +21.4] | 21.4 [18.2, 25.3] | 0.403 [0.402, 0.405] | 1.07 [1.05, 1.10] |
+| `nofloor` | none | 1.205 [1.201, 1.210] | +14.1 [+10.4, +18.0] | 19.6 [17.5, 22.2] | 0.399 [0.397, 0.401] | 1.06 [1.03, 1.10] |
+| `nofloor` | `ar_bounded_52` | 1.221 [1.217, 1.224] | +9.1 [+4.7, +13.9] | 18.3 [16.1, 20.8] | 0.399 [0.397, 0.400] | 1.09 [1.06, 1.11] |
+| `nofloor` | `kmeans_8` | 1.294 [1.287, 1.300] | +15.7 [+12.9, +18.6] | 20.2 [18.4, 22.1] | 0.366 [0.362, 0.369] | 1.51 [1.48, 1.55] |
+| `from20` | none | 1.199 [1.193, 1.203] | +14.8 [+11.2, +18.3] | 20.1 [18.2, 22.4] | 0.400 [0.398, 0.403] | 1.13 [1.10, 1.16] |
+| `from20` | `ar_bounded_52` | 1.208 [1.204, 1.211] | +9.3 [+5.7, +13.1] | 17.6 [16.0, 19.6] | 0.401 [0.399, 0.403] | 1.16 [1.14, 1.18] |
+| `from20` | `kmeans_8` | 1.283 [1.276, 1.290] | +13.7 [+10.6, +16.9] | 19.1 [17.3, 20.9] | 0.370 [0.369, 0.372] | 1.52 [1.49, 1.55] |
+| `from30` | none | 1.200 [1.195, 1.204] | +10.8 [+7.8, +13.6] | 18.1 [17.1, 19.3] | 0.400 [0.398, 0.403] | 1.17 [1.14, 1.19] |
+| `from30` | `ar_bounded_52` | 1.202 [1.196, 1.207] | +9.3 [+7.2, +11.6] | 17.0 [16.1, 18.0] | 0.402 [0.400, 0.404] | 1.18 [1.16, 1.20] |
+| `from30` | `kmeans_8` | 1.289 [1.282, 1.296] | +15.5 [+12.5, +18.4] | 19.9 [17.9, 21.9] | 0.369 [0.366, 0.372] | 1.52 [1.48, 1.55] |
+| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
+
+**Transformer.** `models.MultinomialTransformerModel`, forecast through the key/value
+cache. d_model 64, 4 heads, 3 layers, dropout 0.145, learning rate 0.0027, batch 32, weight
+decay 0, pinned from `searched` r08. At +20.1% bias, r08 was the least biased of the 20
+searched studies.
+
+| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `searched` | none | 1.325 [1.279, 1.377] | +51.7 [+42.0, +62.1] | 54.2 [45.1, 64.0] | 0.400 [0.398, 0.402] | 1.33 [1.28, 1.37] |
+| `nofloor` | none | 1.290 [1.268, 1.314] | +34.1 [+25.3, +42.8] | 43.5 [37.1, 49.9] | 0.396 [0.395, 0.398] | 1.32 [1.28, 1.35] |
+| `nofloor` | `ar_bounded_52` | 1.257 [1.238, 1.282] | +12.5 [+4.1, +20.8] | 31.5 [27.4, 35.9] | 0.401 [0.400, 0.402] | 1.28 [1.21, 1.37] |
+| `nofloor` | `kmeans_8` | 1.330 [1.316, 1.346] | +16.4 [+11.9, +21.2] | 32.2 [28.4, 36.5] | 0.347 [0.342, 0.351] | 1.62 [1.59, 1.65] |
+| `from20` | none | 1.298 [1.274, 1.326] | +39.8 [+32.8, +46.7] | 44.4 [38.8, 50.1] | 0.396 [0.393, 0.398] | 1.32 [1.29, 1.36] |
+| `from20` | `ar_bounded_52` | 1.251 [1.239, 1.265] | +13.7 [+8.8, +19.1] | 24.2 [21.2, 27.6] | 0.399 [0.398, 0.400] | 1.27 [1.22, 1.31] |
+| `from20` | `kmeans_8` | 1.314 [1.305, 1.324] | +11.6 [+8.0, +15.3] | 26.2 [23.8, 28.8] | 0.349 [0.345, 0.352] | 1.67 [1.63, 1.70] |
+| `from30` | none | 1.294 [1.275, 1.315] | +40.1 [+32.2, +48.0] | 44.0 [37.4, 50.9] | 0.396 [0.394, 0.399] | 1.31 [1.28, 1.34] |
+| `from30` | `ar_bounded_52` | 1.246 [1.240, 1.251] | +12.5 [+8.9, +16.3] | 21.7 [19.7, 24.0] | 0.397 [0.396, 0.399] | 1.24 [1.20, 1.28] |
+| `from30` | `kmeans_8` | 1.306 [1.295, 1.318] | +10.6 [+6.7, +14.7] | 24.4 [22.1, 27.0] | 0.352 [0.349, 0.354] | 1.69 [1.66, 1.73] |
+| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
+
+**Every one of the 30 cells over-forecasts, supported.** The lowest lower bound of any
+mean-bias interval is +4.1% (Transformer, `ar_bounded_52`, `nofloor`). Neither input,
+under any epoch rule and for any model, brings a cell's mean down to zero. Pareto/NBD
+under-forecasts (−16.6%, −16.9 to −16.3), and every neural cell's mean bias is supported
+above it, by +25.3 to +68.2 points (`lstm_vs_pareto.py`, all three models).
+
+#### The LSTM against Pareto/NBD
+
+Each LSTM cell's 20 studies against Pareto/NBD's 20 seeded fits: Δ = mean(cell) −
+mean(Pareto/NBD), 95% percentile-bootstrap interval, independent, n = 20 / 20. Negative Δ
+is better for RMSE, |bias| and MAPE; positive Δ is better for Spearman; signed bias says
+which way the miss is. Bold: supported. Script:
+`.scratch/feature-engineering-5y/lstm_vs_pareto.py`; results, with the same comparison for
+LSTMAttention and the Transformer, in
+`.scratch/feature-engineering-5y/results/lstm_vs_pareto.csv`.
+
+| rule | input | Δ RMSE (customer total) | Δ \|bias\| | Δ MAPE | Δ Spearman | Δ bias % |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `searched` | none | **−0.065 [−0.070, −0.060]** | −1.7 [−5.6, +2.7] | **−7.2 [−9.8, −4.0]** | **+0.010 [+0.009, +0.011]** | **+30.4 [+25.8, +35.3]** |
+| `nofloor` | none | **−0.050 [−0.065, −0.031]** | −1.1 [−6.3, +5.8] | **−6.2 [−10.1, −0.5]** | **+0.007 [+0.004, +0.009]** | **+29.7 [+23.2, +37.4]** |
+| `nofloor` | `ar_bounded_52` | **−0.045 [−0.054, −0.036]** | **−6.3 [−8.8, −3.7]** | **−10.2 [−11.1, −9.1]** | **+0.004 [+0.000, +0.007]** | **+25.3 [+21.6, +28.7]** |
+| `nofloor` | `kmeans_8` | **+0.051 [+0.040, +0.061]** | **−7.2 [−11.2, −2.9]** | **−9.2 [−11.3, −6.8]** | **−0.037 [−0.043, −0.031]** | **+25.6 [+21.5, +30.1]** |
+| `from20` | none | **−0.069 [−0.074, −0.064]** | **−5.8 [−8.5, −2.9]** | **−9.9 [−11.2, −8.4]** | **+0.008 [+0.005, +0.010]** | **+26.8 [+23.6, +30.0]** |
+| `from20` | `ar_bounded_52` | **−0.074 [−0.082, −0.067]** | −3.0 [−6.1, +0.2] | **−8.2 [−9.8, −6.4]** | **+0.006 [+0.004, +0.009]** | **+30.1 [+27.0, +33.3]** |
+| `from20` | `kmeans_8` | **+0.042 [+0.032, +0.051]** | **−4.1 [−7.5, −0.6]** | **−9.0 [−10.7, −7.1]** | **−0.041 [−0.046, −0.036]** | **+29.0 [+25.6, +32.5]** |
+| `from30` | none | **−0.071 [−0.077, −0.065]** | **−3.8 [−7.0, −0.8]** | **−8.4 [−9.8, −6.9]** | **+0.007 [+0.004, +0.010]** | **+29.3 [+26.0, +32.3]** |
+| `from30` | `ar_bounded_52` | **−0.072 [−0.079, −0.063]** | **−6.4 [−9.3, −3.4]** | **−9.3 [−10.5, −7.8]** | **+0.005 [+0.002, +0.007]** | **+26.6 [+23.7, +29.7]** |
+| `from30` | `kmeans_8` | **+0.038 [+0.029, +0.047]** | **−4.7 [−8.4, −0.7]** | **−9.4 [−11.7, −6.8]** | **−0.044 [−0.051, −0.038]** | **+28.0 [+24.1, +32.2]** |
+
+- **The searched LSTM beats Pareto/NBD on MAPE and Spearman, supported.** MAPE −7.2
+  (−9.8 to −4.0); the Spearman gain is small, +0.010 (+0.009 to +0.011), about the
+  borrowed refit noise.
+- **Without the k-means label, every LSTM cell beats Pareto/NBD on MAPE and on Spearman,
+  supported** — MAPE by 6.2 to 10.2 points, Spearman by +0.004 to +0.010, small. Its
+  customer-level RMSE is lower in every such cell too (descriptive).
+- **With the k-means label, the LSTM ranks customers worse than Pareto/NBD,** supported
+  under every rule (−0.037 to −0.044), and its customer-level RMSE is higher (descriptive);
+  its MAPE is still lower (−9.0 to −9.4).
+- **The LSTM misses the total by less than Pareto/NBD in 7 of the 10 cells** (|bias|
+  −3.8 to −7.2, supported), and shows no clear difference in the other three (`searched`
+  and `nofloor` without an input, `from20` with the flags). The two miss in opposite
+  directions: every LSTM cell over-forecasts relative to Pareto/NBD (signed Δ +25.3 to
+  +30.4), and Pareto/NBD under-forecasts by 16.6%.
+- This is one panel and one holdout year. Forecast CV is not compared, because neither
+  direction is better.
+
+#### What each input changes
+
+Effect of adding one input to the count + embedded week baseline, within one model and one
+epoch rule. It is Δ = mean(with input) − mean(without), with a 95% bootstrap interval,
+20 studies against 20. Negative Δ is better for MAPE, |bias| and RMSE; positive Δ is
+better for Spearman. The models, hyperparameters and inputs are those of the three tables
+above. Bold: supported.
+
+| model | rule | input added | Δ Spearman | Δ MAPE | Δ \|bias\| | Δ RMSE (customer total) | Δ forecast CV |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| LSTM | `nofloor` | `ar_bounded_52` | −0.003 [−0.007, +0.001] | −4.0 [−10.0, +0.1] | −5.2 [−12.7, +0.8] | +0.005 [−0.016, +0.023] | **−0.10 [−0.17, −0.03]** |
+| LSTM | `from20` | `ar_bounded_52` | −0.002 [−0.005, +0.002] | +1.7 [−0.4, +3.9] | +2.8 [−1.4, +7.0] | −0.005 [−0.014, +0.004] | −0.02 [−0.07, +0.03] |
+| LSTM | `from30` | `ar_bounded_52` | −0.002 [−0.006, +0.001] | −0.9 [−2.9, +1.1] | −2.6 [−6.8, +1.7] | −0.000 [−0.010, +0.010] | **−0.08 [−0.13, −0.04]** |
+| LSTMAttention | `nofloor` | `ar_bounded_52` | −0.000 [−0.002, +0.002] | −1.3 [−4.7, +2.0] | −3.9 [−9.5, +1.8] | **+0.016 [+0.010, +0.021]** | +0.03 [−0.02, +0.07] |
+| LSTMAttention | `from20` | `ar_bounded_52` | +0.001 [−0.003, +0.004] | −2.5 [−5.3, +0.2] | −4.8 [−9.6, +0.0] | **+0.009 [+0.003, +0.015]** | +0.03 [−0.01, +0.07] |
+| LSTMAttention | `from30` | `ar_bounded_52` | +0.002 [−0.002, +0.005] | −1.1 [−2.6, +0.4] | −1.9 [−5.1, +1.5] | +0.002 [−0.005, +0.009] | +0.01 [−0.02, +0.04] |
+| Transformer | `nofloor` | `ar_bounded_52` | **+0.005 [+0.003, +0.007]** | **−12.1 [−19.7, −4.5]** | **−15.2 [−25.3, −5.1]** | −0.033 [−0.064, +0.001] | −0.03 [−0.12, +0.06] |
+| Transformer | `from20` | `ar_bounded_52` | **+0.003 [+0.001, +0.006]** | **−20.2 [−26.7, −13.8]** | **−25.2 [−33.4, −16.8]** | **−0.047 [−0.077, −0.019]** | −0.06 [−0.11, +0.00] |
+| Transformer | `from30` | `ar_bounded_52` | +0.001 [−0.002, +0.003] | **−22.3 [−29.7, −15.5]** | **−27.3 [−36.2, −18.7]** | **−0.048 [−0.071, −0.028]** | **−0.07 [−0.12, −0.02]** |
+| LSTM | `nofloor` | `kmeans_8` | **−0.044 [−0.051, −0.037]** | −3.0 [−9.2, +1.8] | −6.1 [−14.3, +0.8] | **+0.100 [+0.079, +0.119]** | **+0.38 [+0.30, +0.47]** |
+| LSTM | `from20` | `kmeans_8` | **−0.049 [−0.055, −0.043]** | +0.9 [−1.4, +3.2] | +1.7 [−2.8, +6.1] | **+0.111 [+0.100, +0.121]** | **+0.33 [+0.27, +0.39]** |
+| LSTM | `from30` | `kmeans_8` | **−0.051 [−0.058, −0.044]** | −1.0 [−3.8, +1.9] | −0.9 [−5.7, +4.1] | **+0.109 [+0.098, +0.120]** | **+0.35 [+0.28, +0.42]** |
+| LSTMAttention | `nofloor` | `kmeans_8` | **−0.033 [−0.037, −0.029]** | +0.6 [−2.6, +3.5] | +1.6 [−3.2, +6.3] | **+0.088 [+0.081, +0.096]** | **+0.45 [+0.40, +0.49]** |
+| LSTMAttention | `from20` | `kmeans_8` | **−0.030 [−0.033, −0.027]** | −1.1 [−3.9, +1.5] | −1.1 [−5.8, +3.5] | **+0.084 [+0.075, +0.092]** | **+0.39 [+0.35, +0.43]** |
+| LSTMAttention | `from30` | `kmeans_8` | **−0.031 [−0.035, −0.027]** | +1.8 [−0.6, +4.0] | **+4.3 [+0.4, +8.2]** | **+0.089 [+0.081, +0.098]** | **+0.35 [+0.31, +0.39]** |
+| Transformer | `nofloor` | `kmeans_8` | **−0.050 [−0.055, −0.044]** | **−11.4 [−19.0, −3.8]** | **−17.7 [−27.6, −7.9]** | **+0.040 [+0.012, +0.067]** | **+0.30 [+0.26, +0.34]** |
+| Transformer | `from20` | `kmeans_8` | **−0.047 [−0.051, −0.043]** | **−18.2 [−24.5, −11.9]** | **−27.3 [−34.8, −19.6]** | +0.016 [−0.012, +0.043] | **+0.34 [+0.29, +0.39]** |
+| Transformer | `from30` | `kmeans_8` | **−0.045 [−0.048, −0.042]** | **−19.6 [−27.0, −12.5]** | **−28.3 [−37.1, −19.8]** | +0.012 [−0.012, +0.035] | **+0.38 [+0.34, +0.43]** |
+
+`effects.csv` also holds the direct `ar_bounded_52` → `kmeans_8` comparison. Its Spearman
+row is supported for all nine model × rule pairs, −0.031 to −0.055. Its MAPE row is not
+distinguishable in eight of nine; the exception is LSTMAttention `from30`, where the label
+is worse by +2.9 [+0.6, +5.1].
+
+**The bounded flags.**
+
+- **Transformer: they lower the level error under every epoch rule**, supported: MAPE
+  −12.1, −20.2 and −22.3, |bias| −15.2 to −27.3. Each is several times the borrowed
+  `electronics` refit noise. Its Spearman rises by +0.005 and +0.003 under `nofloor` and
+  `from20`, also supported, but that is below the borrowed refit noise of 0.0105, so the
+  change is small; under `from30` it is not distinguishable.
+- **LSTM and LSTMAttention: no supported change in Spearman, MAPE or |bias|** under any
+  rule. For both, the MAPE intervals reach from about −10 to +4, so a moderate gain or loss
+  is not ruled out at n = 20. What does move is descriptive. For the LSTM, CV falls under
+  `nofloor` and `from30`. For LSTMAttention, customer-level RMSE rises under `nofloor` and
+  `from20`, by 0.016 and 0.009.
+- **The flags narrow the Transformer's gap to the LSTM without closing it.** The effects
+  file has the model contrasts with the same inputs and rules. With input "none" the
+  Transformer's MAPE is worse than the LSTM's by +22.0, +26.6 and +24.6. With
+  `ar_bounded_52` it is worse by +13.9 [+9.7, +18.4], +4.7 [+1.1, +8.4] and +3.3
+  [+0.7, +5.9], still supported under every rule.
+- **This is not the gain seen on the 829-household `electronics` panel,** where the flags
+  took Spearman from 0.027 to 0.267 (the descriptive ablation table above). On
+  electronic_5y every model already ranks at 0.40 with count and week alone, and no model
+  gains on Spearman beyond +0.005. That fits CDNOW's pattern, where the history carried in
+  the count already ranks the panel, but the mechanism was not tested.
+
+**The cluster label.**
+
+- **It lowers ranking for every model under every rule**, supported: Spearman −0.044 to
+  −0.051 for the LSTM, −0.030 to −0.033 for LSTMAttention and −0.045 to −0.050 for the
+  Transformer, three to five times the borrowed refit noise. Every `kmeans_8` cell falls
+  from about 0.40 to 0.35–0.37, supported below Pareto/NBD's 0.395 for all three models
+  (Δ −0.025 to −0.048, `lstm_vs_pareto.py`).
+- **It is not a collapse.** Forecast CV *rises* by +0.30 to +0.45 in all nine cases,
+  supported. The label spreads the per-customer forecasts further apart and orders them
+  worse at the same time: it separates customers, but along its eight groups rather than
+  along what they go on to buy. That reading is an interpretation of the two numbers
+  together and has not been tested.
+- **For the Transformer it lowers the level error as much as the flags do.** MAPE −11.4
+  to −19.6 and |bias| −17.7 to −28.3, all supported, and the direct flags → label MAPE
+  contrast is not distinguishable under any rule. For the two LSTMs it makes no supported
+  difference to MAPE, and LSTMAttention's |bias| gets worse under `from30` (+4.3). So the
+  label buys the Transformer its level at a supported cost in ranking, which the flags do
+  not charge.
+- **The four earlier panels do not agree with this, and neither do they agree with each
+  other.** In `docs/insights-cluster-ablation.md` §5.1.1 (`ValendinLSTM`, 20 replications
+  a cell), adding the label raised Spearman on the 829-household `electronics` panel
+  (+0.283) and on multichannel (+0.182), both supported. On CDNOW (+0.039) and gift
+  (+0.010) the change was not distinguishable. Once the model was trained past its early
+  plateau, the label raised Spearman in all eight (panel, model) cells, by +0.023 to
+  +0.127. On the synthetic grid (`docs/insights-synthetic-grid.md`, claim 5) the label
+  hurt the level error of an LSTM without AR features at rates ≥ 0.10, and alongside the
+  flags from rate 0.05. On the panels where the label helped, the count-only model had
+  collapsed, with Spearman near 0. On electronic_5y it had not: CV is 1.1–1.3 and
+  Spearman 0.40. That difference is a candidate explanation and has not been tested.
+  This is heterogeneity between panels, and none of these results generalises across
+  them.
+
+**Which to carry on electronic_5y.** For the Transformer, `ar_bounded_52`: it gets the
+level gains the label gets without the label's loss in ranking. For the two LSTMs, none of
+this evidence favours adding either input. The flags are not distinguishable from no
+input, and the label costs ranking.
+

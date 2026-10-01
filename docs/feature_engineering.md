@@ -1,1088 +1,280 @@
 # Feature Engineering
 
-This chapter documents how `panelclv` turns a raw customer-period panel into the
-`(N, T, F)` float32 tensors the models consume, and — just as importantly — how it keeps
-every engineered feature *reconstructible at forecast time without reading the future*.
+How `panelclv` turns a customer-period panel into the `(N, T, F)` tensors the models read,
+which features exist, and why each was built. Results of using them are not here: they
+are in `docs/insights-real-panels.md` (real panels) and `docs/insights-synthetic-grid.md`
+(synthetic grid).
 
-The guiding constraint is the Valendin et al. design: the model is a **classifier over
-transaction-count classes** whose forecast is produced by an **autoregressive Monte Carlo
-rollout**. That has a hard consequence for feature engineering:
+## 1. The rule every feature obeys
 
-> Every feature the model sees at step *t* of the holdout must be either (a) genuinely
-> known in advance, or (b) computable from the model's own *sampled* history.
-> A feature that is neither cannot exist in this package — there is no way to supply it
-> during the rollout without leaking the answer.
+The model is a classifier over count classes whose forecast is an autoregressive Monte
+Carlo rollout (`CLAUDE.md`). So:
 
-Everything below is a consequence of that rule.
-
-**Revised under the statistical protocol (2026-09-28).** §4's electronic_5y results now
-follow `docs/statistical-protocol.md`, and Pareto/NBD there is 20 seeded fits (mean bias
-−16.6%, Spearman 0.395) rather than one. Cell intervals moved in the last digit and no
-input effect flipped. The LSTM-against-Pareto/NBD verdicts that flipped:
-
-- Spearman without the label: *not distinguishable* in every pinned cell → **LSTM higher,
-  supported** in all of them (+0.004 to +0.009); `nofloor` / none MAPE: *not
-  distinguishable* → **LSTM lower, supported** (−6.2).
-- |bias|: *no cell differs from Pareto/NBD* → **LSTM's miss smaller in 7 of 10 cells**
-  (−3.8 to −7.2), no clear difference in 3.
-- Bias direction: *every cell's interval above Pareto/NBD's −15.6%* → every cell of all
-  three models supported above Pareto/NBD's 20 fits (+25.3 to +68.2).
-- The `kmeans_8` cells' customer-level RMSE against Pareto/NBD: *not distinguishable* →
-  higher, which RMSE, being descriptive, no longer carries as a claim.
-
-**Where the code lives**
+> Every feature the model reads at holdout step *t* is either **known in advance** or
+> **computable from the model's own sampled history**. Anything else would leak the
+> answer, and cannot exist in this package.
 
 | Concern | Module |
 | --- | --- |
-| Declarative feature spec + validation | `src/panelclv/configs/panel_config.py` |
-| Panel → tensor pipeline, calendar features, embeddings | `src/panelclv/data_preparation/panel_dataset.py` |
-| Autoregressive target-derived features | `src/panelclv/data_preparation/ar_features.py` |
-| Feature consumption (embeddings / covariate projection) | `src/panelclv/models/multinomial_lstm.py`, `multinomial_transformer.py` |
-| Feature reconstruction during the rollout | `src/panelclv/models/monte_carlo_forecasting.py` |
-| Feature *selection* as a tuned decision | `src/panelclv/tuning/optuna_tuning.py` |
+| Feature declaration and validation | `configs/panel_config.py` |
+| Panel → tensors, calendar features, embeddings | `data_preparation/panel_dataset.py` |
+| Autoregressive (AR) features | `data_preparation/ar_features.py` |
+| Behavioural clusters | `data_preparation/cluster_features.py` |
+| Re-computing features during the rollout | `models/monte_carlo_forecasting.py` |
+| Covariate-subset search | `tuning/optuna_tuning.py` |
 
----
+## 2. Roles
 
-## 1. The contract: what a feature *is* in this package
+A feature is a numeric panel column with a **role**, declared once in `PanelConfig`.
+`seq_cols` (the channel names in tensor order) is the contract: models address channels by
+name, so a new panel needs a new config, not a code edit. Channel order is fixed:
+`target → time → known_future → observed_past → static → ar_features → cluster_features`.
 
-A feature is a **numeric column of the panel** that has been assigned a **role**. Roles
-are declared once, in a `PanelConfig`, and `prepare_dataset` does the rest:
-
-```
-panel (one row per customer × period)
-   │
-   ├─ 1. engineer calendar columns          (time_features flags)
-   ├─ 2. add `period_start` anchor          (uniform date handle for slicing)
-   ├─ 3. create AR feature columns          (zero placeholders for now)
-   ├─ 4. flatten roles → seq_cols           (fixed channel order)
-   ├─ 5. slice calibration / holdout windows
-   ├─ 6. cohort filter + target clipping
-   ├─ 7. FILL AR features from calibration only
-   ├─ 8. resolve embedding cardinalities
-   ├─ 9. reshape → (N, T, F)
-   ├─ 10. standardise the numeric channels  (calibration-fitted; §5)
-   └─ 11. build (samples, targets)
-```
-
-The output is a plain dict; the feature-relevant keys are:
-
-| Key | Shape / type | Meaning |
+| Role | Field | In the holdout |
 | --- | --- | --- |
-| `calibration` | `(N, T_CAL, F)` | calibration-window tensor |
-| `holdout` | `(N, T_HOLD, F)` | holdout-window tensor (covariates real, target/AR columns never fed) |
-| `samples` | `(N, T_CAL-1, F)` | next-step inputs, `calibration[:, :-1, :]` |
-| `targets` | `(N, T_CAL-1, 1)` | next-step class labels, `calibration[:, 1:, target_idx]` |
-| `seq_cols` | `list[str]` | channel names, in tensor order — the single source of truth for `F` |
-| `target_idx` | `int` | position of the target channel |
-| `embedded_cols` | `{col: cardinality}` | resolved categorical embedding map |
-| `ar_features` | `list[str]` | which channels must be recomputed during the rollout |
-| `covariate_stats` | `{col: (mean, std)}` | calibration-fitted scaling of the numeric channels — the rollout must re-apply it |
-
-`seq_cols` is the contract. The model addresses channels **by name**, never by a
-hardcoded position, which is what makes the package dataset-agnostic: a new panel with
-different covariates needs a different `PanelConfig`, not a code edit.
-
-### Channel order
-
-Channels are laid out in a fixed group order (`_SCHEMA_GROUP_ORDER`):
-
-```
-target → time → known_future → observed_past → static → ar_features → cluster_features
-```
-
-De-duplicated, first-occurrence-wins. Fixing the order means two configurations that
-share features put them in comparable positions, which keeps checkpoints, diagnostics
-and the feature-subset slicing legible.
-
----
-
-## 2. Feature roles (the TFT-style grouping)
-
-Roles are not decoration — each one carries a *different guarantee about the future*, and
-the pipeline treats them differently.
-
-| Role | `PanelConfig` field | Guarantee | Available in holdout? |
-| --- | --- | --- | --- |
-| target | `target_col` | the thing being predicted | **never fed** — replaced by the sample |
-| time | `time` (+ auto-filled by `time_features`) | deterministic function of the calendar | yes, computable arbitrarily far ahead |
-| known future | `known_future` | value is known per period in advance (promo calendar, season flag, `year_idx`) | yes, read from the holdout tensor |
-| observed past | `observed_past` | observed only up to the forecast origin | **not supported — dropped with a warning** |
-| static | `static` | one value per customer, broadcast over that customer's rows | yes, constant |
-| AR features | `ar_features` | causal function of the target's own past | recomputed from the *sampled* target |
-
-Two of these deserve their justification spelled out.
-
-**`observed_past` is deliberately unimplemented.** An unknown-future covariate has no
-value at holdout step *t* unless you read the true one — which is leakage — or model it
-jointly, which is out of scope. Rather than silently mis-handling it, `prepare_dataset`
-drops the group and emits a warning naming the columns. The two planned honest routes
-are (i) encoder-only conditioning during warm-up, or (ii) lagging the covariate into
-`known_future` so its value at *t* is its observed value at *t − k*.
-
-**The target is a role of its own** and is *not* listed in any covariate group. It is
-declared once as `target_col`, its cardinality drives the softmax head, and at rollout
-time its channel is overwritten with the sampled class each step.
-
----
+| target | `target_col` | never fed; replaced by the sampled class each step |
+| time | `time` (+ `time_features` flags) | computed from the calendar |
+| known future | `known_future` | read from the holdout tensor (promo calendar, `year_idx`) |
+| observed past | `observed_past` | **unsupported, dropped with a warning**: it has no honest holdout value |
+| static | `static` | constant per customer |
+| AR features | `ar_features` | recomputed from the sampled target (§4) |
+| cluster | `cluster_features` | frozen at the end of calibration (§5) |
 
 ## 3. Calendar features
 
-Calendar features are the cheapest genuinely-known-future signal available, and the only
-family the package *engineers from scratch*. They are **opt-in**: omitting
-`time_features` engineers nothing.
+Opt-in through `time_features`; `TIME_FEATURE_FLAGS` in `panel_config.py` is the source.
 
-This table is not the source: `configs/panel_config.py`'s `TIME_FEATURE_FLAGS` is, and
-`add_time_features` builds against it, so the columns and frequencies below are read off
-one declaration rather than restated in three.
+| Flag | Columns | Formula |
+| --- | --- | --- |
+| `add_year_idx` | `year_idx` | `year − year(training_start)` |
+| `add_week_sin_cos` | `week_sin`, `week_cos` | `sin/cos(2π·w / 52)` |
+| `add_month_sin_cos` | `month_sin`, `month_cos` | `sin/cos(2π·(m−1) / 12)` |
+| `add_dayofyear_sin_cos` | `day_sin`, `day_cos` | `sin/cos(2π·(doy−1) / 365)` |
 
-| Flag | Columns created | Formula | Valid frequencies |
-| --- | --- | --- | --- |
-| `add_year_idx` | `year_idx` | `year − year(training_start)` | weekly, monthly, daily |
-| `add_week_sin_cos` | `week_sin`, `week_cos` | `sin/cos(2π·w / periods_per_year)` weekly, `sin/cos(2π·w / 52)` daily | weekly, daily |
-| `add_month_sin_cos` | `month_sin`, `month_cos` | `sin/cos(2π·(m−1) / 12)` | monthly, daily |
-| `add_dayofyear_sin_cos` | `day_sin`, `day_cos` | `sin/cos(2π·(doy−1) / 365)` | daily |
+- **Week convention (ADR-0009).** Valendin's `dayofyear // 7`, capped at 51: 52 weeks,
+  0..51. Every stored panel is built on it (`period_calendar.week_of_year`,
+  `complete_week_grid`); a panel on another rule is silently misaligned.
+- **Why sin/cos.** Week 52 and week 1 are neighbours; the circle encodes that, and is
+  defined arbitrarily far into the holdout.
+- **`year_idx` caveat.** Monotone, so the holdout takes values never seen in calibration.
+  A model leaning on it extrapolates a trend. It is not auto-assigned to a role.
 
-**Where `w` comes from, and why the daily divisor is 52 rather than
-`periods_per_year`.** A weekly panel carries its own `week` column and the divisor is the
-declared `periods_per_year` (52 by convention). A daily panel has no week column, so the
-week-of-year is read off the date by the package's single week convention
-(`data_preparation/period_calendar.py`): Valendin's `dayofyear // 7`, capped at 51, so a
-year is **52 weeks numbered 0..51**. Week 0 is six days (Jan 1..6), weeks 1..50 are seven
-days starting on day-of-year `7w`, and week 51 absorbs everything from day-of-year 357 to
-Dec 31. The divisor there is 52 because that is how
-many weeks the cycle has — on a daily panel `periods_per_year` counts *days* (365), and
-using it would compress the year into a seventh of the sine's period. This is deliberately
-not ISO 8601: ISO gives some years a 53rd week, which aliases exactly onto week 0 under a
-52-week sine and would encode New Year's Eve as New Year's Day.
+## 4. Autoregressive features
 
-**Every stored panel is built on the same rule (ADR-0009).** A panel arrives with its
-`week` column already computed and the package never re-derives it from a date, yet
-`prepare_dataset` cuts windows on `week_start`, which inverts only the package's rule. A
-panel built on another rule is silently misaligned, and a mid-year cut then moves a
-whole week across the boundary. The panels used to be mixed — electronics on
-`dayofyear // 7`, CDNOW, gift and multichannel on `(dayofyear − 1) // 7` — and were
-rebuilt. Measured against the raw transactions under `dayofyear // 7`:
+Functions of the target's own past, recomputed at every rollout step from the count the
+model just sampled. They bring the recency/frequency/age structure of the BTYD models
+into the neural input. A transaction is `target > 0`.
 
-```
-gift          0 mismatched cells of 8561
-multichannel  0 mismatched cells of 2904
-cdnow         0 mismatched cells of 6369
-electronics   0 mismatched cells of 3335
-```
-
-Build a new panel with `period_calendar.week_of_year` and `complete_week_grid`, as
-`scripts/build_cdnow_panel.py` and `scripts/build_rdata_panel.py` do, so `week_start`
-inverts it.
-
-**Why sin/cos rather than the raw index.** A raw week number is a discontinuous
-encoding of a circular quantity: weeks 52 and 1 are adjacent in the world but maximally
-distant in the feature. Projecting onto the unit circle makes the encoding continuous and
-periodic — the model can learn "late December ≈ early January" without spending capacity
-undoing the wrap-around. It also extrapolates perfectly into the holdout, since it is a
-pure function of the calendar.
-
-**Auto-assignment to the `time` role.** A flag that produces cyclical columns registers
-them into the `time` role automatically (`PanelConfig.schema`), *unless* the column is
-already assigned to some role. So you never list `week_sin`/`week_cos` yourself. The
-`time` field is reserved for cyclical columns **already present** in the panel. `year_idx`
-is deliberately *not* auto-assigned: it is a trend feature, and where it belongs
-(usually `known_future`) is a modeling choice.
-
-**The `year_idx` caveat.** `year_idx` is monotone and, by construction, takes values in
-the holdout that were never seen in calibration. A model that leans on it is extrapolating
-a trend off the end of its training support — in practice the classic failure mode is a
-rollout that over-predicts with no decay. It is included because reproducing the reference
-workflow requires it, but it is a prime candidate for `removable_features` (§8), and the
-rollout-based selection metric exists partly to catch exactly this.
-
-**`period_start`.** Independently of the flags, the pipeline adds a single `period_start`
-Timestamp so both windows are sliced by one uniform rule (weekly: `Jan-1 of year +
-max(7·week − 1, 0)` days; monthly: first of month; daily: the date itself). It is a slicing anchor, not a
-model feature. The weekly rule is the same convention `week_sin`/`week_cos` read, and both
-come from `period_calendar` — the anchor and the feature cannot drift apart.
-
----
-
-## 4. Target-derived features
-
-Two families are derived from the target's own past, and they differ in one thing: what
-happens to them during the rollout. **Autoregressive features** are recomputed at every
-step from the count the model just sampled. **Behavioural clusters** are computed once
-from calibration and then frozen. The first half of this section covers the AR family;
-"The frozen kind" at the end covers clusters.
-
-The AR family is what makes the recency/frequency structure of the BTYD literature
-available to a neural model without breaking the rollout. A "transaction" is defined as
-`target > 0`.
-
-All of them are read off a small per-customer running state, maintained in period order:
+### 4.1 The running state and the features read off it
 
 | State | Definition |
 | --- | --- |
-| `since` | periods since the last transaction (0 in a transacting period) |
-| `ever` | whether any transaction has occurred yet |
-| `cum_txn` | number of *active periods* so far |
-| `cum_cnt` | sum of the target counts so far |
-| `tenure` | periods since the first transaction (0 before and at the first) |
+| `since` | periods since the last transaction (0 in a transacting period; before the first, `t + 1`) |
+| `ever` | any transaction yet |
+| `cum_txn` | active periods so far |
+| `cum_cnt` | sum of counts so far |
+| `tenure` | periods since the first transaction (0 at and before it) |
 
-and the exposed features are pure functions of it:
+| Feature | Value | Pareto/NBD analogue | Bounded? |
+| --- | --- | --- | --- |
+| `period_since_last_transaction` | `since` | recency gap | no, window-capped |
+| `period_since_first_transaction` | `tenure` | age **T** | no, window-capped |
+| `cumulative_transactions` | `cum_txn` | frequency **x** | no |
+| `cumulative_count` | `cum_cnt` | — | no |
+| `has_transacted_before` | `1[ever]` | — | yes |
+| `active_in_last_<K>_periods` | `1[ever and since < K]` | windowed activity | yes |
+| `transaction_rate` | `cum_txn / max(tenure, 1)` | rate **λ** | yes |
+| `log_period_since_last_transaction` | `log(1 + since)` | Lomax log-survival coordinate | no, compressed |
+| `log_period_since_first_transaction` | `log(1 + tenure)` | — | no, compressed |
+| `saturating_recency_<C>_periods` | `since / (since + C)` | — | yes, in [0, 1) |
+| `saturating_tenure_<C>_periods` | `tenure / (tenure + C)` | — | yes, in [0, 1) |
+| `recency_over_tenure` | `(T − t_x) / T`, 0 before the first purchase | share of life spent silent | yes |
 
-| Feature name | Value | BTYD analogue |
-| --- | --- | --- |
-| `period_since_last_transaction` | `since` | recency (the gap since the last purchase) |
-| `has_transacted_before` | `1[ever]` | — |
-| `active_in_last_<K>_periods` | `1[ever and since < K]` | windowed activity flag, `K ≥ 1` |
-| `cumulative_transactions` | `cum_txn` | frequency **x** |
-| `cumulative_count` | `cum_cnt` | total count (≥ `cum_txn`; differs when a period holds several transactions) |
-| `period_since_first_transaction` | `tenure` | observation age **T** |
-| `transaction_rate` | `cum_txn / max(tenure, 1)` | empirical Poisson rate **λ** |
-| `log_period_since_last_transaction` | `log(1 + since)` | the coordinate the Lomax log-survival is linear in |
-| `log_period_since_first_transaction` | `log(1 + tenure)` | the same compression applied to **T** |
-| `saturating_recency_<C>_periods` | `since / (since + C)` | bounded recency, `1/2` at a gap of `C`, `C ≥ 1` |
-| `saturating_tenure_<C>_periods` | `tenure / (tenure + C)` | bounded observation age |
-| `recency_over_tenure` | `(T − t_x) / T`, `0` before the first purchase | the share of an observed life spent silent |
+All states are integers, so the training-time precompute and the rollout's incremental
+update agree exactly (§7).
 
-The last five re-encode the two window-capped clocks; "Which ones to prefer" below
-measures what that buys and `.scratch/ar-encoding-support/spec.md` derives them.
+### 4.2 Why bounding matters
 
-Notes on the conventions, which matter for reproducibility:
+`period_since_last_transaction` and `period_since_first_transaction` cannot exceed
+`T_CAL` while the model is fitted, but keep counting through the holdout. So the holdout
+lands outside the range the weights were trained on. Measured on electronics (104
+calibration weeks) by `scripts/measure_ar_support.py`:
 
-- Before a customer's first transaction, `since` counts up from the start of the series
-  (index `t` ⇒ `since = t + 1`), and `tenure` is pinned to 0. `has_transacted_before` and
-  every `active_*` flag are 0. So "never purchased yet" is representable and distinct
-  from "purchased long ago".
-- `tenure` is 0 *at* the first transaction and increments from the next period — matching
-  the "age since first purchase" convention, not "number of observed periods".
-- `transaction_rate` guards its denominator with `max(tenure, 1)`, so the first period
-  never divides by zero and later periods are undistorted.
-- All counters are integer-valued (the counts are multinomial class indices), so the two
-  compute paths (§6) agree **exactly**, not approximately.
-
-**Which ones to prefer.** Measured on the electronics panel (104 calibration periods, 52
-holdout periods), as the share of holdout cells whose value falls outside the `[min, max]`
-the channel took anywhere in calibration — the region where the shared covariate
-projection extrapolates rather than interpolates. `z` is how far the worst holdout cell
-sits past the calibration ceiling in calibration standard deviations, which is the unit
-the model reads after standardisation:
-
-| feature | escapes calibration range | z past the ceiling | why |
-| --- | ---: | ---: | --- |
-| `period_since_first_transaction` | **88.8%** | 1.74 | capped by the window length while fitted, then keeps counting |
-| `period_since_last_transaction` | **37.7%** | 1.90 | same cap; only customers quiet longer than anyone was in calibration escape |
-| `cumulative_transactions` | 0.04% | 0.64 | unbounded in principle, but the heaviest calibration buyer sets a high maximum |
-| `cumulative_count` | 0.04% | 0.64 | as above |
-| `transaction_rate`, `has_transacted_before`, `active_in_last_<K>_periods` | **0%** | — | bounded and stationary by construction |
-
-`scripts/measure_ar_support.py` regenerates this for either panel (the CDNOW figures
-predate ADR-0009's rebuilt panel), and the two columns have to be read together. **On CDNOW `cumulative_transactions` escapes on only 0.176% of
-cells but by 9.19 z at the worst cell and 3.87 z on average** — further outside than
-either window-capped clock. A channel can escape rarely and catastrophically, so "in
-range in practice" is a claim about the count and not about the distance.
-
-**The escape fraction cannot rank two encodings of one feature.** It is invariant to
-every order-preserving transform, so `log(1 + recency)` escapes on exactly the cells
-`recency` does, to the last cell. That leaves two ways an encoding can actually help, and
-naming them is what makes the next paragraph's fix legible: collapse the tail
-**non-injectively** onto a value calibration already contains, which is what the nested
-`active_in_last_<K>` flags do and why they discard resolution; or **shorten the distance**
-travelled outside, which a concave compression does while keeping it. The family built on
-that second route is specified in `.scratch/ar-encoding-support/spec.md`, with the
-Pareto/NBD derivation that picks out `log(1 + gap)` as the coordinate in which the true
-response is a straight line.
-
-The two families that matter are therefore **not** the bounded and the unbounded ones. The
-hazard is being **capped by the calibration window length**: `period_since_first_transaction`
-and `period_since_last_transaction` cannot exceed `T_CAL` while being fitted, because there
-are only that many periods to count, and they carry on counting through the holdout. The
-cumulative counters grow without bound in principle and stay in range in practice.
-
-Tenure is the extreme case, and `require_calibration_activity=True` makes it worse rather
-than better: every retained customer's clock is already running when the holdout opens, so
-100% of them end past the calibration maximum, moving from a standardised range topping out
-at z = 1.91 to z = 3.46. The drift is one-sided — no holdout cell falls below the
-calibration minimum — so whatever slope was fitted at the sparse top of the range is applied
-to the whole cohort in the same direction.
-
-**What this costs, and what fixes it — measured on both panels.** A configuration
-carrying `(period_since_last_transaction, cumulative_transactions,
-period_since_first_transaction)` was ablated against a bounded replacement at two depths,
-40 replications per arm, by `scripts/run_ar_encoding_ablation.py`. The CDNOW rows predate ADR-0009:
-they were measured on the earlier 38-week holdout panel. `|bias|` is the mean
-per-replication magnitude; `rho` is the Spearman rank correlation between per-customer
-predicted and actual holdout totals, i.e. how well the forecast separates heavy customers
-from light ones.
-
-| panel | arm | `ar_features` | \|bias\|% | MAPE | rho |
-| --- | --- | --- | ---: | ---: | ---: |
-| electronics | no_ar | none | 22.4 | 56.1 | 0.027 |
-| `T_CAL`=104 | unbounded | recency + cum_txn + tenure | **235.5** | **240.7** | 0.227 |
-| `T_HOLD`=52 | bounded_32 | flags to K=32 | 22.5 | 48.6 | **0.267** |
-| | bounded_52 | flags to K=52 | **14.3** | **45.4** | 0.202 |
-| cdnow | no_ar | none | 14.6 | 24.1 | 0.437 |
-| `T_CAL`=39 | unbounded | recency + cum_txn + tenure | **335.0** | **345.7** | 0.255 |
-| `T_HOLD`=38 | bounded_16 | flags to K=16 | **14.5** | **22.0** | **0.438** |
-| | bounded_32 | flags to K=32 | 46.2 | 55.4 | 0.300 |
-
-Three things the two panels agree on:
-
-- **The unbounded set is catastrophic, and worse where the drift is worse.** CDNOW has the
-  higher recency escape fraction (56.9% vs 37.7%) and the steeper between-window rate drop
-  (2.52x vs 1.60x), and it is the panel with the larger blow-up. One CDNOW replication
-  reached +2530% bias.
-- **It is not exposure bias.** A teacher-forced pass on electronics — true counts *and*
-  true AR values fed at every step, so no sampling and no feedback — reproduces the bias at
-  +169%. The fitted conditional is wrong before any rollout happens. Beyond the fitted
-  range the predicted rate stops decaying and settles near 0.072 while the true rate at
-  long silence is 0.0153; because silence accumulates, that region holds 49.9% of holdout
-  cells against 7.7% of calibration cells, so 54% of the excess comes from it.
-- **A bounded encoding removes it entirely**, returning `|bias|` to the no-AR baseline or
-  below on both panels.
-
-They disagree on what the AR channels then *buy*, which is worth knowing before assuming
-the features earn their place. On electronics the bounded arms improve ranking sharply over
-no AR features at all (0.267 vs 0.027); on CDNOW they do not (0.438 vs 0.437), because the
-target's own history already ranks that panel well. The gain there is confined to MAPE
-(22.0 vs 24.1).
-
-**Choose the deepest bin against the calibration window, not by copying a number.** The
-losing CDNOW arm is instructive: K=32 on a 39-period window leaves only **3.5%** of
-calibration cells beyond the deepest bin, while **68.9%** of holdout cells fall there — the
-same sparsity that breaks the unbounded counters, reproduced inside a nominally bounded
-encoding. The arms that won leave 26.6% (electronics K=52) and 33.7% (CDNOW K=16) of
-calibration cells beyond the deepest threshold. `check_arm_depth` in the ablation script
-rejects only the degenerate case `K >= T_CAL`, where the flag is an exact duplicate of
-`has_transacted_before` in calibration; the sparser failure above it is a judgement the
-caller still has to make.
-
-`transaction_rate`, `has_transacted_before` and `active_in_last_<K>_periods` are bounded and
-stationary, and carry much of the same information: a set of nested
-`active_in_last_<K>_periods` flags is a bounded step encoding of exactly the silence the
-recency counter measures. Each flag takes only 0 or 1 and both values occur in calibration,
-so however far the counter runs in the holdout the model reads an input it was fitted on —
-gaps of 87 and 200 periods produce the identical all-zero vector. What is given up is
-resolution past the deepest threshold, where the true rate is already flat.
-`tests/test_ar_feature_support.py` pins the input-side half of this.
-
-Standardisation (§5) does **not** rescue an unbounded counter. The mean and standard
-deviation are fitted on the calibration window, so a counter still climbing through the
-holdout still climbs after the transform — from a recentred origin, at a rescaled rate,
-but out of the range the weights were trained on all the same. What standardisation does
-neutralise is *scale*: an unbounded channel no longer dominates the shared covariate
-projection merely for being measured in larger units. So the case for preferring a
-bounded feature is extrapolation alone, which is a judgement about the length of your
-holdout rather than about the architecture. It does, however, set the *units* that
-judgement is made in, which is why the distance column above is measured in calibration
-standard deviations rather than in periods.
-
-**Where else this failure is known.** Nothing above is specific to customer-base analysis.
-The general statement is that a fitted model holds no evidence about a region its inputs
-never covered during training, and a window-capped counter guarantees the holdout lands in
-exactly that region. It is worth separating from *covariate shift* in the usual sense
-(Shimodaira, 2000, *Journal of Statistical Planning and Inference* 90(2), 227–244,
-[doi:10.1016/S0378-3758(00)00115-4](https://doi.org/10.1016/S0378-3758(00)00115-4)), where
-the input distribution moves but the two supports still overlap, so reweighting the
-training likelihood can repair the fit. Here the supports are nearly disjoint — 88.8% of
-tenure cells sit above *every* calibration value — and there is nothing to reweight.
-
-What a model does in that region depends on the architecture, and neither answer is good:
-
-- **Neural.** Xu, Zhang, Li, Du, Kawarabayashi & Jegelka (2021), ["How Neural Networks
-  Extrapolate: From Feedforward to Graph Neural Networks"](https://arxiv.org/abs/2009.11848),
-  ICLR 2021, prove that "ReLU MLPs quickly converge to linear functions along any direction
-  from the origin". A network therefore does not go quiet past its training range; it
-  continues along whatever slope the sparse tail of the training data implied, and does so
-  confidently. That is the measured failure above: under teacher forcing the predicted rate
-  stops decaying with silence and settles near five times the true long-silence rate. The
-  theorem is stated for ReLU MLPs; the models here are not MLPs, but a numeric channel
-  reaches the stack through a *linear* map either way — the shared `covariate_proj` of
-  `ProjectedEmbedder`, or the model's own `input_projection` where `ValendinEmbedder`
-  concatenates the raw value — so the first thing done to an out-of-range value is to
-  multiply it by a fitted weight.
-- **Trees.** A regression tree is piecewise constant: beyond the outermost split its
-  prediction is the mean of that terminal region, by construction (Hastie, Tibshirani &
-  Friedman, *The Elements of Statistical Learning*, 2nd ed., 2009, §9.2). It cannot
-  extrapolate a trend at all. This is why the standing applied-forecasting advice is never
-  to hand a raw time index to a gradient-boosted model.
-
-**The remedy is old.** Differencing a series to stationarity before fitting is this same
-correction, and it is the first step of the Box–Jenkins procedure (Box & Jenkins, 1970,
-*Time Series Analysis: Forecasting and Control*, Holden-Day): make the input's distribution
-the same in-sample and out-of-sample, then fit. Replacing a level with a rate
-(`transaction_rate`) or with a bounded step encoding (nested `active_in_last_<K>_periods`)
-is the same move in a different coordinate. The preprocessing guidelines in Hewamalage,
-Bergmeir & Bandara (2021), ["Recurrent Neural Networks for Time Series Forecasting: Current
-status and future directions"](https://arxiv.org/abs/1909.00590), *IJF* 37(1), 388–427, are
-the modern restatement for RNN forecasters.
-
-In production ML the symptom is catalogued as **training–serving skew** (Zinkevich, ["Rules
-of Machine Learning"](https://developers.google.com/machine-learning/guides/rules-of-ml),
-rule 29 onward), and the standard defence is precisely the escape-fraction table above:
-record the range each feature took in training, then check the served values against it.
-Breck, Polyzotis, Whang, Roy & Zinkevich (2019), ["Data Validation for Machine
-Learning"](https://mlsys.org/Conferences/2019/doc/2019/167.pdf), MLSys, describe the
-schema-based form of that check as shipped in TensorFlow Data Validation. Reading the
-escape fractions before choosing `ar_features` is the same discipline applied at design
-time rather than in monitoring.
-
-**The contrast with this package's own benchmark is the sharpest argument for the bounded
-encoding.** Pareto/NBD conditions on the *same three quantities* — recency `t_x`, frequency
-`x` and observation age `T` (Schmittlein, Morrison & Colombo, 1987, *Management Science*
-33(1), 1–24, [doi:10.1287/mnsc.33.1.1](https://doi.org/10.1287/mnsc.33.1.1)) — and suffers
-none of this. Its likelihood encodes the decay analytically, so an age beyond anything
-observed is evaluated by the formula rather than inferred from neighbouring examples. A
-classifier has to learn that shape from cells, and past the calibration window there are
-none to learn it from. The quantities are not the problem; unbounded *encodings* of them
-are.
-
-**Adding a new AR feature.** Extend the running state in `_base_states` (the vectorised
-`(N, T)` precompute), mirror the increment in `ARFeatureState.update` (the per-step
-rollout), add a branch in `_render` and a name in `parse_ar_feature`. The three must stay
-consistent — `tests/test_ar_features.py` asserts the precompute and the incremental path
-produce identical columns, which is the test to extend alongside.
-
-### The frozen kind: behavioural clusters
-
-`PanelConfig.cluster_features` declares a **behavioural cluster**: customers are
-partitioned by how they behaved over the calibration window, and each customer's group
-index becomes a channel. One name is supported, `kmeans_<K>` (`K ≥ 2`), and the name is
-also the column name — so `cluster_features=("kmeans_8",)` puts `kmeans_8` in `seq_cols`
-and an archived `config.json` records the algorithm and K without a lookup table.
-
-Customers are clustered on the **Pareto/NBD sufficient statistics** read at the last
-calibration period — recency `t_x`, frequency `x`, observation age `T` — standardised,
-then partitioned by k-means. That triple is not an arbitrary summary: it is what the
-Pareto/NBD likelihood conditions on, and it is what `grids/seasonal_4x4x10_ar.py` already
-hands the neural models as three continuous AR channels. Clustering on the same triple
-makes the two directly comparable — the same information reaching the model once as three
-real-valued channels and once as a single category.
-
-Three properties follow from the label being frozen, and each is asserted in
-`tests/test_cluster_features.py`:
-
-- **It needs no rollout machinery.** `simulate_recurrent_path` overwrites only the target
-  channel and the AR channels, so a static channel rides through every holdout step
-  untouched. There is nothing to advance and therefore nothing to get wrong — which is
-  the whole reason to prefer a frozen label over a re-clustered one.
-- **It cannot escape its support.** Unlike `period_since_first_transaction`, a cluster
-  index takes exactly the same `K` values in the holdout as in calibration, by
-  construction. The extrapolation failure catalogued above simply does not apply.
-- **It is deterministic.** `KMeans` runs with a fixed `random_state` and `n_init=10`, so
-  labels are a property of the panel rather than a per-study draw. This keeps
-  `base_seed + i` meaning what `studies.config` says it means — the Optuna sampler and the
-  Monte Carlo forecast, nothing else — instead of hiding a second variance component
-  inside a suite that reports across-study SD.
-
-**The label is embedded automatically**, with cardinality pinned to `K`. This is not the
-caller's choice as it is for an AR feature: a group index is categorical by definition,
-and omitting it from `embedded_cols` would send it through `standardize_covariates` into
-a z-score, imposing an ordering the labels do not have — silently, since no shape check
-can catch it.
-
-**One deviation is deliberate.** The label is fitted on the *full* calibration window,
-which includes the temporal validation window (ADR-0001) that early stopping later scores
-on, so it has "seen" those periods. Every other calibration-derived quantity uses that
-same window — `resolve_embedded_cols` sizes static cardinalities off it, Pareto/NBD is
-fitted on it, the ADR-0008 refit trains on it — and a label computed on a different window
-than all of them would be a subtler inconsistency than the bias it avoids. The bias is
-bounded: an unsupervised 3-feature partition reveals nothing about the target beyond what
-the model already reads in those same periods.
-
-What the label does to a forecast is measured in the next subsection: on electronic_5y
-it lowers ranking for every model tried.
-
-### Both kinds measured on electronic_5y
-
-electronic_5y is the paper's electronics cohort at trip level on Valendin et al.'s split:
-3,755 households, 260 calibration weeks (the last 52 are the validation window) and a
-52-week holdout from 2003-12-02, 2,153 holdout transactions, 99.0% zero cells, 6 count
-classes (`docs/benchmarks-real-panels.md`, "Pareto/NBD on electronic_5y"). It is a
-different panel from the 829-household `electronics` panel measured above, with a
-calibration window two and a half times as long. All numbers below are recomputed from the
-stored forecasts by `.scratch/feature-engineering-5y/effects_5y.py`, which writes
-`.scratch/feature-engineering-5y/results/per_forecast.csv`, `cells.csv`, `effects.csv` and
-`input_support.csv` beside it, and by `.scratch/feature-engineering-5y/lstm_vs_pareto.py`.
-
-**How claims are made here.** `docs/statistical-protocol.md`, computed by
-`panelclv.evaluation.effects.effect`:
-
-- A cell is the mean over its 20 studies with a **95% percentile-bootstrap interval**
-  (10,000 resamples). An effect is Δ = mean(B) − mean(A) with its 95% interval, each
-  condition resampled separately: training is unseeded, so studies are independent
-  replications even though replication *r* seeds both cells' Monte Carlo forecast from
-  the same value.
-- An effect is **supported when its interval excludes zero**; supported entries are
-  bold. An interval containing zero is "no clear difference at n = 20", never "no
-  effect".
-- One metric per claim. **Spearman** (per-customer holdout totals) carries claims about
-  ranking customers, **aggregate MAPE** claims about level, |bias| is secondary. A claim
-  that a cell over-forecasts needs its mean-bias interval to exclude zero.
-- **Forecast CV** — std / mean of the per-customer predicted holdout totals — sits beside
-  Spearman and is diagnostic: Spearman says whether customers are ordered correctly, CV
-  whether the forecast separates them at all. CV near 0 is a collapse.
-- **RMSE on customer totals** is printed because it is the paper's metric, and supports no
-  claim. Its intervals and effects are shown as description.
-- The refit noise has not been measured on electronic_5y; the `electronics` figures (MAPE
-  3.63, |bias| 5.94, Spearman 0.0105) come from another panel and are quoted only as a
-  borrowed sense of magnitude, never as a threshold.
-- **Pareto/NBD is 20 seeded MCMC fits** on the same cohort and windows, a replicated
-  condition like any cell, and every neural cell is compared with it by the independent
-  bootstrap.
-- Every result holds for electronic_5y. Where it disagrees with another panel, that is
-  heterogeneity, not a claim about panels in general.
-
-The ablation tables earlier in this section came before this standard and have no intervals.
-Under it they are descriptive.
-
-#### The input side: the long window shrinks the escape, and K = 52 is well populated
-
-Model: none — this is a property of the panel, a census of every cell rather than a
-sample, so it has no interval. Features computed from the **true** counts in both windows,
-on the benchmark's cohort (`scripts/run_epoch_floor_5y.py`, `build_data`), in the same way
-as `scripts/measure_ar_support.py`:
-
-| feature | escapes calibration range | z past the ceiling |
+| Feature | Holdout cells outside the calibration range | Worst cell, calibration sd past the max |
 | --- | ---: | ---: |
-| `period_since_first_transaction` | 60.6% | 0.70 |
-| `period_since_last_transaction` | 16.3% | 0.84 |
-| `cumulative_transactions` | 0.03% | 3.14 |
-| `transaction_rate`, `has_transacted_before`, `active_in_last_{32,52}_periods` | 0% | — |
+| `period_since_first_transaction` | 88.8% | 1.74 |
+| `period_since_last_transaction` | 37.7% | 1.90 |
+| `cumulative_transactions` | 0.04% | 0.64 (9.19 on CDNOW) |
+| bounded features | 0% | — |
 
-| share of cells after a customer's first purchase whose silence is ≥ K | calibration | holdout |
-| --- | ---: | ---: |
-| K = 32 | 65.4% | 79.7% |
-| K = 52 (the deepest flag of `ar_bounded_52`) | 51.5% | 71.7% |
+A network does not go quiet past its training range; it continues along its fitted
+slope (Xu et al., ICLR 2021, [arXiv:2009.11848](https://arxiv.org/abs/2009.11848)).
+Unlike ordinary covariate shift (Shimodaira 2000), the supports barely overlap, so
+nothing can be reweighted. Standardisation (§6) rescales a counter but does not stop it
+climbing. Pareto/NBD conditions on the same `(t_x, x, T)` without trouble because its
+likelihood encodes the decay analytically. **The information is right; an unbounded
+encoding of it is not usable in a rollout.**
 
-- The window-capped clocks still escape, but less often and less far than on the
-  104-week `electronics` panel (tenure 88.8% → 60.6%, recency 37.7% → 16.3%, both within
-  one calibration sd of the ceiling). A calibration window of 260 weeks leaves less of the
-  holdout outside it.
-- `cumulative_transactions` repeats the CDNOW pattern: it escapes rarely (0.03%) but
-  3.1 z past the ceiling.
-- The deepest flag is well populated: half of all post-first-purchase calibration cells
-  already lie past 52 weeks of silence. That is the opposite of the failed CDNOW K = 32
-  arm (3.5%), and more than either winning arm on the earlier panels (26.6%, 33.7%).
-- The unbounded counters were **not** trained on electronic_5y, so this table says only
-  that the precondition for their failure is weaker here. It does not say how they would
-  forecast.
+There are two ways to keep a clock usable:
+- **Collapse the tail** onto a value calibration contains (the nested flags): safe, but
+  every gap past the deepest bin looks the same.
+- **Shorten the distance** travelled outside (log, saturating, ratio): keeps resolution.
 
-#### The forecasts: three models × three epoch rules × three inputs
+The escape fraction cannot rank two encodings of one clock, because it is invariant to
+order-preserving transforms. That is why the second route was specified separately
+(`.scratch/ar-encoding-support/spec.md`).
 
-Setting shared by every table below. Scripts: `scripts/run_real_panel_benchmarks.py
---calibration 5y` (the `searched` LSTM row), `scripts/run_epoch_floor_5y.py`,
-`scripts/run_epoch_floor_features_5y.py` and `scripts/run_attention_models_5y.py`.
-Suites: `Studies/{real_panel_benchmarks,epoch_floor,attention}_cal5y__*`.
+### 4.3 The encodings tested, and why
 
-- **Inputs.** The baseline for every model (input "none") is the count, `Embedding(6, 3)`,
-  and the calendar week `dayofyear // 7` capped at 51, `Embedding(52, 8)`, both through the
-  `valendin` embedder. There are no static covariates and no continuous calendar columns.
-  Each other row adds **exactly one** input to that baseline:
-  - `ar_bounded_52`: `active_in_last_{2,4,8,16,32,52}_periods` +
-    `has_transacted_before`, seven 0/1 channels concatenated raw. They are recomputed from
-    the sampled path at every holdout step.
-  - `kmeans_8`: one static label per customer, k-means with K = 8 on (t_x, x, T) at the end
-    of calibration, embedded with 8 classes.
-- **Epoch rules.** In `searched`, each study runs its own 100-trial Optuna search, input
-  "none" only. `nofloor` pins the least-biased `searched` study's hyperparameters, runs
-  one trial, and keeps the best-validation epoch. `from20` and `from30` do the same but
-  keep only weights from epoch 20 or 30 on (`select_from_epoch`). Every rule uses patience
-  7, at most 100 epochs, the ADR-0008 refit and 500 Monte Carlo paths.
-- **Cells.** 20 studies each, seeds `BASE_SEED + r`, 600 forecasts in all.
-- **Pareto/NBD reference** (20 seeded MCMC fits, same cohort, mean): RMSE 1.228, bias
-  −16.6%, MAPE 27.7, Spearman 0.395, forecast CV 1.40.
+Each arm is a fixed `ar_features` tuple. Every neural arm also carries the embedded
+target count.
 
-Each metric is the mean [95% percentile-bootstrap interval] over 20 studies. The
-Pareto/NBD row that closes each table repeats the reference above, with its interval over
-its 20 fits.
-
-**LSTM.** Hidden 128, dense 128, dropout 0, learning rate 0.002195, batch 32, weight decay 0,
-pinned from `searched` r13. With input "none" this is the frozen `ValendinLSTM` benchmark.
-With an added input it is `models.MultinomialLSTMModel` built in the benchmark's shape.
-`docs/benchmarks-real-panels.md` describes that shape as the same parameter shapes and
-forward pass, so within this model a none → input difference also crosses from one
-implementation to the other.
-
-| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | 1.163 [1.159, 1.168] | +13.8 [+9.3, +18.8] | 20.5 [17.9, 23.7] | 0.405 [0.404, 0.406] | 1.27 [1.24, 1.31] |
-| `nofloor` | none | 1.178 [1.164, 1.198] | +13.2 [+6.7, +20.8] | 21.5 [17.6, 27.3] | 0.402 [0.399, 0.404] | 1.24 [1.17, 1.29] |
-| `nofloor` | `ar_bounded_52` | 1.183 [1.174, 1.193] | +8.7 [+5.1, +12.1] | 17.5 [16.6, 18.6] | 0.399 [0.396, 0.402] | 1.14 [1.10, 1.17] |
-| `nofloor` | `kmeans_8` | 1.279 [1.268, 1.289] | +9.0 [+4.9, +13.5] | 18.5 [16.4, 21.0] | 0.358 [0.352, 0.364] | 1.62 [1.56, 1.68] |
-| `from20` | none | 1.159 [1.154, 1.164] | +10.2 [+7.1, +13.4] | 17.8 [16.6, 19.3] | 0.403 [0.400, 0.405] | 1.30 [1.27, 1.33] |
-| `from20` | `ar_bounded_52` | 1.154 [1.146, 1.161] | +13.5 [+10.5, +16.7] | 19.5 [17.9, 21.3] | 0.401 [0.399, 0.403] | 1.28 [1.24, 1.32] |
-| `from20` | `kmeans_8` | 1.270 [1.261, 1.279] | +12.4 [+9.0, +15.9] | 18.7 [17.0, 20.6] | 0.354 [0.349, 0.359] | 1.63 [1.58, 1.68] |
-| `from30` | none | 1.157 [1.151, 1.163] | +12.7 [+9.5, +15.7] | 19.4 [17.9, 20.8] | 0.402 [0.399, 0.405] | 1.31 [1.28, 1.34] |
-| `from30` | `ar_bounded_52` | 1.157 [1.149, 1.165] | +10.0 [+7.1, +13.1] | 18.4 [17.2, 19.9] | 0.400 [0.397, 0.402] | 1.23 [1.19, 1.26] |
-| `from30` | `kmeans_8` | 1.266 [1.257, 1.276] | +11.5 [+7.6, +15.7] | 18.3 [16.1, 20.9] | 0.351 [0.344, 0.357] | 1.66 [1.59, 1.72] |
-| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
-
-**LSTMAttention.** `models.MultinomialLSTMAttentionModel`: an LSTM whose head also reads
-single-head causal attention over its own past outputs. Hidden 64, dense 64, dropout 0.007,
-learning rate 0.0025, batch 32, weight decay 0, pinned from `searched` r17.
-
-| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | 1.208 [1.205, 1.213] | +16.0 [+11.2, +21.4] | 21.4 [18.2, 25.3] | 0.403 [0.402, 0.405] | 1.07 [1.05, 1.10] |
-| `nofloor` | none | 1.205 [1.201, 1.210] | +14.1 [+10.4, +18.0] | 19.6 [17.5, 22.2] | 0.399 [0.397, 0.401] | 1.06 [1.03, 1.10] |
-| `nofloor` | `ar_bounded_52` | 1.221 [1.217, 1.224] | +9.1 [+4.7, +13.9] | 18.3 [16.1, 20.8] | 0.399 [0.397, 0.400] | 1.09 [1.06, 1.11] |
-| `nofloor` | `kmeans_8` | 1.294 [1.287, 1.300] | +15.7 [+12.9, +18.6] | 20.2 [18.4, 22.1] | 0.366 [0.362, 0.369] | 1.51 [1.48, 1.55] |
-| `from20` | none | 1.199 [1.193, 1.203] | +14.8 [+11.2, +18.3] | 20.1 [18.2, 22.4] | 0.400 [0.398, 0.403] | 1.13 [1.10, 1.16] |
-| `from20` | `ar_bounded_52` | 1.208 [1.204, 1.211] | +9.3 [+5.7, +13.1] | 17.6 [16.0, 19.6] | 0.401 [0.399, 0.403] | 1.16 [1.14, 1.18] |
-| `from20` | `kmeans_8` | 1.283 [1.276, 1.290] | +13.7 [+10.6, +16.9] | 19.1 [17.3, 20.9] | 0.370 [0.369, 0.372] | 1.52 [1.49, 1.55] |
-| `from30` | none | 1.200 [1.195, 1.204] | +10.8 [+7.8, +13.6] | 18.1 [17.1, 19.3] | 0.400 [0.398, 0.403] | 1.17 [1.14, 1.19] |
-| `from30` | `ar_bounded_52` | 1.202 [1.196, 1.207] | +9.3 [+7.2, +11.6] | 17.0 [16.1, 18.0] | 0.402 [0.400, 0.404] | 1.18 [1.16, 1.20] |
-| `from30` | `kmeans_8` | 1.289 [1.282, 1.296] | +15.5 [+12.5, +18.4] | 19.9 [17.9, 21.9] | 0.369 [0.366, 0.372] | 1.52 [1.48, 1.55] |
-| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
-
-**Transformer.** `models.MultinomialTransformerModel`, forecast through the key/value
-cache. d_model 64, 4 heads, 3 layers, dropout 0.145, learning rate 0.0027, batch 32, weight
-decay 0, pinned from `searched` r08. At +20.1% bias, r08 was the least biased of the 20
-searched studies.
-
-| rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | 1.325 [1.279, 1.377] | +51.7 [+42.0, +62.1] | 54.2 [45.1, 64.0] | 0.400 [0.398, 0.402] | 1.33 [1.28, 1.37] |
-| `nofloor` | none | 1.290 [1.268, 1.314] | +34.1 [+25.3, +42.8] | 43.5 [37.1, 49.9] | 0.396 [0.395, 0.398] | 1.32 [1.28, 1.35] |
-| `nofloor` | `ar_bounded_52` | 1.257 [1.238, 1.282] | +12.5 [+4.1, +20.8] | 31.5 [27.4, 35.9] | 0.401 [0.400, 0.402] | 1.28 [1.21, 1.37] |
-| `nofloor` | `kmeans_8` | 1.330 [1.316, 1.346] | +16.4 [+11.9, +21.2] | 32.2 [28.4, 36.5] | 0.347 [0.342, 0.351] | 1.62 [1.59, 1.65] |
-| `from20` | none | 1.298 [1.274, 1.326] | +39.8 [+32.8, +46.7] | 44.4 [38.8, 50.1] | 0.396 [0.393, 0.398] | 1.32 [1.29, 1.36] |
-| `from20` | `ar_bounded_52` | 1.251 [1.239, 1.265] | +13.7 [+8.8, +19.1] | 24.2 [21.2, 27.6] | 0.399 [0.398, 0.400] | 1.27 [1.22, 1.31] |
-| `from20` | `kmeans_8` | 1.314 [1.305, 1.324] | +11.6 [+8.0, +15.3] | 26.2 [23.8, 28.8] | 0.349 [0.345, 0.352] | 1.67 [1.63, 1.70] |
-| `from30` | none | 1.294 [1.275, 1.315] | +40.1 [+32.2, +48.0] | 44.0 [37.4, 50.9] | 0.396 [0.394, 0.399] | 1.31 [1.28, 1.34] |
-| `from30` | `ar_bounded_52` | 1.246 [1.240, 1.251] | +12.5 [+8.9, +16.3] | 21.7 [19.7, 24.0] | 0.397 [0.396, 0.399] | 1.24 [1.20, 1.28] |
-| `from30` | `kmeans_8` | 1.306 [1.295, 1.318] | +10.6 [+6.7, +14.7] | 24.4 [22.1, 27.0] | 0.352 [0.349, 0.354] | 1.69 [1.66, 1.73] |
-| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
-
-**Every one of the 30 cells over-forecasts, supported.** The lowest lower bound of any
-mean-bias interval is +4.1% (Transformer, `ar_bounded_52`, `nofloor`). Neither input,
-under any epoch rule and for any model, brings a cell's mean down to zero. Pareto/NBD
-under-forecasts (−16.6%, −16.9 to −16.3), and every neural cell's mean bias is supported
-above it, by +25.3 to +68.2 points (`lstm_vs_pareto.py`, all three models).
-
-#### The LSTM against Pareto/NBD
-
-Each LSTM cell's 20 studies against Pareto/NBD's 20 seeded fits: Δ = mean(cell) −
-mean(Pareto/NBD), 95% percentile-bootstrap interval, independent, n = 20 / 20. Negative Δ
-is better for RMSE, |bias| and MAPE; positive Δ is better for Spearman; signed bias says
-which way the miss is. Bold: supported. Script:
-`.scratch/feature-engineering-5y/lstm_vs_pareto.py`; results, with the same comparison for
-LSTMAttention and the Transformer, in
-`.scratch/feature-engineering-5y/results/lstm_vs_pareto.csv`.
-
-| rule | input | Δ RMSE (customer total) | Δ \|bias\| | Δ MAPE | Δ Spearman | Δ bias % |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | **−0.065 [−0.070, −0.060]** | −1.7 [−5.6, +2.7] | **−7.2 [−9.8, −4.0]** | **+0.010 [+0.009, +0.011]** | **+30.4 [+25.8, +35.3]** |
-| `nofloor` | none | **−0.050 [−0.065, −0.031]** | −1.1 [−6.3, +5.8] | **−6.2 [−10.1, −0.5]** | **+0.007 [+0.004, +0.009]** | **+29.7 [+23.2, +37.4]** |
-| `nofloor` | `ar_bounded_52` | **−0.045 [−0.054, −0.036]** | **−6.3 [−8.8, −3.7]** | **−10.2 [−11.1, −9.1]** | **+0.004 [+0.000, +0.007]** | **+25.3 [+21.6, +28.7]** |
-| `nofloor` | `kmeans_8` | **+0.051 [+0.040, +0.061]** | **−7.2 [−11.2, −2.9]** | **−9.2 [−11.3, −6.8]** | **−0.037 [−0.043, −0.031]** | **+25.6 [+21.5, +30.1]** |
-| `from20` | none | **−0.069 [−0.074, −0.064]** | **−5.8 [−8.5, −2.9]** | **−9.9 [−11.2, −8.4]** | **+0.008 [+0.005, +0.010]** | **+26.8 [+23.6, +30.0]** |
-| `from20` | `ar_bounded_52` | **−0.074 [−0.082, −0.067]** | −3.0 [−6.1, +0.2] | **−8.2 [−9.8, −6.4]** | **+0.006 [+0.004, +0.009]** | **+30.1 [+27.0, +33.3]** |
-| `from20` | `kmeans_8` | **+0.042 [+0.032, +0.051]** | **−4.1 [−7.5, −0.6]** | **−9.0 [−10.7, −7.1]** | **−0.041 [−0.046, −0.036]** | **+29.0 [+25.6, +32.5]** |
-| `from30` | none | **−0.071 [−0.077, −0.065]** | **−3.8 [−7.0, −0.8]** | **−8.4 [−9.8, −6.9]** | **+0.007 [+0.004, +0.010]** | **+29.3 [+26.0, +32.3]** |
-| `from30` | `ar_bounded_52` | **−0.072 [−0.079, −0.063]** | **−6.4 [−9.3, −3.4]** | **−9.3 [−10.5, −7.8]** | **+0.005 [+0.002, +0.007]** | **+26.6 [+23.7, +29.7]** |
-| `from30` | `kmeans_8` | **+0.038 [+0.029, +0.047]** | **−4.7 [−8.4, −0.7]** | **−9.4 [−11.7, −6.8]** | **−0.044 [−0.051, −0.038]** | **+28.0 [+24.1, +32.2]** |
-
-- **The searched LSTM beats Pareto/NBD on MAPE and Spearman, supported.** MAPE −7.2
-  (−9.8 to −4.0); the Spearman gain is small, +0.010 (+0.009 to +0.011), about the
-  borrowed refit noise.
-- **Without the k-means label, every LSTM cell beats Pareto/NBD on MAPE and on Spearman,
-  supported** — MAPE by 6.2 to 10.2 points, Spearman by +0.004 to +0.010, small. Its
-  customer-level RMSE is lower in every such cell too (descriptive).
-- **With the k-means label, the LSTM ranks customers worse than Pareto/NBD,** supported
-  under every rule (−0.037 to −0.044), and its customer-level RMSE is higher (descriptive);
-  its MAPE is still lower (−9.0 to −9.4).
-- **The LSTM misses the total by less than Pareto/NBD in 7 of the 10 cells** (|bias|
-  −3.8 to −7.2, supported), and shows no clear difference in the other three (`searched`
-  and `nofloor` without an input, `from20` with the flags). The two miss in opposite
-  directions: every LSTM cell over-forecasts relative to Pareto/NBD (signed Δ +25.3 to
-  +30.4), and Pareto/NBD under-forecasts by 16.6%.
-- This is one panel and one holdout year. Forecast CV is not compared, because neither
-  direction is better.
-
-#### What each input changes
-
-Effect of adding one input to the count + embedded week baseline, within one model and one
-epoch rule. It is Δ = mean(with input) − mean(without), with a 95% bootstrap interval,
-20 studies against 20. Negative Δ is better for MAPE, |bias| and RMSE; positive Δ is
-better for Spearman. The models, hyperparameters and inputs are those of the three tables
-above. Bold: supported.
-
-| model | rule | input added | Δ Spearman | Δ MAPE | Δ \|bias\| | Δ RMSE (customer total) | Δ forecast CV |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| LSTM | `nofloor` | `ar_bounded_52` | −0.003 [−0.007, +0.001] | −4.0 [−10.0, +0.1] | −5.2 [−12.7, +0.8] | +0.005 [−0.016, +0.023] | **−0.10 [−0.17, −0.03]** |
-| LSTM | `from20` | `ar_bounded_52` | −0.002 [−0.005, +0.002] | +1.7 [−0.4, +3.9] | +2.8 [−1.4, +7.0] | −0.005 [−0.014, +0.004] | −0.02 [−0.07, +0.03] |
-| LSTM | `from30` | `ar_bounded_52` | −0.002 [−0.006, +0.001] | −0.9 [−2.9, +1.1] | −2.6 [−6.8, +1.7] | −0.000 [−0.010, +0.010] | **−0.08 [−0.13, −0.04]** |
-| LSTMAttention | `nofloor` | `ar_bounded_52` | −0.000 [−0.002, +0.002] | −1.3 [−4.7, +2.0] | −3.9 [−9.5, +1.8] | **+0.016 [+0.010, +0.021]** | +0.03 [−0.02, +0.07] |
-| LSTMAttention | `from20` | `ar_bounded_52` | +0.001 [−0.003, +0.004] | −2.5 [−5.3, +0.2] | −4.8 [−9.6, +0.0] | **+0.009 [+0.003, +0.015]** | +0.03 [−0.01, +0.07] |
-| LSTMAttention | `from30` | `ar_bounded_52` | +0.002 [−0.002, +0.005] | −1.1 [−2.6, +0.4] | −1.9 [−5.1, +1.5] | +0.002 [−0.005, +0.009] | +0.01 [−0.02, +0.04] |
-| Transformer | `nofloor` | `ar_bounded_52` | **+0.005 [+0.003, +0.007]** | **−12.1 [−19.7, −4.5]** | **−15.2 [−25.3, −5.1]** | −0.033 [−0.064, +0.001] | −0.03 [−0.12, +0.06] |
-| Transformer | `from20` | `ar_bounded_52` | **+0.003 [+0.001, +0.006]** | **−20.2 [−26.7, −13.8]** | **−25.2 [−33.4, −16.8]** | **−0.047 [−0.077, −0.019]** | −0.06 [−0.11, +0.00] |
-| Transformer | `from30` | `ar_bounded_52` | +0.001 [−0.002, +0.003] | **−22.3 [−29.7, −15.5]** | **−27.3 [−36.2, −18.7]** | **−0.048 [−0.071, −0.028]** | **−0.07 [−0.12, −0.02]** |
-| LSTM | `nofloor` | `kmeans_8` | **−0.044 [−0.051, −0.037]** | −3.0 [−9.2, +1.8] | −6.1 [−14.3, +0.8] | **+0.100 [+0.079, +0.119]** | **+0.38 [+0.30, +0.47]** |
-| LSTM | `from20` | `kmeans_8` | **−0.049 [−0.055, −0.043]** | +0.9 [−1.4, +3.2] | +1.7 [−2.8, +6.1] | **+0.111 [+0.100, +0.121]** | **+0.33 [+0.27, +0.39]** |
-| LSTM | `from30` | `kmeans_8` | **−0.051 [−0.058, −0.044]** | −1.0 [−3.8, +1.9] | −0.9 [−5.7, +4.1] | **+0.109 [+0.098, +0.120]** | **+0.35 [+0.28, +0.42]** |
-| LSTMAttention | `nofloor` | `kmeans_8` | **−0.033 [−0.037, −0.029]** | +0.6 [−2.6, +3.5] | +1.6 [−3.2, +6.3] | **+0.088 [+0.081, +0.096]** | **+0.45 [+0.40, +0.49]** |
-| LSTMAttention | `from20` | `kmeans_8` | **−0.030 [−0.033, −0.027]** | −1.1 [−3.9, +1.5] | −1.1 [−5.8, +3.5] | **+0.084 [+0.075, +0.092]** | **+0.39 [+0.35, +0.43]** |
-| LSTMAttention | `from30` | `kmeans_8` | **−0.031 [−0.035, −0.027]** | +1.8 [−0.6, +4.0] | **+4.3 [+0.4, +8.2]** | **+0.089 [+0.081, +0.098]** | **+0.35 [+0.31, +0.39]** |
-| Transformer | `nofloor` | `kmeans_8` | **−0.050 [−0.055, −0.044]** | **−11.4 [−19.0, −3.8]** | **−17.7 [−27.6, −7.9]** | **+0.040 [+0.012, +0.067]** | **+0.30 [+0.26, +0.34]** |
-| Transformer | `from20` | `kmeans_8` | **−0.047 [−0.051, −0.043]** | **−18.2 [−24.5, −11.9]** | **−27.3 [−34.8, −19.6]** | +0.016 [−0.012, +0.043] | **+0.34 [+0.29, +0.39]** |
-| Transformer | `from30` | `kmeans_8` | **−0.045 [−0.048, −0.042]** | **−19.6 [−27.0, −12.5]** | **−28.3 [−37.1, −19.8]** | +0.012 [−0.012, +0.035] | **+0.38 [+0.34, +0.43]** |
-
-`effects.csv` also holds the direct `ar_bounded_52` → `kmeans_8` comparison. Its Spearman
-row is supported for all nine model × rule pairs, −0.031 to −0.055. Its MAPE row is not
-distinguishable in eight of nine; the exception is LSTMAttention `from30`, where the label
-is worse by +2.9 [+0.6, +5.1].
-
-**The bounded flags.**
-
-- **Transformer: they lower the level error under every epoch rule**, supported: MAPE
-  −12.1, −20.2 and −22.3, |bias| −15.2 to −27.3. Each is several times the borrowed
-  `electronics` refit noise. Its Spearman rises by +0.005 and +0.003 under `nofloor` and
-  `from20`, also supported, but that is below the borrowed refit noise of 0.0105, so the
-  change is small; under `from30` it is not distinguishable.
-- **LSTM and LSTMAttention: no supported change in Spearman, MAPE or |bias|** under any
-  rule. For both, the MAPE intervals reach from about −10 to +4, so a moderate gain or loss
-  is not ruled out at n = 20. What does move is descriptive. For the LSTM, CV falls under
-  `nofloor` and `from30`. For LSTMAttention, customer-level RMSE rises under `nofloor` and
-  `from20`, by 0.016 and 0.009.
-- **The flags narrow the Transformer's gap to the LSTM without closing it.** The effects
-  file has the model contrasts with the same inputs and rules. With input "none" the
-  Transformer's MAPE is worse than the LSTM's by +22.0, +26.6 and +24.6. With
-  `ar_bounded_52` it is worse by +13.9 [+9.7, +18.4], +4.7 [+1.1, +8.4] and +3.3
-  [+0.7, +5.9], still supported under every rule.
-- **This is not the gain seen on the 829-household `electronics` panel,** where the flags
-  took Spearman from 0.027 to 0.267 (the descriptive ablation table above). On
-  electronic_5y every model already ranks at 0.40 with count and week alone, and no model
-  gains on Spearman beyond +0.005. That fits CDNOW's pattern, where the history carried in
-  the count already ranks the panel, but the mechanism was not tested.
-
-**The cluster label.**
-
-- **It lowers ranking for every model under every rule**, supported: Spearman −0.044 to
-  −0.051 for the LSTM, −0.030 to −0.033 for LSTMAttention and −0.045 to −0.050 for the
-  Transformer, three to five times the borrowed refit noise. Every `kmeans_8` cell falls
-  from about 0.40 to 0.35–0.37, supported below Pareto/NBD's 0.395 for all three models
-  (Δ −0.025 to −0.048, `lstm_vs_pareto.py`).
-- **It is not a collapse.** Forecast CV *rises* by +0.30 to +0.45 in all nine cases,
-  supported. The label spreads the per-customer forecasts further apart and orders them
-  worse at the same time: it separates customers, but along its eight groups rather than
-  along what they go on to buy. That reading is an interpretation of the two numbers
-  together and has not been tested.
-- **For the Transformer it lowers the level error as much as the flags do.** MAPE −11.4
-  to −19.6 and |bias| −17.7 to −28.3, all supported, and the direct flags → label MAPE
-  contrast is not distinguishable under any rule. For the two LSTMs it makes no supported
-  difference to MAPE, and LSTMAttention's |bias| gets worse under `from30` (+4.3). So the
-  label buys the Transformer its level at a supported cost in ranking, which the flags do
-  not charge.
-- **The four earlier panels do not agree with this, and neither do they agree with each
-  other.** In `docs/insights-cluster-ablation.md` §5.1.1 (`ValendinLSTM`, 20 replications
-  a cell), adding the label raised Spearman on the 829-household `electronics` panel
-  (+0.283) and on multichannel (+0.182), both supported. On CDNOW (+0.039) and gift
-  (+0.010) the change was not distinguishable. Once the model was trained past its early
-  plateau, the label raised Spearman in all eight (panel, model) cells, by +0.023 to
-  +0.127. On the synthetic grid (`docs/insights-synthetic-grid.md`, claim 5) the label
-  hurt the level error of an LSTM without AR features at rates ≥ 0.10, and alongside the
-  flags from rate 0.05. On the panels where the label helped, the count-only model had
-  collapsed, with Spearman near 0. On electronic_5y it had not: CV is 1.1–1.3 and
-  Spearman 0.40. That difference is a candidate explanation and has not been tested.
-  This is heterogeneity between panels, and none of these results generalises across
-  them.
-
-**Which to carry on electronic_5y.** For the Transformer, `ar_bounded_52`: it gets the
-level gains the label gets without the label's loss in ranking. For the two LSTMs, none of
-this evidence favours adding either input. The flags are not distinguishable from no
-input, and the label costs ranking.
-
----
-
-## 5. Encoding: categorical embeddings and numeric standardisation
-
-`embedded_cols` declares **which columns are categorical**; everything else in `seq_cols`
-is treated as continuous. The spec is either a mapping `{col: int | "auto"}` or a plain
-list of names (all `"auto"`).
-
-Inside the model, the two paths are:
-
-- **Embedded columns** → `nn.Embedding(cardinality, √cardinality + 1)` → `LayerNorm` →
-  `Linear(→ embedding_dim)` → `LayerNorm`. The target's embedding is kept separate; all
-  other embeddings are **summed** into a context representation.
-- **Continuous columns** → concatenated → `Linear(n → embedding_dim)` → `LayerNorm`, then
-  added into the same context representation.
-
-The LSTM/Transformer input is `[context, target_embedding]` when any context exists, and
-the target embedding alone otherwise (so the minimum legal model is target-only,
-`F = 1`). The Transformer mirrors this encoder exactly; the two families differ in how
-history is carried, not in what a feature means.
-
-### Numeric channels are standardised, fitted on calibration
-
-Every channel that is **not** embedded is put on a common scale — mean 0, std 1 — by
-`standardize_covariates`, which runs after the reshape to `(N, T, F)` and before
-`samples` / `targets` are sliced. Two things are excluded, for different reasons:
-
-- everything in `embedded_cols`, because those are integer class indices cast with
-  `.long()` and used as embedding-table lookups; rescaling them would corrupt the lookup
-  outright;
-- `target_col`, excluded explicitly. A valid config always embeds it, so the first rule
-  would already cover it, but the explicit exclusion also protects the autoregressive
-  contract: `targets` are sliced straight out of `calibration` and have to stay integer
-  class indices for the cross-entropy head.
-
-**Why it is needed.** The models push every non-embedded column through *one* shared
-`Linear(n_covariates → embedding_dim)`, which computes `sum_k W_k · x_k` with all `W_k`
-drawn from the same initial distribution. Each column's contribution to that sum — and
-the gradient reaching its weights — therefore scales with its **raw magnitude**. Mixing
-`week_sin` (std ≈ 0.7) with `period_since_last_transaction` (std ≈ 27) hands the recency
-channel almost all of the pre-activation variance purely because it is measured in weeks
-rather than in a sine wave. The `LayerNorm` that follows cannot repair this: it
-normalises the *sum*, after the columns have already been mixed, so it fixes the output
-scale while leaving the drowned-out columns drowned out. Before the sum is the only place
-the imbalance can be corrected.
-
-**Fitted on calibration, applied to both windows.** The `{col: (mean, std)}` map is
-computed on the calibration window and returned as `covariate_stats`; the holdout is
-transformed with those same statistics, never with its own. Fitting on the holdout would
-leak its distribution into the forecast — the quiet kind of leakage this chapter exists
-for.
-
-**The rollout has to re-apply it.** The holdout tensor's declared covariates were
-standardised once, by `prepare_dataset`, along with the calibration window. The *derived*
-ones are the problem: `ARFeatureState` regenerates them in raw units at each step, so the
-simulator puts every recomputed AR value back through its `(mean, std)` before writing it
-into the step input. Skipping that would feed the model raw recency after warming it up on
-standardised recency — a silent unit mismatch no shape check can catch. A column missing
-from the map (an AR feature the caller chose to embed, or a dict from an older run) passes
-through with the identity `(0.0, 1.0)` rather than raising — see §6.
-
-### Cardinality resolution is role-aware
-
-`"auto"` cardinalities are inferred from the data, but **which window is read depends on
-the role** — this is where leakage would otherwise creep in:
-
-| Column | Inference window | Rationale |
+| Arm | Columns | Why it was tested |
 | --- | --- | --- |
-| target | `clip_target_upper + 1`, else calibration max + 1 | the head size is a modeling decision, not a data peek |
-| `time` / `known_future` | `max(calibration, holdout) + 1` | legitimate: those future values are *given*, not predicted |
-| static / everything else | calibration max + 1 | never peek at the holdout |
+| `no_ar` | — | Baseline: the model sees its own past counts only. |
+| `ar_unbounded` | `period_since_last_transaction`, `cumulative_transactions`, `period_since_first_transaction` | Pareto/NBD's own sufficient statistic `(t_x, x, T)`: hand the network exactly what the benchmark conditions on. Kept afterwards as the known-broken reference. |
+| `ar_bounded_K` | nested `active_in_last_{2,4,8,…,K}_periods` + `has_transacted_before` | The same silence information, collapsed past `K` so no holdout value leaves the fitted range. `active_in_last_1` is omitted because the target channel already carries it. |
+| `ar_log` | `log_period_since_last_transaction`, `cumulative_transactions`, `log_period_since_first_transaction` | The unbounded set with only the coordinate changed. Pareto/NBD's Lomax survival is linear in `log(1 + gap)`, so a network's linear extrapolation is the right shape there. Isolates the effect of `log1p`. |
+| `ar_saturating` | `saturating_recency_C_periods`, `transaction_rate`, `saturating_tenure_C_periods` | Both clocks bounded in [0, 1) rather than compressed, plus the bounded rate. |
+| `ar_ratio` | `recency_over_tenure`, `transaction_rate`, `saturating_tenure_C_periods`, `has_transacted_before` | The Pareto/NBD triple made bounded: `t_x/T`, `x/T` and a saturating `T`. It keeps the resolution the flags discard. `has_transacted_before` disambiguates the ratio's 0. |
+| `ar_bounded32ratio` | `ar_bounded_32` + `ar_ratio` | The flags and the ratio together, to test whether each set does its own job when combined. |
 
-Pinned integers are kept but validated to cover the values actually present in the
-relevant window, and a column whose inferred cardinality is 1 (constant in-window) raises
-rather than producing a degenerate embedding.
+`C` is about a quarter of the calibration window: 10 on CDNOW, 26 elsewhere.
 
-### The known-future drift warning
+**Choosing the deepest bin `K`.** Choose it against the calibration window, not by
+copying a number.
+- `check_arm_depth` refuses `K ≥ T_CAL`, where the flag duplicates
+  `has_transacted_before` in calibration.
+- A `K` close to `T_CAL` is also unsafe. On CDNOW, `K = 32` against 39 calibration
+  periods leaves 3.5% of calibration cells past the bin and 68.9% of holdout cells.
+- Depths used: 16 or 32 on CDNOW, 32 or 52 on electronics, 32 on gift, multichannel and
+  the synthetic grid, 52 on electronic_5y. A bare `ar_bounded` means `ar_bounded_32`,
+  except in `real_panel_arms` on CDNOW, where it means 16.
 
-Sizing a known-future embedding over both windows is safe, but there is a subtler failure:
-embedding **rows** for categories that appear *only* in the holdout are never touched by
-training, so at forecast time the model reads their random initialisation.
-`warn_known_future_drift` reports this up front, before any training, listing the offending
-column and values. It is scoped to *embedded* known-future columns on purpose — continuous
-known-future channels (`week_sin`, `year_idx`, …) are *expected* to take new values every
-period and have no table to leave untrained.
+**Adding a feature.** Extend `_base_states` (vectorised precompute) and
+`ARFeatureState.update` (rollout), add a branch in `_render` and a name in
+`parse_ar_feature`. `tests/test_ar_features.py` asserts the two paths agree.
 
----
+## 5. Behavioural cluster (`kmeans_<K>`)
 
-## 6. Leakage discipline: one primitive, two call sites
+**What it is.** Each customer's `(t_x, x, T)` at the last calibration period is
+standardised and partitioned by k-means (`KMeans(n_clusters=K, n_init=10,
+random_state=0)`). The group index becomes one channel, named after the feature
+(`kmeans_8` = K of 8). It is embedded automatically with cardinality `K`, since a group
+index has no order to standardise.
 
-The single most important implementation detail in this chapter.
+**Why it was tested.** It carries the same information as `ar_unbounded` (the Pareto/NBD
+triple), but as a single bounded, frozen category:
+- **No rollout machinery.** The simulator overwrites only the target and AR channels, so
+  the label rides through the holdout untouched.
+- **It cannot escape its support.** The holdout takes the same `K` values as calibration.
+- **It is deterministic.** It has a fixed `random_state`, so it adds no hidden variance
+  across studies.
 
-AR features are **not** computed over each customer's full series. That series spans the
-holdout, so recency/frequency/tenure would absorb activity from the forecast window — a
-model told "this customer purchases often" using purchases it is supposed to predict.
+The trade-off is that it cannot update when a simulated customer goes quiet.
 
-Instead:
+**How K was chosen.** It is declared, never fitted: there is no elbow, silhouette or gap
+statistic. K is also the width of an embedding table, so a larger K describes customers
+more finely but gives each group fewer customers to learn from. K is an arm, never an
+Optuna knob, so arms stay comparable. The ladder 4 / 8 / 16 was swept once (family F);
+everywhere else K = 8, the middle rung.
 
-1. In the panel, AR columns are created as **zero placeholders**, so the column-existence
-   and window-slicing checks pass.
-2. After the cohort filter and after target clipping, they are filled **on the calibration
-   window only**, per customer, in period order, from the *clipped* calibration target —
-   via `compute_ar_feature_columns`.
-3. The holdout's AR columns are **left at zero and never read**. During the rollout, an
-   `ARFeatureState` is seeded from the calibration target history and advanced one step at
-   a time with the **sampled** count, overwriting those channels in the input row before
-   each model call.
+**One deliberate deviation.** The label is fitted on the full calibration window, which
+includes the validation window that early stopping scores. Every other calibration-derived
+quantity uses that same window: cardinalities, Pareto/NBD and the ADR-0008 refit. Holdout
+scoring is clean. Whether selection is affected is experiment E2
+(`docs/model-selection.md`).
 
-Both paths — the vectorised training-time precompute and the incremental rollout state —
-are the same recurrence over the same five state variables, expressed twice for
-performance reasons and kept identical by construction (`_render` is shared) and by test.
-This is what makes the training distribution and the inference distribution of these
-features match.
+## 6. Encoding: embeddings and standardisation
 
-The rollout more generally, per step *t*:
+- **Embedded columns** (`embedded_cols`) → `nn.Embedding(card, √card + 1)` → LayerNorm →
+  Linear → LayerNorm. The target embedding is kept apart; the other embeddings are
+  summed into a context vector.
+- **Continuous columns** → one shared `Linear(n → embedding_dim)` → LayerNorm, added into
+  the context.
+- **Standardisation.** Every non-embedded channel is set to mean 0, sd 1 by
+  `standardize_covariates`, fitted on calibration and applied to both windows
+  (`covariate_stats`). It is needed because the shared projection would otherwise let
+  the largest-unit channel (recency in weeks) dominate. The rollout re-applies the same
+  `(mean, std)` to every recomputed AR value.
+- **Cardinality by role.** For the target: `clip_target_upper + 1`. For time and known
+  future: the max over both windows (these values are given). For everything else: the
+  calibration max only. A constant column raises.
+- **Known-future drift.** `warn_known_future_drift` flags embedded known-future categories
+  that occur only in the holdout, whose embedding rows would never be trained.
 
-| Channel group | Source at rollout step *t* |
+## 7. Leakage discipline
+
+AR features are never computed over the full series, which spans the holdout.
+1. In the panel, AR columns are created as zero placeholders.
+2. After the cohort filter and target clipping, they are filled **on the calibration
+   window only** (`compute_ar_feature_columns`).
+3. The holdout's AR columns stay zero and are **never read**. The rollout seeds an
+   `ARFeatureState` from the calibration history and advances it with each sampled count.
+
+Both paths share `_render`, so the training and inference distributions match. At rollout
+step *t*:
+
+| Channel | Source |
 | --- | --- |
-| target | previous **sampled** class |
+| target | previous sampled class |
 | AR features | `ARFeatureState.update(sample)` |
-| time / known future / static | true holdout values (legitimately known) |
-| observed past | not present (dropped upstream) |
+| time / known future / static / cluster | true holdout values, legitimately known |
 
-The true holdout target is never fed to either model family.
+## 8. Target handling and cohort
 
----
+- **`clip_target_upper`** clips the training target only, and sets the head size. The
+  holdout stays unclipped for scoring. AR features are filled after clipping.
+- **`require_calibration_activity`** (on by default) keeps customers with a calibration
+  purchase, which is Valendin et al.'s cohort rule. It runs inside `prepare_dataset`, so
+  Pareto/NBD fits the same cohort.
 
-## 7. Target handling and cohort selection
+## 9. Feature selection as a hyperparameter
 
-Two panel-level operations sit alongside feature construction because they change what the
-features *describe*.
+`run_optuna_study(removable_features=[...])` toggles single columns or groups (e.g.
+`("week_sin", "week_cos")`). It works by slicing the built tensors (`select_features`),
+with `ar_features` filtered in lockstep. Each trial records `selected_features` /
+`dropped_features`. The search scores teacher-forced validation CE, which cannot see
+rollout drift, so it may keep an extrapolating channel. No study suite passes
+`removable_features`, so no suite can drop the feature under test.
 
-**Upper clipping (`clip_target_upper`).** Counts are clipped on the **training window
-only**; the holdout is left untouched so evaluation runs against real actuals. The clip
-sets the softmax head size (`clip_target_upper + 1` classes) and thereby the target
-embedding's cardinality — a cross-check that fires at config time if a pinned target
-cardinality is too small for the clip. Because AR features are filled *after* clipping,
-`cumulative_count` reflects the clipped counts, consistent with what the model can sample.
-The clip is invariant for the "transaction occurred" test (clipping never turns a positive
-into a zero), so recency/frequency/tenure are unaffected by it.
-
-**Cohort filter (`require_calibration_activity`, on by default).** Keeps only customers
-with at least one transaction during calibration — equivalently, first purchase ≤
-`training_end`. This reproduces the Valendin et al. cohort rule. Customers first seen in
-the holdout are unknown at forecast time and would otherwise present the model with an
-all-zero history. Crucially the filter is applied inside `prepare_dataset`, so the
-Pareto/NBD benchmark (which reads the returned `train_panel`) fits the **same cohort** as
-the neural models — the comparison stays fair.
-
----
-
-## 8. Feature selection as a tuned decision
-
-Which covariates to keep is a hyperparameter, not a prior belief. `run_optuna_study`
-accepts `removable_features`, a list where each entry is either a single column (its own
-on/off toggle) or a **group toggled as a unit** — e.g. `("week_sin", "week_cos")`, since
-half a cyclical pair is meaningless.
-
-Per trial, the sampled drop-set is applied by `select_features`, which is pure column
-slicing on the already-built tensors: it re-indexes the feature axis of
-`calibration`/`holdout`, rebuilds `samples`/`targets`/`target_idx`, filters
-`embedded_cols`, and — importantly — filters `ar_features` in lockstep, so a dropped AR
-column cannot be looked up by the rollout and raise. No data re-prep happens per trial.
-The target is never removable.
-
-Each trial records `selected_features` / `dropped_features` as user attributes, so the
-winning feature set is recoverable after the fact with `select_features_for_trial` — which
-matters because a checkpoint trained on a sliced layout will not load into a full-feature
-model.
-
-Selection interacts with feature engineering directly, and not in your favour: trials are
-scored on `val_loss` — teacher-forced next-step cross-entropy — which is blind to the
-rollout, so it can happily keep an extrapolating trend feature and drop the
-seasonal/recency signals. Nothing in tuning penalises drift over a long horizon
-(ADR-0003, retired). If the feature set includes unbounded or out-of-range channels,
-that is a judgement you have to make yourself.
-
----
-
-## 9. Worked configurations
-
-**Minimal — target plus a raw weekly index.** No engineered calendar features, no
-covariates, no embeddings beyond the target:
-
-```python
-cfg = PanelConfig(
-    id_col="Id", target_col="Transactions", frequency="weekly",
-    time_cols=("year", "week"),
-    training_start="1999-01-01", training_end="2000-12-31",
-    validation_start="2000-07-01",
-    holdout_start="2001-01-01", holdout_end="2001-12-31",
-    time=("week",),                       # already in the panel; no flag engineers it
-    clip_target_upper=6,
-    embedded_cols={"Transactions": "auto"},
-)
-# seq_cols → ["Transactions", "week"]
-```
-
-**Full — calendar + covariates + leak-free RFM signals:**
+## 10. Configuration example
 
 ```python
 cfg = PanelConfig(
     id_col="Id", target_col="Transactions", frequency="weekly",
     time_cols=("year", "week"), periods_per_year=52,
     training_start="1999-01-01", training_end="2000-12-31",
-    validation_start="2000-07-01",
+    validation_start="2000-01-01",
     holdout_start="2001-01-01", holdout_end="2001-12-31",
-    known_future=("year_idx", "high.season"),
-    static=("Gender", "Income"),
-    time_features={"add_year_idx": True, "add_week_sin_cos": True},
-    ar_features=("period_since_last_transaction",
-                 "active_in_last_4_periods",
-                 "transaction_rate"),
+    known_future=("high.season",), static=("Gender", "Income"),
+    time_features={"add_week_sin_cos": True},
+    ar_features=("active_in_last_2_periods", "active_in_last_4_periods",
+                 "active_in_last_8_periods", "active_in_last_16_periods",
+                 "active_in_last_32_periods", "has_transacted_before"),
+    cluster_features=("kmeans_8",),
     clip_target_upper=6,
     embedded_cols={"Transactions": "auto", "Gender": "auto", "high.season": "auto"},
 )
-# seq_cols → ["Transactions",                       # target
-#             "week_sin", "week_cos",               # time (auto-assigned by the flag)
-#             "year_idx", "high.season",            # known future
-#             "Gender", "Income",                   # static
-#             "period_since_last_transaction",      # ar features
-#             "active_in_last_4_periods",
-#             "transaction_rate"]
 ```
 
-Paired with a tuning run that is allowed to question the risky channels:
+## 11. Failure modes
 
-```python
-study = run_optuna_study(
-    model_type="lstm",
-    data_builder=make_data_builder(data_full),
-    search_space={...},
-    removable_features=[("week_sin", "week_cos"), "year_idx",
-                        "Gender", "Income", "transaction_rate"],
-    n_trials=40,
-)
-```
+These fail at config or `prepare_dataset` time, before any training:
+- an unknown `ar_features` or `time_features` name, or `active_in_last_K` with `K < 1`
+- date windows out of order, or a validation window left empty
+- an AR name colliding with a panel column
+- missing or non-numeric columns, or NaN in a selected column
+- an empty window or an empty cohort
+- ragged or misordered customers
+- a pinned cardinality too small, or a constant `"auto"` column
+- `clip_target_upper` at or above the pinned target cardinality
 
----
+These only warn:
+- dropped `observed_past` columns
+- known-future embedding drift
 
-## 10. Validation and failure modes
-
-Feature construction fails **early and loudly**, before any tensor is built or any epoch
-is run. The checks, in the order they fire:
-
-- unknown `ar_features` name, or an `active_in_last_K` with `K < 1` → at `PanelConfig`
-  construction;
-- unknown `time_features` flag (typo) → error; a flag the frequency cannot produce →
-  dropped with a warning;
-- date-window ordering (`training_start < validation_start ≤ training_end <
-  holdout_start`) → at construction; re-checked against the real calendar so a
-  `validation_start` leaving zero training or zero validation periods raises;
-- AR feature name colliding with an existing panel column → error;
-- missing `id_col` / `target_col` / schema columns; non-numeric selected columns (encode
-  them first — the tensors are float32);
-- empty training or holdout window, quoting the panel's actual date coverage;
-- empty cohort after the activity filter;
-- ragged per-customer period counts, or train/holdout customer sets that differ or are
-  ordered differently;
-- NaN in any selected column, named per window;
-- pinned embedding cardinality too small for the observed values, or an `"auto"` column
-  that is constant in-window;
-- `clip_target_upper` ≥ the pinned target cardinality.
-
-Warnings (not errors): `observed_past` columns being dropped, and known-future embedding
-drift.
-
----
-
-## 11. Limitations and open extensions
-
-- **`observed_past` covariates are unsupported.** See §2 for the two honest routes.
-- **No per-feature scaling.** Continuous channels are projected raw; prefer bounded AR
-  features, or pre-scale in the panel, when magnitudes differ by orders of magnitude.
-- **Window-capped counters extrapolate.** `period_since_first_transaction` and
-  `period_since_last_transaction` cannot exceed the calibration length while being fitted
-  and keep counting through the holdout, so they leave their fitted range (§4: 88.8% and
-  37.7% of holdout cells on electronics). `cumulative_*` is unbounded in principle but
-  stays in range in practice (0.04%). The measured replacement is a set of nested
-  `active_in_last_<K>_periods` flags, or one of the compressed encodings added alongside
-  them (`log_period_since_*`, `saturating_*`, `recency_over_tenure`), which keep the
-  resolution the flags discard; `transaction_rate` is the bounded stand-in for the
-  frequency counters. §4 places this against the wider literature on extrapolating outside
-  the training support, and `scripts/measure_ar_support.py` measures it for a new panel.
-  How far they leave depends on the calibration window. On electronic_5y (260 weeks) it is
-  60.6% and 16.3% (§4, "Both kinds measured on electronic_5y").
-- **The cluster label is not a validated gain.** On electronic_5y, `kmeans_8` lowers
-  per-customer Spearman for all three models under every epoch rule (supported, §4). It
-  helps the Transformer's level only, and there the bounded flags do the same without
-  that cost.
-- **Uniform panels only.** Every customer must have an identical number of periods in
-  each window; ragged panels must be padded upstream (`notebooks/archive/dataset_building.ipynb`).
-- **Static covariates must already be broadcast** to every row of a customer and must be
-  numerically encoded — the pipeline does not label-encode strings for you.
+**Not supported:**
+- `observed_past` covariates
+- ragged panels (pad them upstream)
+- string-valued statics (encode them first)

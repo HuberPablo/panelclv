@@ -43,8 +43,8 @@ not a result, because none of the five is recoverable from the number.
 | `projected` | All features projected to one common width (`embedding_dim` for the LSTM, `d_model` for the Transformer). **Never run** (§6). |
 | *frozen* | `ValendinLSTM` does not take an embedder parameter at all: ADR-0004 freezes the published raw sqrt(n)+1 embeddings, so `param_embedder` is empty in its rows. `ParetoNBD` is not a neural model and has none. |
 
-**Arm.** The feature set, named `<ar>-<cluster>-<embedder>[-<calendar>]`; §3 decodes every
-token. Where a run wrote a bare `ar_bounded`, §3's depth table resolves it.
+**Arm.** The feature set, named `<ar>-<cluster>-<embedder>[-<calendar>]`; §3 points to where
+each token is decoded (`docs/feature_engineering.md` §4.3 resolves a bare `ar_bounded`).
 
 **Metrics.** All three aggregate metrics come from
 `models.monte_carlo_forecasting.compute_forecast_metrics`, the single scoring authority.
@@ -151,46 +151,10 @@ customers, and its `Transactions` counts line items rather than purchase occasio
 
 ## 3. Vocabulary: what an arm token means
 
-The same token always means the same feature set. Every neural arm additionally carries
-the target's own count as an embedded channel — that is the model contract, not a
-covariate choice.
-
-### AR encoding — how a customer's transaction history enters the input
-
-| Token | Columns | Note |
-|---|---|---|
-| `no_ar` | — | The level baseline. The target's own past is still an input channel. |
-| `ar_unbounded` | `period_since_last_transaction`, `cumulative_transactions`, `period_since_first_transaction` | The Pareto/NBD sufficient statistics (t_x, x, T). Two of the three keep counting through the holdout, past the range the weights were fitted on — the diagnosed failure. |
-| `ar_bounded_K` | `active_in_last_{2,4,8,16,…,K}_periods` + `has_transacted_before` | **Nested** flags up to and including the deepest bin `K` — *not* a single flag at K. `ar_bounded_32` = five flags (2, 4, 8, 16, 32) plus `has_transacted_before`. All are 0 beyond the deepest bin, so no holdout value can leave the fitted range. `active_in_last_1_periods` is omitted because the target channel already carries the previous count. Definition: `scripts/run_ar_encoding_ablation.py:bounded_flags`. |
-| `ar_log` | `log_period_since_last_transaction`, `cumulative_transactions`, `log_period_since_first_transaction` | The coordinate in which Pareto/NBD's log-survival is linear. Keeps the resolution the flags throw away, and still drifts past the calibration ceiling. |
-| `ar_ratio` | `recency_over_tenure`, `transaction_rate`, `saturating_tenure_C_periods`, `has_transacted_before` | The bounded Pareto/NBD triple: the first two cannot leave their calibration range by construction. `C` is a quarter of the calibration window — 10 on CDNOW, 26 elsewhere. |
-| `ar_saturating` | `saturating_recency_C_periods`, `transaction_rate`, `saturating_tenure_C_periods` | Both clocks saturated at `C` rather than ratio-normalised. Same `C` rule. |
-| `ar_bounded32ratio` | `ar_bounded_32` + `ar_ratio` | Both sets together — the flags, which protected the level, and the ratio triple, which protected the ranking. |
-
-`K` must stay below the panel's calibration length or the column degenerates into a
-duplicate of `has_transacted_before` in calibration and diverges from it only in the
-holdout — the exact failure the encoding exists to remove. `check_arm_depth` refuses a
-flag at or above `T_CAL`. Hence `K` differs per family:
-
-| Panel | Calibration periods | `K` used |
-|---|---|---|
-| CDNOW | 39 | 16 (≈41%, families E and H), 32 (≈82%, family E ablation and **family O by decision** — see §7) |
-| electronics | 104 | 32 (≈31%), 52 (50%, ablation only) |
-| gift, multichannel | 104 | 32 |
-| synthetic `seasonal_4x4x10` | 104 | 32 |
-
-**Where a run writes plain `ar_bounded`, resolve it here.** The synthetic grid's
-`ar_bounded` is `ar_bounded_32`. `real_panel_arms`' is `ar_bounded_16` on CDNOW and
-`ar_bounded_32` on electronics (`BOUNDED_DEPTH`, `run_real_panel_arms.py:182`). Family O's
-`bounded32` is depth 32 on every panel, CDNOW included.
-
-### Cluster
-
-| Token | Column |
-|---|---|
-| `no_cluster` | — |
-| `kmeans_4` / `kmeans_8` / `kmeans_16` | one frozen categorical `kmeans_<n>`, embedded, from k-means over `(t_x, x, T)` at the last calibration period |
-| `ar_plus_cluster_8` | `ar_unbounded` + `kmeans_8` (cluster ablation only) |
+AR-encoding and cluster tokens (`no_ar`, `ar_unbounded`, `ar_bounded_K`, `ar_log`,
+`ar_ratio`, `ar_saturating`, `ar_bounded32ratio`, `kmeans_K`), their columns, depths and
+why each was tested: `docs/feature_engineering.md` §4.3 and §5. `ar_plus_cluster_8` (the
+cluster ablation only) is `ar_unbounded` + `kmeans_8`.
 
 ### Calendar encoding
 

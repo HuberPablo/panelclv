@@ -243,8 +243,8 @@ weeks of silence before resuming its decline. Neither curve is flat, which is th
 minimum the proposal needs: a customer's purchase rate is not a constant to be
 recovered, it is a decaying function of how long they have been quiet.
 
-That matters for what the current AR encoding can express. `feature_engineering.md`
-establishes that the unbounded recency clock is catastrophic out of range (+235% bias on
+That matters for what the current AR encoding can express. `benchmarks-real-panels.md`
+("The first AR-encoding ablation") establishes that the unbounded recency clock is catastrophic out of range (+235% bias on
 electronics, +335% on CDNOW) and that **bounded activity flags to `K` fix it entirely**.
 But a bounded flag set is non-injective past `K` by construction: every customer silent
 for more than `K` periods lands in the same bucket and is assigned the same rate
@@ -348,13 +348,13 @@ never an input; the models could only infer it from the target's own history thr
 hidden state across a 104-week warm-up, and evidently did not. So these numbers do
 *not* show that an AR-equipped LSTM is recency-blind. What they show is that the target
 history alone does not carry recency through a warm-up of this length, and
-`feature_engineering.md` independently measures that bounded AR flags lift electronics ρ
+`benchmarks-real-panels.md` independently measures that bounded AR flags lift electronics ρ
 from 0.027 to 0.267 — most of the way to Pareto/NBD, and still with a floor past `K`.
 
 ## 4. The rollout experiment: what the feedback loop actually costs
 
 The first version of this document asserted that the feedback loop was a second-order
-effect, on the strength of one figure borrowed from `feature_engineering.md` (a
+effect, on the strength of one figure borrowed from `benchmarks-real-panels.md` (a
 teacher-forced pass reproducing +169% of a +235% bias) that was measured on the
 *unbounded* arm. That inference does not survive a direct measurement. This section
 replaces it.
@@ -382,7 +382,7 @@ the attribution independent of the order one walks it:
 
 **A trap worth naming, because it invalidated the first attempt at this.**
 `prepare_dataset` leaves `data["holdout"]`'s AR columns as raw **zero placeholders** —
-documented at `docs/feature_engineering.md` §"Instead:" (3), *"The holdout's AR columns
+documented at `docs/feature_engineering.md` §7 (3), *"The holdout's AR columns
 are left at zero and never read"* — because the rollout always overwrites them and true
 values sitting there would be a standing leakage hazard. Reading them directly feeds a
 cohort that is 100% `has_transacted_before = 1` a value of 0, which is −4.11 after
@@ -696,11 +696,11 @@ Everything above is either measured here or cited from a document in this repo.
 | Pareto/NBD `p_alive` and the latent churn time τ | `src/panelclv/benchmarks/pareto_nbd.py:249-258` |
 | Hurdle and zero-inflation are vacuous over a free softmax | `docs/loss-functions.md` §5.6 |
 | The four constraints a loss proposal must satisfy | `docs/loss-functions.md` §1 |
-| Unbounded recency blows the forecast up; bounded flags fix it; the failure is not exposure bias | `docs/feature_engineering.md`, "What this costs, and what fixes it" |
-| Bounded AR flags lift electronics ρ from 0.027 to 0.267 | `docs/feature_engineering.md`, same table |
-| Recency escapes its calibration range on 37.7% of electronics holdout cells | `docs/feature_engineering.md`, "Which ones to prefer" |
+| Unbounded recency blows the forecast up; bounded flags fix it; the failure is not exposure bias | `docs/benchmarks-real-panels.md`, "The first AR-encoding ablation" |
+| Bounded AR flags lift electronics ρ from 0.027 to 0.267 | `docs/benchmarks-real-panels.md`, same table |
+| Recency escapes its calibration range on 37.7% of electronics holdout cells | `docs/feature_engineering.md` §4.2 |
 | Per-model rollout functions are declared in the registry | `docs/adr/` ADR-0006 |
-| Holdout AR columns are zero placeholders, never read | `docs/feature_engineering.md`, "Instead:" (3); `src/panelclv/data_preparation/panel_dataset.py:700-708` |
+| Holdout AR columns are zero placeholders, never read | `docs/feature_engineering.md` §7 (3); `src/panelclv/data_preparation/panel_dataset.py:700-708` |
 | The rollout rebuilds AR state from the sampled count via `ARFeatureState` | `src/panelclv/models/monte_carlo_forecasting.py:144-175` |
 | Bounded-flag arm definitions (`ar_bounded_32`, depths per panel) | `scripts/run_ar_encoding_ablation.py`, `bounded_flags` / `PANEL_DEPTHS` |
 | The non-flooring recency family proposed as the competitor | `.scratch/ar-encoding-support/spec.md` |
