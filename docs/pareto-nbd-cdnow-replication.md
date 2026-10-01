@@ -24,9 +24,8 @@ correct, are both about the Pareto/NBD on CDNOW, and are not the same quantity.
 >   at n = 5** against D's single deterministic fit (Δ +1.46, CI −0.32 to +3.05).
 
 Read `CONTEXT.md` first for the vocabulary (*calibration*, *holdout*, *aggregate
-bias*, *benchmark*). Unlike `docs/hurdle-models-vs-pareto-nbd.md`, which is a reading
-exercise, everything here was **run**: one script, `.scratch/pnbd-cdnow-replication/replicate.py`,
-produces every number below. Claims read from the paper rather than measured are
+bias*, *benchmark*). Everything here was **run**: one script,
+`.scratch/pnbd-cdnow-replication/replicate.py`, produces every number below. Claims read from the paper rather than measured are
 attributed to it inline; the one construction that was inferred rather than read is
 marked **INFERRED** and restated in §10.
 
@@ -52,8 +51,8 @@ marked **INFERRED** and restated in §10.
 
 Two numbers about the same benchmark sat in the docs without a bridge between them.
 
-`docs/hurdle-models-vs-pareto-nbd.md` §2 quotes Jerath, Fader & Hardie's cumulative
-aggregate MAPE of **1.35%** for the Pareto/NBD over a 39-week CDNOW holdout, and draws
+An earlier literature review in these docs quoted Jerath, Fader & Hardie's cumulative
+aggregate MAPE of **1.35%** for the Pareto/NBD over a 39-week CDNOW holdout, and drew
 the conclusion that "there is very little room above that" — the benchmark is close to
 a ceiling.
 
@@ -290,7 +289,7 @@ identical parameters.
 reproduce the cohort's sales trajectory" against "how many transactions will these
 customers make next year". This package asks the second, because the thesis compares
 per-customer forecasts. But the published 1.35% is not evidence about the second
-question, and `docs/hurdle-models-vs-pareto-nbd.md` §2 read it as though it were.
+question, and the earlier literature review read it as though it were.
 
 ---
 

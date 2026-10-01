@@ -5,7 +5,7 @@ Read `CONTEXT.md` first for the vocabulary (*calibration window*, *holdout windo
 `CLAUDE.md` for the model contract: logits `(B, T, K)`, a count as a class not a
 quantity, cross-entropy on a class index, evaluation by sampling-and-averaging.
 
-Unlike `docs/hurdle-models-vs-pareto-nbd.md`, which is a reading exercise, **nothing
+Unlike a literature review, **nothing
 here comes from the literature.** Every number below was recomputed from the
 `results.csv` files already under `Studies/`, from `.scratch/p-slstm/`, and from the
 grid declarations in `grids/`. Where a claim rests on someone else's measurement
@@ -143,7 +143,7 @@ identically and a single fix may not serve both.
 neural model, on panels where their aggregate MAPE differs by a factor of three (169.8,
 128.6, 50.8). On a target that is mostly zeros, per-customer per-period RMSE is
 dominated by getting the zeros right, which is the trap
-`docs/hurdle-models-vs-pareto-nbd.md` §2 documents — it quotes Valendin et al.'s own
+`docs/loss-functions.md` §4.1 documents — it quotes Valendin et al.'s own
 footnote 19, that forecasting mostly zero for everyone would "outperform" every model
 in their study on MAE. **Do not rank models on
 RMSE in this thesis.** The aggregate metrics are the ones carrying signal.

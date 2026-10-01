@@ -98,7 +98,7 @@ the question.
 benchmark's number to two decimals — and an eleventh reports 0.19, while their aggregate
 MAPE spans 51% to 441%. On
 a target that is mostly zeros, per-customer per-period RMSE measures getting the zeros
-right; `docs/hurdle-models-vs-pareto-nbd.md` §2 documents the trap. Every ranking here is
+right; `docs/loss-functions.md` §4.1 documents the trap. Every ranking here is
 on `bias_percent` and `mape_aggregate`, both from
 `models.monte_carlo_forecasting.compute_forecast_metrics`.
 

@@ -677,42 +677,8 @@ new `loss_type` and one new coefficient.
 
 ### 5.6 Zero-inflated and hurdle formulations — vacuous over a free softmax
 
-A hurdle model factorises `f_hurdle(y) = f_zero(0)` if `y=0`, else
-`(1 − f_zero(0)) · f_count(y)/(1 − f_count(0))` — the formulation Zeileis, Kleiber &
-Jackman give and attribute to Mullahy (1986)
-(JSS 27(8), https://www.jstatsoft.org/index.php/jss/article/view/v027i08/v27i08.pdf).
-Written over the **same** `K`-way softmax and trained by log-likelihood, that
-factorisation is cross-entropy, term for term:
-
-```
-−[1{y=0} log q₀ + 1{y>0}(log(1−q₀) + log(q_y/(1−q₀)))] = −log q_y
-```
-
-Verified numerically to ten decimals on both panels' class mixes. The chain rule is not
-an approximation here — a hurdle "loss" over a free categorical head is a
-re-parameterisation of CE with no new degrees of freedom. It differs only if the two
-terms are weighted unequally, which reintroduces exactly the impropriety of §5.2.
-
-The same argument kills zero-inflation. The ZIP mixture
-`f_zi(y) = f_zero(0)·I_0(y) + (1 − f_zero(0))·f_count(y)` (same source) exists because a
-Poisson with mean `λ` cannot place enough mass at zero; the inflation parameter buys the
-extra zero mass a one-parameter family cannot express. A free `K`-way softmax can already
-place any mass at zero, so there is nothing to inflate. **Zero-inflation is a fix for a
-constraint this head does not have.**
-
-The count-modelling literature reaches the same conclusion even for parametric heads.
-Warton, "Many zeros does not mean zero inflation" (Environmetrics 16(3), 2005,
-https://doi.org/10.1002/env.702), fitted 20 datasets and 1,672 variables and found the
-negative binomial best-fitting *without* zero-inflation, the high zero frequency being
-already well described by the systematic component (abstract reconstructed from OpenAlex,
-near-verbatim — see §7). Zeileis et al. illustrate it concretely: an NB alone recovers 608
-of 683 observed zeros where a Poisson predicts 47, and hurdle/ZINB add little. With 98%
-zeros the question is never "are there many zeros" but "does the model's mean go low
-enough for dormant customer-weeks" — and a softmax's does, by construction.
-
-This is a genuinely useful negative result for the thesis: the categorical head that
-`CLAUDE.md` mandates already dominates ZIP/hurdle *on the classes it covers*. The only
-thing it gives up is support above `K−1`.
+A hurdle or zero-inflated likelihood written over the same `K`-way softmax is
+cross-entropy term for term: `docs/hurdle-model.md` §2.
 
 ### 5.7 Poisson / negative binomial / Tweedie heads — a different proposal, flagged
 
