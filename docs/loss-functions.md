@@ -8,23 +8,6 @@ is falsified there, and R2 shows no clear difference from the baseline while its
 drives λ toward zero; the Measured blocks in §6 record that, and the recommendations are
 kept as written so the prediction and the outcome sit side by side.
 
-> **Revised under the statistical protocol (2026-09-28).** The CDNOW loss-ablation claims
-> in §6 now rest on Δ with a 95% percentile-bootstrap interval from
-> `panelclv.evaluation.effects.effect` (`.scratch/statistical-protocol/small_docs_effects.py`),
-> not on per-seed sign counts. The arms are compared as **independent** replications
-> (n = 10 / 10): the shared seed `base_seed + j` drives only the Optuna sampler and the
-> Monte Carlo forecast, training is unseeded, and the arms optimise different objectives,
-> so seed j is not a unit both arms were measured on. Verdicts:
->
-> - R1, `emd` worse than cross-entropy on MAPE ("9 of 10 seeds") → **still supported**
->   (Δ +82.3, CI +57.2 to +106.5).
-> - R2, `ce + λ·emd` worse than cross-entropy on MAPE ("8 of 10 seeds, 17.7 points") →
->   **no clear difference at n = 10** (Δ +17.7, CI −12.8 to +51.4).
-> - The "~20 points of bias is not detectable at N_STUDIES=3" sizing rule (an SD
->   heuristic) is withdrawn in favour of reporting the interval at whatever n was run.
-> - Per-customer Spearman, the protocol's other primary metric, cannot be computed for
->   this ablation: it ran on the pre-ADR-0009 CDNOW window.
-
 Read `CLAUDE.md` for the model contract and `CONTEXT.md` for the vocabulary first.
 The short version, because everything below hangs off it: these models are
 **classifiers driving a simulator**, so the loss is not scored on the thing it trains.
@@ -392,9 +375,13 @@ ADR-0002), so a recursive rollout is not a design choice that could be swapped o
 
 The actionable reading is therefore narrow and worth stating plainly: expect a
 per-step-optimal model to be sub-optimal at horizon 38–52, measure that gap, and do not
-reach for scheduled sampling as if it were a free correction. **UNVERIFIED**: the
-compounding-*upward* mechanism specific to this data is inferred from the code path and the
-sign of the archived bias, not demonstrated by an experiment. §6 says how to test it.
+reach for scheduled sampling as if it were a free correction.
+
+**Measured since** (`docs/absorbing-death-state.md` §4). On the electronics `ar_bounded_32`
+LSTM, feeding the true history instead of the sampled one shows no clear difference in
+bias (Δ −0.24, −3.0 to +2.0, n = 8), but lifts ranking from ρ 0.240 to 0.816. The feedback
+loop costs ranking, through the recency encoding, not level. So the compounding-*upward*
+account of the positive neural bias above is not supported.
 
 Note also that ADR-0003 already considered and **retired** the closest available lever
 (selecting trials on rollout quality instead of validation cross-entropy). Its "Why it
@@ -754,14 +741,10 @@ Ranked below the EMD mixture for that reason, and because it needs real new code
 Stated once, clearly, because a document that recommends a loss tweak while ignoring
 these would be misleading:
 
-- **The archived electronics runs feed the model almost nothing.** The suite config
-  records `seq_cols = ["Transactions", "week_sin", "week_cos"]` — no covariates and, more
-  importantly, **no AR features**. The current `scripts/run_studies.py` electronics config
-  is worse still: `prepare_dataset` reports `seq_cols = ['Transactions']`, F=1. CDNOW's
-  config carries `period_since_last_transaction` and `has_transacted_before`; electronics
-  carries neither, despite `Gender`, `Income` and `high.season` sitting unused in the CSV.
-  Recency is the single feature that lets a model represent the cohort decay that §2.3(b)
-  identifies as the dominant source of bias. Adding it is a `PanelConfig` edit.
+- **Inputs.** A persistent per-customer input matters more than any loss (bounded AR
+  encodings, the cluster label): `docs/insights-real-panels.md` §3–§5. Unbounded recency
+  counters must not be used in a rollout (`docs/feature_engineering.md` §4.2).
+- **Training length.** `docs/insight-training-efficiency.md`.
 - **`n_simulations`.** At 30 the Monte Carlo noise alone adds 3.33% to MSE, larger than
   the entire electronics oracle headroom. The archived suite used 100; the CDNOW ablation
   uses 300. Use 300.
@@ -969,27 +952,16 @@ the teacher-forced one-step aggregate, not the rolled-out one.
 Listed because on the measured evidence each of these is worth more than any loss change,
 and a reader deciding where to spend a GPU week deserves to know.
 
-1. **Give the electronics config AR features.** `ar_features=("period_since_last_transaction",
-   "has_transacted_before")` in `scripts/run_studies.py`'s `build_panel_config`, matching
-   CDNOW. Recency is the channel through which a model can represent the 43% cohort decay
-   that §2.3(b) identifies as the dominant bias driver, and the archived runs did not have
-   it. Testable as a two-arm suite, and the expected effect on `bias_percent` is far
-   larger than 20 points.
+1. **Give the model AR features.** Done since, with bounded encodings rather than the raw
+   recency counter proposed here, which turned out catastrophic in a rollout
+   (`docs/insights-real-panels.md` §4).
 2. **Declare the electronics covariates.** `Gender`, `Income` and `high.season` are in the
    CSV and used by nothing. The covariate-subset search exists to decide whether they
    help; it cannot decide about columns `PanelConfig` never names.
 3. **`n_simulations = 300` minimum** (§4.1).
-4. **Diagnose the exposure-bias gap of §4.3 before trying to fix it.** This is the
-   mismatch that best explains the *sign* of the neural bias. The cheap diagnostic is to
-   score a trained model two ways over the validation window — teacher-forced, and through
-   a leak-free rollout — and report the gap; that is most of what retired ADR-0003 built,
-   so read its "Why it goes" section first. Do **not** reach for scheduled sampling as the
-   fix: Huszár proves its objective "is improper and leads to an inconsistent learning
-   algorithm" (https://arxiv.org/abs/1511.05101), which surrenders the exact property §5.1
-   identifies as making the simulator correct, and the Direct Multi-Horizon alternative is
-   structurally unavailable under ADR-0002. **Cannot be tested by a pinned-arm study suite
-   without new code**, which is why it is last despite being the most interesting hypothesis
-   in this document.
+4. **Diagnose the exposure-bias gap of §4.3.** Done: `docs/absorbing-death-state.md` §4
+   (see §4.3). Scheduled sampling remains ruled out (Huszár,
+   https://arxiv.org/abs/1511.05101).
 
 ---
 
@@ -1007,18 +979,6 @@ Measurement gaps first, then reading gaps.
   been run on CDNOW** (2026-08-31): R1 is falsified there and R2 shows no clear
   difference from cross-entropy at n = 10 — see the Measured blocks in §6. R3's argument remains unrun by design and R4 is untested, and no recommendation has
   been run on electronics at all.
-- **The exposure-bias mechanism of §4.3.** The *literature* is verified (Bengio et al.,
-  Huszár, Wen et al.); the claim that the compounding runs *upward on this data* is
-  inferred from the code path and the sign of the archived bias (neural +39%/+11% vs
-  Pareto/NBD −53%), not demonstrated.
-- **Any CDNOW baseline beyond the loss ablation's own control arm.** `ls Studies/` now
-  returns 19 entries, of which exactly one is CDNOW: `Studies/loss_ablation_cdnow`. Its
-  `LSTM_ce` arm is the first archived CDNOW forecast this project has (10 studies,
-  `mape_aggregate` 41.2 ± 25.6, `bias_percent` −17.0 ± 39.0), and it exists only as that
-  ablation's control. `scripts/run_cdnow_embedding_ablation.py` still has never produced
-  an archive. Every archived number in §4 is electronics, and the CDNOW arguments in §5
-  rest on the panel's measured statistics (§2.1) and the loss minimisers (§5.0), not on
-  that one arm.
 - **Whether the archived electronics suite is comparable to today's config.** Its
   `config.json` records `validation_start = 2000-01-01` and `seq_cols` including
   `week_sin`/`week_cos`; the current `scripts/run_studies.py` uses `2000-07-01` and no time

@@ -1,6 +1,6 @@
 """Where does customer time 0 sit? A toy panel run through the real `_build_cbs`.
 
-`docs/pareto-nbd-cdnow-replication.md` §9(b) suspected the Pareto/NBD forecast window was
+`docs/benchmarks.md` ("Pareto/NBD on CDNOW against Jerath, Fader & Hardie") suspected the Pareto/NBD forecast window was
 one period early. It is not. `t_x` and `T_cal` are both differences of week LABELS, so
 whatever within-week anchor you assume cancels out of both, and the arithmetic is exact
 under the convention that a week's transactions happen at its end.

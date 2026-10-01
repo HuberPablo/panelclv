@@ -1,23 +1,18 @@
 # Every study run, and what is still owed
 
-A global inventory of every study suite on disk under `Studies/`, what it varied, at what
-budget, on which windows — so the gaps are visible without re-deriving them from **6,533
-archived suite directories holding 10,136 completed studies**.
+A global inventory of every study suite on disk under `Studies/`: what it varied, at what
+budget, on which windows. It makes the gaps visible without re-deriving them from **4,820
+archived suite directories**. It records what was run and what is owed. Results live in
+the insights docs it points to.
 
-Built by reading the archived `config.json` and `results.csv` of every suite (they record
-the panel config, the model specs, the budget and the embedder Optuna sampled, verbatim)
-and cross-checking the commands that own the "what is owed" question:
-`scripts/run_real_panel_arms.py --check-complete`, `scripts/run_real_panel_ar.py
---check-complete`, `scripts/run_real_panel_benchmarks.py --check-complete` and
-`scripts/reconcile_grid.py --grid <name>`. Those commands are the authority; this document
-is a snapshot of them taken **18 September 2026**, plus the families they do not cover.
+Built by reading each suite's `config.json` and `results.csv`, cross-checked against the
+commands that own the "what is owed" question:
+- `scripts/run_real_panel_arms.py --check-complete`
+- `scripts/run_real_panel_ar.py --check-complete`
+- `scripts/run_real_panel_benchmarks.py --check-complete`
+- `scripts/reconcile_grid.py --grid <name>`
 
-**Revised under the statistical protocol (2026-09-28).** One verdict flipped: §4.7's "the
-search adds nothing once a model is floored" had no test behind it. Tested as
-`floor50` against `paper90` with `effect()`, it holds as no clear difference for
-ValendinLSTM and for the LSTM's MAPE, and **flips for the LSTM's Spearman**: the searched
-floored arm ranks worse (Δ −0.100, 95% CI −0.138 to −0.063, n = 20 / 20). Pareto/NBD on
-the real panels is now 20 seeded fits per panel (§4.3, family N).
+Those commands are the authority. This is a snapshot of them taken **1 October 2026**.
 
 ---
 
@@ -67,35 +62,14 @@ archive. §7 lists the two families where it does not.
 
 ## 2. The panels
 
-### Two-year calibration — the benchmark windows
+### Two-year, three-year and electronic_5y windows
 
-These are the windows `scripts/run_real_panel_benchmarks.py` declares and every runner
-since 13 September imports rather than restates, so the families cannot drift apart. Week
-buckets follow `dayofyear // 7` capped at 51 (ADR-0009).
-
-| panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells | `clip_target_upper` → classes |
-|---|---:|---|---|---|---:|---:|---:|---|
-| cdnow | 2,357 | 1997-01-01 → 1997-09-29 | 1997-08-05 | 1997-09-30 → 1998-06-30 | 39 / 39 | 1,895 | 98.0% | 4 → 5 |
-| electronics | 829 | 1999-01-01 → 2000-12-31 | 2000-01-01 | 2001-01-01 → 2001-12-31 | 104 / 52 | 1,467 | 98.6% | 6 → 7 |
-| gift | 2,062 | 2001-02-25 → 2003-02-24 | 2002-02-25 | 2003-02-25 → 2004-02-24 | 104 / 52 | 1,146 | 99.0% | none → 5 (max 4/week) |
-| multichannel | 1,402 | 2005-01-01 → 2006-12-31 | 2006-01-01 | 2007-01-01 → 2007-12-31 | 104 / 52 | 228 | 99.7% | none → 5 (max 4/week) |
-
-CDNOW's panel spans 77 weeks, so it keeps the published 39 / 39 split with the last eight
-calibration weeks as validation instead of a whole year. Gift's panel opens on 2001 week
-8, so its years are counted from there.
-
-### Three-year calibration
-
-Two years fit the weights, the third is the validation window, and the year after is the
-holdout. **The holdout year moves with the window**, so a 3-year row forecasts a different
-year from its 2-year counterpart, on different actuals. CDNOW's 77-week panel has no room
-for it.
-
-| panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells |
-|---|---:|---|---|---|---:|---:|---:|
-| electronics | 829 | 1999-01-01 → 2001-12-31 | 2001-01-01 | 2002-01-01 → 2002-12-31 | 156 / 52 | 1,541 | 98.7% |
-| gift | 2,062 | 2001-02-25 → 2004-02-24 | 2003-02-25 | 2004-02-25 → 2005-02-24 | 156 / 52 | 1,040 | 99.1% |
-| multichannel | 1,402 | 2005-01-01 → 2007-12-31 | 2007-01-01 | 2008-01-01 → 2008-12-31 | 156 / 52 | 173 | 99.8% |
+The benchmark's windows (two calibration years, one holdout year, plus electronic_5y)
+are in `docs/benchmarks.md`, "Setup". Every runner since 13 September imports them from
+`run_real_panel_benchmarks.WINDOWS` / `WINDOWS_5Y` rather than restating them. The
+three-year windows (`--calibration 3y`; CDNOW is too short) are in
+`docs/insights-real-panels.md` §6. **On the three-year windows the holdout year moves with
+the window.**
 
 ### The archived CDNOW window — pre-ADR-0009
 
@@ -212,7 +186,12 @@ the `param_embedder` column, so their embedder is inferred rather than recorded.
 | **R** | **`run_rescore_trials`** | vast + local | **17 Sep** | all four | ValendinLSTM | as N | — | **698 refits** | 500 | 0 (rescores N) | **complete**, written to `Rescored/` |
 | **T** | **`training_budget`** | vast | **20 Sep** | electronics | ValendinLSTM, LSTM | 4 recipes: `archive`, `paper`, `paper90`, `floor50` (§4.6) | 100 / **1**⁵ | **20** | **200** | **160** | **complete** |
 | **U** | **`factorial`** | vast | **21 Sep** | **all four** | ValendinLSTM, LSTM | 2×2: {`archive`, `floored`} × {`no_cluster`, `kmeans_8`} (§4.7) | 100 / **1**⁵ | **20** | **200** | **640** | **complete** |
+| **T′** | **`training_budget` on CDNOW (E1)** | vast | **21 Sep** | cdnow | ValendinLSTM, LSTM | `archive`, `floor50`, `paper` | 100 / 1 | 20 | 200 | **120** | **complete** |
 | **V** | **`selection_rescore`** | vast | **21 Sep** | electronics, cdnow | ValendinLSTM, LSTM | `archive` only; scores every trial twice (§4.8) | 100 | 40 / 10 | 100 | **90** | **complete** |
+| **W** | **`real_panel_benchmarks_cal5y`** | vast + local | **26–28 Sep** | electronic_5y | ValendinLSTM, ParetoNBD | count + embedded week | 100 | 20 (+ 20 seeded Pareto/NBD fits) | 500 | **41** | **complete** |
+| **X** | **`epoch_floor_cal5y`** | vast | **26–27 Sep** | electronic_5y | ValendinLSTM, LSTM | pinned settings × {`nofloor`, `from20`, `from30`} × {none, `ar_bounded_52`, `kmeans_8`} | 1 | 20 | 500 | **180** | **complete** (first draw of 4 floored cells overwritten) |
+| **Y** | **`attention_cal5y`** | vast | **27–28 Sep** | electronic_5y | LSTMAttention, Transformer | `searched` + the X grid | 100 / 1 | 20 | 500 | **400** | **complete** |
+| **Z** | **`rollout_feedback`** | local | 20 Sep | electronics | LSTM | `ar_bounded_32`, `ar_bounded_52`, `ar_unbounded`, read four ways, plus latches | 10 | 8 | — | 1 | complete (`docs/absorbing-death-state.md` §4) |
 
 ¹ `ValendinLSTM` gets 25 trials in families G and H: ADR-0004 freezes its architecture, so
 its search space holds only `learning_rate` / `weight_decay` / `batch_size`. Family N gives
@@ -227,8 +206,8 @@ not as replications of each other.
 ⁵ Family T's `paper` arm pins every hyperparameter, so it runs a single trial by design —
 its `results.csv` carries no `param_*` spread, and that is the point (§4.6).
 
-Families B, E, F, H, N, O and P are the ones results are read off today. Where they are
-reported: family B in `docs/insights-synthetic-grid.md`, family F in
+Where each family is reported: family B and S in `docs/insights-synthetic-grid.md`; families T, T′ and X in
+`docs/insight-training-efficiency.md`; family V in `docs/model-selection.md`; family F in
 `docs/insights-real-panels.md` §5.1, family N in `docs/benchmarks.md`, families E, H, O
 and P in `docs/insights-real-panels.md` §4 and §6, family G in §4.4 and §9 there, and
 family R in `docs/model-selection.md` §3.2.
@@ -338,11 +317,8 @@ Read in `docs/insights-synthetic-grid.md`, claim 12.
 
 ### 4.6 Family T — the training recipe, not the architecture or the inputs
 
-Declared 20 September, specified in `.scratch/training-budget/spec.md` and motivated by
-`docs/insight-training-efficiency.md`: every archived neural study stopped while its validation loss
-was still falling, because our training recipe is not the reference notebook's. The
-notebook trains at batch 32 with plain Adam for ~90 epochs — about 2,300 gradient updates
-on electronics — while a family N winner receives about 32.
+Specified in `.scratch/training-budget/spec.md`; reported in
+`docs/insight-training-efficiency.md`.
 
 Three recipes, on electronics only, crossed with two models:
 
@@ -354,10 +330,8 @@ Three recipes, on electronics only, crossed with two models:
 | `floor50` | `archive`'s search plus `min_epochs=50`, `n_epochs=300` | 100 |
 
 `archive` gets 100 trials because family N gave this panel 100: a control is only a
-control if it searches what the archive searched. `paper90` exists because the recipe
-alone does not reproduce the training — measured before launch, `paper` stops at epoch 1
-on electronics and scores *worse* than `archive`
-(`.scratch/training-budget/issues/01-paper-recipe-arm.md`).
+control if it searches what the archive searched. **T′** is the same runner on CDNOW with
+`archive`, `floor50` and `paper` only (experiment E1).
 
 Three things a reader has to know before comparing a family T row with anything:
 
@@ -382,22 +356,12 @@ recipe, F the cluster label. Family U crosses them on all four panels, so the qu
 "do they add?" has an answer rather than two separate before-and-afters.
 `scripts/run_factorial.py`, reported in `docs/insights-real-panels.md` §5.2 and `docs/insight-training-efficiency.md` §5.2.
 
-**Crossing them adds little.** In seven of eight (panel, model) cells the increment from
-adding the floor on top of the label has a 95% interval spanning zero, and in all eight
-that interval rules out a gain larger than about +0.035 Spearman — the order of what an
-unseeded refit moves on its own. The label reaches most of what is reachable by itself and
-the floor reaches a little over half of it; stacking them buys a few hundredths at most.
-
 Two things a reader must carry when quoting a family U row:
 
 - **Its `floored` arm runs ONE pinned trial**, not a search, so its `param_*` columns are
-  constant by design. Whether the search would add anything under a floor is answered only
-  indirectly, by family T's `floor50` (searched, 50-epoch floor) against `paper90` (pinned,
-  90-epoch floor) on electronics, 20 / 20 replications, which also differ in floor length:
-  no clear difference in MAPE for either model (ValendinLSTM Δ +1.1, 95% CI −3.2 to +5.3;
-  LSTM −4.6, −13.6 to +3.6) nor in Spearman for ValendinLSTM (−0.009, −0.061 to +0.044),
-  and **the searched arm ranks worse for the LSTM** (Spearman −0.100, −0.138 to −0.063).
-  `.scratch/training-budget/family_t_stats.py`.
+  constant by design. Whether the search adds anything under a floor is answered only
+  indirectly, by family T's `floor50` against `paper90`
+  (`docs/insight-training-efficiency.md` §5.1).
 - **Its LSTM carries no year index on any panel**, unlike families H, O and T, which
   inherited one on electronics. `run_real_panel_arms.py` argues against a year index for
   CDNOW — constant in calibration, out of range across the holdout — and family U applies
@@ -416,6 +380,20 @@ target. The output is a per-trial table inside each suite, `selection_rescore.cs
 It exists because the archive cannot answer the question: every family T and U suite kept
 only its winner's checkpoint. 40 studies per model on electronics, 5 per model on CDNOW.
 Reported in `docs/model-selection.md` §3.3–3.6.
+
+### 4.9 Families W, X, Y — electronic_5y
+
+The paper's electronics cohort on Valendin et al.'s split (`docs/datasets.md`). All three
+families share `WINDOWS_5Y` and the benchmark cohort.
+- **W** is the benchmark pair (`docs/benchmarks.md`).
+- **X** and **Y** pin the least-biased searched study's settings per model and vary the
+  epoch rule (`select_from_epoch`) and one added input. They are reported in
+  `docs/insights-real-panels.md` §7, and the epoch rule in
+  `docs/insight-training-efficiency.md` §5.4.
+
+The four floored feature cells of X were trained twice. The `nofloor` workers retrained
+them and overwrote the first draw, whose forecasts are lost: a worker started without the
+finished suites on its disk retrains them.
 
 ---
 
@@ -467,10 +445,8 @@ Ordered by what a result depends on.
 3. **`ValendinLSTM` on the synthetic grid** — §5. Needs a declared `week`-embedded grid arm,
    or an explicit statement in the thesis that the frozen benchmark is a real-panel-only
    comparator.
-4. **`ar_saturating` is unreported.** Family E's best electronics arm by MAPE and among the
-   best on level — bias −11.6 ± 18.0, MAPE 43.3 ± 3.6, Spearman 0.299 ± 0.019 over 100
-   replications — appears in no document. It was also never carried onto gift and
-   multichannel, where family O ran only four of the seven encodings.
+4. **`ar_saturating` on gift and multichannel.** It is family E's best electronics arm on
+   level (`docs/insights-real-panels.md` §4.1), and family O never ran it.
 5. **Family E is not budget-matched across its own arms** (§4.1): three arms at 40–80
    replications against eleven at 100. The missing shard `b` of CDNOW `ar_ratio` is cheap
    to finish; the two `ar_unbounded` arms are deliberate.
@@ -485,6 +461,12 @@ Ordered by what a result depends on.
    LSTM-vs-Transformer statement and treat A as superseded.
 9. **Extra shards** anywhere a comparison turns out to be within noise. Nothing beyond
    shard `a` exists in families B, G or H.
+10. **E2**: recompute `kmeans_8` before the validation window, and re-run electronics
+    `archive / kmeans_8` (`docs/feature_engineering.md` §5).
+11. **E4 / E5**: a stopping rule that suits the flat temporal curve, and a floor scaled to
+    calibration length (`docs/insight-training-efficiency.md` §7).
+12. **The CDNOW tripling under the floored paper recipe** is unexplained after E1. It needs
+    a 90-epoch-floor arm on CDNOW (`docs/insight-training-efficiency.md` §5.3).
 
 ---
 

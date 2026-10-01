@@ -6,31 +6,12 @@ can possibly be, given that `D` is never observed in any panel.
 
 Read `CLAUDE.md` for the model contract and `CONTEXT.md` for the vocabulary first, and
 `docs/feature_engineering.md` before touching anything a rollout reads. This document
-continues an argument those two started: `loss-functions.md` §5.6 shows that
+continues an argument those two started: `hurdle-model.md` §2 shows that
 zero-inflation and hurdle formulations are vacuous over a free softmax, and
 `feature_engineering.md` shows that the recency clock the BTYD literature leans on is
 capped by the calibration window and drifts out of range during the holdout. An
 absorbing state is the first proposal in this package that answers both at once, and
 the one place where "add a class to the softmax" is *not* vacuous.
-
-> **Revised under the statistical protocol (2026-09-28).** Every comparison below now
-> carries Δ with its 95% percentile-bootstrap interval from
-> `panelclv.evaluation.effects.effect`, computed by
-> `.scratch/statistical-protocol/small_docs_effects.py`; the 2×2 and the latch are paired
-> on study (the same weights read several ways, n = 8). Verdicts that changed:
->
-> - *Feedback inflates bias* ("measurably false", "flat to ~1pp") → **no clear
->   difference at n = 8** (Δ −0.24 points, CI −3.0 to +2.0). Not shown to be absent.
-> - *MAPE untouched across the 2×2* → **supported and small**: the true-history readouts
->   lower MAPE by 1.0–1.4 points.
-> - *Latch gain "reliable, 8/8"* → supported by its interval; the sign count stays only
->   as description.
-> - *Unbounded arm's bias is worse teacher-forced than rolled out* → **no clear
->   difference at n = 8** (Δ +236, CI −38 to +756); the "shielding" account is now a
->   hypothesis.
-> - The comparisons against Pareto/NBD's 0.310 rest on one archived fit (n = 1), so they
->   are tested against that number as a fixed reference and say nothing about Pareto/NBD's
->   own refit spread.
 
 **The verdict, up front.** The idea is sound, the obvious implementation cannot train,
 and the motivation usually given for it — that simulated paths *resurrect* dead
@@ -319,28 +300,11 @@ that the ranking is shown to be zero. The superseding note below is the stronger
 evidence on how much recency these models can recover; the recency-lookup rows are
 single deterministic numbers and are descriptive.
 
-> **Superseded in part, 21 September 2026.** The ρ ≈ 0 above is real, but it is a property
-> of how those archived models were *trained*, not only of what they were given.
-> `docs/insights-real-panels.md` §5.2 re-runs the same configuration —
-> `["Transactions", "week_sin", "week_cos"]`, no AR features, no cluster label — with a
-> training floor instead of patience 7, over 20 replications on all four panels:
->
-> | panel | as archived (patience 7) | trained to the paper's epoch count |
-> | --- | ---: | ---: |
-> | electronics | 0.029 | **0.182** |
-> | multichannel | 0.003 | **0.079** |
-> | cdnow | 0.386 | 0.352 |
-> | gift | 0.326 | 0.263 |
->
-> So on the two panels this section is about, the models recover *some* of the recency
-> signal once they are trained long enough to try — a sixfold rise on electronics from an
-> input set that contains no recency at all. They still fall short of the 0.296 that the
-> single integer buys, and short of the 0.305 a cluster label buys (§15.1), so **the
-> argument below is unchanged in direction and weaker in magnitude**: the gap to close is
-> 0.18 → 0.30, not 0.00 → 0.30.
->
-> Read "the neural models recover none of it" as "an undertrained neural model recovers
-> none of it".
+> **Superseded in part.** The ρ ≈ 0 above belongs to an *undertrained* model. Trained to the
+> paper's epoch count, the same inputs rank electronics customers at 0.18
+> (`docs/insights-real-panels.md` §5.2). That is still short of the 0.296 a single recency
+> integer buys, so the argument below holds in direction and is weaker in magnitude: the
+> gap is 0.18 → 0.30, not 0.00 → 0.30.
 
 **The caveat that governs this whole subsection:** that configuration's `seq_cols` are
 `["Transactions", "week_sin", "week_cos"]` — **no autoregressive features**. Recency was
@@ -694,7 +658,7 @@ Everything above is either measured here or cited from a document in this repo.
 | The loss is computed on a time-flattened tensor | `src/panelclv/training/loop.py:106`, `:170` |
 | Scoring authority and Monte Carlo mean | `src/panelclv/models/monte_carlo_forecasting.py:401`, `:542` |
 | Pareto/NBD `p_alive` and the latent churn time τ | `src/panelclv/benchmarks/pareto_nbd.py:249-258` |
-| Hurdle and zero-inflation are vacuous over a free softmax | `docs/loss-functions.md` §5.6 |
+| Hurdle and zero-inflation are vacuous over a free softmax | `docs/hurdle-model.md` §2 |
 | The four constraints a loss proposal must satisfy | `docs/loss-functions.md` §1 |
 | Unbounded recency blows the forecast up; bounded flags fix it; the failure is not exposure bias | `docs/insights-real-panels.md` §4.2 |
 | Bounded AR flags lift electronics ρ from about 0.04 to 0.26 | `docs/insights-real-panels.md` §4.1 |

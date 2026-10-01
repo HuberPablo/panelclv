@@ -2,7 +2,7 @@
 
 Status: wontfix
 
-Closes open item 1 of `docs/pareto-nbd-cdnow-replication.md` §13, and **overturns the
+Closes open item 1 of the CDNOW replication (`docs/benchmarks.md`), and **overturns the
 suspicion it was opened on**. §9(b) of that document flagged `cal_end` being the last
 calibration period's `period_start` as a probable off-by-one. It is not one. The
 arithmetic is self-consistent, and the residual convention effect is smaller than the

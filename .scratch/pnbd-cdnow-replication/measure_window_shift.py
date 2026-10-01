@@ -1,6 +1,6 @@
 """What the Pareto/NBD's weekly-clock conventions are worth, measured.
 
-Background: `docs/pareto-nbd-cdnow-replication.md` §9(b) flagged two choices in
+Background: `docs/benchmarks.md` ("Pareto/NBD on CDNOW against Jerath, Fader & Hardie") flagged two choices in
 `benchmarks/pareto_nbd._build_cbs` that it could not separate. This script separates
 them. The conclusion is in
 `.scratch/pnbd-cdnow-replication/issues/01-pareto-weekly-discretisation-convention.md`;

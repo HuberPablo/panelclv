@@ -1,7 +1,7 @@
 """Replicate Jerath, Fader & Hardie's CDNOW Pareto/NBD result, and score the same
 fit the way this package scores a forecast.
 
-Written for `docs/pareto-nbd-cdnow-replication.md`; every number in that document
+Written for `docs/benchmarks.md` ("Pareto/NBD on CDNOW against Jerath, Fader & Hardie"); every number in that document
 comes from one run of this script.
 
 The question it answers: JFH report a cumulative aggregate MAPE of 1.35% for the

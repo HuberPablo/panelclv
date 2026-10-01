@@ -10,24 +10,6 @@ because the negative result is worth keeping — it is a measured answer about a
 current architecture, not a dead end to forget — and because understanding *why* it
 does not win says something about what this forecasting problem actually rewards.
 
-> **Revised under the statistical protocol (2026-09-28).** §10–§11's comparisons now
-> carry Δ with a 95% percentile-bootstrap interval from
-> `panelclv.evaluation.effects.effect`
-> (`.scratch/statistical-protocol/small_docs_effects.py`). The LSTM and P-sLSTM runs are
-> compared as **independent** (n = 8 / 8): each seed j seeds both, but two architectures
-> consume the same random stream differently, so seed j is not a unit both were
-> measured on. Verdicts:
->
-> - Run 1, P-sLSTM beats the class prior ("8.7% ± 0.3, reproducibly") → **supported**
->   (8.67% below the prior, CI +8.51 to +8.98, n = 3).
-> - Run 2, "P-sLSTM is worse on all three metrics" → **no clear difference at n = 8** on
->   MAPE (Δ +2.8, CI −3.0 to +8.2) or |bias| (Δ +6.8, CI −3.8 to +17.7); RMSE is
->   descriptive. The verdict "does not beat the LSTM" stands; "loses" does not.
-> - Run 2, "validation CE lower in every seed … not noise" → **not re-tested under the
->   statistical protocol**: the per-seed CE values were only in a run log that is gone.
-> - "The neural models are unbiased on average" → **no clear bias at n = 8** (not a
->   demonstration of zero bias); Pareto/NBD's under-prediction is supported.
-
 Read `CONTEXT.md` first for the vocabulary (*calibration*, *holdout*, *rollout*,
 *trial*). This document assumes it, and assumes the categorical-head contract
 `CLAUDE.md` states: logits `(B, T, K)`, a count as a class not a quantity,
