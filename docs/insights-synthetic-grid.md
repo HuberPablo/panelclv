@@ -1,38 +1,13 @@
 # Insights from the Pareto/NBD synthetic grid studies
+Stored forecasts under `Studies/seasonal_4x4x10*`.
 
-As of 2026-09-28. Exported from the Claude Doc
-<https://claude.ai/code/artifact/bff00b0b-93dd-4be8-8f71-5ea53e3d965b>; all numbers were
-recomputed from the stored forecasts under `Studies/seasonal_4x4x10*`.
-
-**Revised under the statistical protocol (2026-09-28).** Every test now follows
+ Every test follows
 `docs/statistical-protocol.md`: Δ is the difference of means with a 95% percentile-bootstrap
 interval (`evaluation.effects.effect`), run per rate × churn cell only (paired by panel;
-independent for 1,000 vs 3,000 customers). Rate, churn
-and whole-grid results are now described, not tested, and the pooled tables carry no marks.
-Δ values changed throughout because they are now differences of means. Verdicts that moved:
+independent for 1,000 vs 3,000 customers).
 
-- Claim 1: Pareto/NBD ranks better in 94 of 96 cell comparisons, not all of them. At 3,000
-  customers, rate 0.30, churn 20%, both LSTM arms rank slightly better (+0.003, supported).
-  At 3,000 customers and rate 0.05, the LSTM's MAPE lead over Pareto/NBD (supported
-  rate-pooled before) is clear in no cell.
-- Claim 2: was a tested trend; it is now a described pattern across cells.
-- Claim 4: the Transformer is also hurt at rate 0.10 (two cells), not only at rate 0.30.
-- Claim 5: with the unbounded counters, the label no longer "helps whenever": it hurts the
-  LSTM badly in two rate-0.01 cells.
-- Claim 7: the true season lowers Pareto/NBD's MAPE in 16 of 16 cells (was 15). Against the
-  seasonal Pareto/NBD at rate 0.30, the LSTM is no longer "level": it keeps a small lead at
-  churn 20–40% and loses at churn 80%.
-- Claim 9: the LSTM leaks more than Pareto/NBD at rate 0.10, churn 80% (was "equal"); the
-  Transformer leaks more in 15 of 16 cells (was 13).
-- Claim 11: it is now described
-  per cell with no test (a correlation over panels is not a difference of means), and the
-  verdict stays "not supported". The Transformer layer count is the one consistent pattern
-  (positive in 13 of 16 cells).
-- Claim 12: the LSTM `no_ar` at rate 0.01 goes from "no change" to mixed (worse at churn
-  20%, better at churn 80%).
-- Results: the MAPE leader is clearly ahead of the runner-up in 7 of 16 cells (was 6; rate
-  0.30, churn 40% is new). Fewer per-cell entries are marked tied with the best (47 of 1,024
-  metric entries against 85).
+
+
 
 ## How the datasets were made
 
@@ -57,7 +32,7 @@ and β by the generator.
 | Churn rate: share of customers dropped out by week 52 | 20%, 40%, 60%, 80% |
 | Shape parameters | r = s = 2.0 |
 | Replicate panels per cell | 10 (different seeds, base seed 42) |
-| Total panels | 4 × 4 × 10 = 160 |
+| Total panels (datasets) | 4 × 4 × 10 = 160 |
 | Customers per panel | 1,000 (a second grid, `seasonal_4x4x10_n3000`, uses 3,000) |
 | Length | 156 weeks, 1999–2001 |
 
@@ -74,7 +49,7 @@ customer but never shown to a model.
 
 Three models ran on all 160 panels: an LSTM, a Transformer and the Pareto/NBD benchmark.
 The frozen ValendinLSTM did not run on this grid. It reads only embedded columns (count and
-week), and every arm here, the `no_ar` baseline included, carries the continuous calendar
+week), and every arm here, the `no_ar`(no autoregressive features) baseline included, carries the continuous calendar
 columns (year index, week sin/cos), which it refuses (F11). It did run without covariates
 on the real panels (CDNOW, electronics), where the calendar can be left out.
 
@@ -87,7 +62,7 @@ on the real panels (CDNOW, electronics), where the calendar can be left out.
 | Transformer | batch {32, 64, 128, 256}; d_model {32, 64, 128}; heads {2, 4, 8}; layers 1–3; dropout {0, 0.1, 0.2, 0.3}; learning rate 1e-4–3e-3 (log) | same |
 | Pareto/NBD | none: one hierarchical-Bayes MCMC fit (BTYDplus defaults) | — |
 
-Both neural models use the `valendin` embedder. The `projected` embedder was declared but
+Both neural models use the `valendin`(original paper) embedder. The `projected` embedder was declared but
 cut on cost.
 
 **Arms: how a customer's history is fed in.** Three AR encodings crossed with two cluster
@@ -114,8 +89,6 @@ A second grid with 3,000 customers per panel (17–18 September) re-ran two LSTM
 | Win rate | share of panels where a model's MAPE beats Pareto/NBD's on the same panel | high |
 | Spearman | rank correlation of each customer's predicted and actual holdout-year total, over the panel's customers | 1 |
 | Validation CE | cross-entropy per customer-week of the chosen trial on the 2000 validation window (the Optuna objective, one step ahead with the true counts fed in). Neural models only: Pareto/NBD emits no class distribution. Depends on the panel's rate and churn, so compare within one cell | low |
-| Shape correlation | correlation of predicted and actual weekly totals; ignores level | 1 |
-| Alive ratio R_A / dead leakage L_D | forecast volume before / after each customer's true death week, over true volume (uses the hidden truth) | 1 / 0 |
 
 The per-cell Results tables show five metrics, each as the mean over the cell's panels with
 its 95% percentile-bootstrap interval in brackets; tables that pool cells, and the later
@@ -129,10 +102,7 @@ runs inside one rate × churn cell of 10 panels. The effect is the difference of
 Δ = mean(B) − mean(A), with its 95% percentile-bootstrap interval from 10,000 resamples
 (`panelclv.evaluation.effects.effect`), and a claim is supported when the interval excludes
 0. Two trees fitted on the same panels are paired by panel. The 1,000- and 3,000-customer
-grids are independent replications (claim 12 says why). Results per rate, per churn level
-or over the whole grid pool cells, so they are described, never tested: the pooled mean,
-and the pattern of per-cell verdicts. RMSE is descriptive only (§4 of the protocol).
-
+grids are independent replications. 
 ## Results
 
 The ranking depends on both the purchase rate and the churn rate. On MAPE, Pareto/NBD leads
@@ -154,21 +124,13 @@ same panel, one metric each, and count the table's panels where the tree wins:
 lower MAPE, smaller |bias| (closer to 0, either sign), higher Spearman. The counts are
 description only and carry no marks.
 
-**Best, and not clearly worse than the best** (per-cell tables only). Every metric column
+**Best tree** (per-cell tables only): Every metric column
 of a cell's table marks its best tree in **bold**: the lowest mean over the cell's panels
 for RMSE, MAPE, Val. CE and |bias| (taken per panel, so a tree that errs +50% on one panel
 and −50% on another is not unbiased), and the highest mean for Spearman. A tree is
 <ins>underlined</ins> when the paired 95% bootstrap interval of its difference from the
-best tree, over the cell's 10 panels, contains 0. Pairing compares the two trees within
-each panel, which removes the panel-to-panel differences in difficulty. Pareto/NBD has no
-CE. The rate-pooled tables carry no marks: they pool four cells, and the protocol never
-tests across cells.
-
-Read an underline as "no clear difference from the best at n = 10", never as "equal". 47
-of the 1,024 metric entries in the per-cell tables are underlined. The mark is per column,
-so a tree underlined on MAPE can be plain on Spearman. At rate 0.30 and churn 80%, LSTM
-`ar_bounded` is not underlined against LSTM `no_ar` on MAPE at 35 against 32: the paired
-difference is small but consistent (+3, 95% CI +1 to +6).
+best tree, over the cell's 10 panels, contains 0.
+Read an underline as "no clear difference from the best at n = 10", never as "equal". 
 
 ### By purchase rate and churn
 
@@ -462,83 +424,7 @@ One table per rate × churn cell, 10 panels per row (9 where a study was left ou
 | Transformer | `ar_unbounded` + `kmeans_8` | 4.26 [3.89, 4.65] | +39 [+19, +57] | 56 [48, 65] | 0.47 [0.44, 0.49] | 0.123 [0.115, 0.130] | 0 of 10 | 1 of 10 | 0 of 10 |
 | Transformer | `no_ar` + `kmeans_8` | 4.96 [4.36, 5.63] | +119 [+88, +148] | 120 [90, 148] | 0.45 [0.44, 0.47] | 0.129 [0.122, 0.137] | 0 of 10 | 0 of 10 | 0 of 10 |
 
-### By purchase rate, churn pooled
 
-The same tables with the four churn levels pooled, 40 panels per row. These pool four
-cells, so they are description only: means, with no interval and no marks, and the
-"Beats P/NBD" columns count wins over the rate's 40 panels.
-
-**Rate 0.01**, churn 20–80% pooled (40 panels)
-
-| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE | Beats P/NBD: MAPE | Beats P/NBD: \|bias\| | Beats P/NBD: Spearman |
-| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| **Pareto/NBD** | — | 0.62 | +35 | 90 | 0.23 | — | — | — | — |
-| LSTM | `no_ar` | 0.84 | +309 | 314 | 0.00 | 0.058 | 0 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` | 3.38 | +505 | 513 | −0.18 | 0.058 | 1 of 40 | 1 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` | 0.77 | +231 | 243 | −0.06 | 0.058 | 3 of 40 | 1 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` + `kmeans_8` | 0.77 | +210 | 221 | 0.10 | 0.057 | 0 of 40 | 0 of 40 | 1 of 40 |
-| LSTM | `ar_unbounded` + `kmeans_8` | 7.05 | +1107 | 1118 | −0.07 | 0.056 | 0 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `no_ar` + `kmeans_8` | 0.85 | +302 | 307 | 0.14 | 0.057 | 0 of 40 | 0 of 40 | 1 of 40 |
-| Transformer | `no_ar` | 0.67 | +74 | 120 | 0.05 | 0.056 | 14 of 40 | 15 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` | 0.75 | +89 | 150 | 0.00 | 0.055 | 20 of 40 | 18 of 40 | 1 of 40 |
-| Transformer | `ar_bounded` | 0.65 | +50 | 103 | 0.04 | 0.056 | 15 of 40 | 11 of 40 | 1 of 40 |
-| Transformer | `ar_bounded` + `kmeans_8` | 0.71 | +60 | 119 | 0.15 | 0.053 | 15 of 40 | 13 of 40 | 5 of 40 |
-| Transformer | `ar_unbounded` + `kmeans_8` | 0.70 | +44 | 121 | 0.05 | 0.051 | 8 of 40 | 9 of 40 | 1 of 40 |
-| Transformer | `no_ar` + `kmeans_8` | 0.73 | +71 | 130 | 0.14 | 0.055 | 16 of 40 | 11 of 40 | 2 of 40 |
-
-**Rate 0.05**, churn 20–80% pooled (40 panels)
-
-| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE | Beats P/NBD: MAPE | Beats P/NBD: \|bias\| | Beats P/NBD: Spearman |
-| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| **Pareto/NBD** | — | 1.44 | +11 | 44 | 0.54 | — | — | — | — |
-| LSTM | `no_ar` | 2.10 | +199 | 200 | 0.13 | 0.125 | 2 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` | 11.88 | +582 | 582 | 0.36 | 0.124 | 0 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` | 1.64 | +44 | 58 | 0.49 | 0.118 | 10 of 40 | 5 of 40 | 1 of 40 |
-| LSTM | `ar_bounded` + `kmeans_8` | 1.89 | +121 | 126 | 0.42 | 0.116 | 2 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` + `kmeans_8` | 10.18 | +418 | 424 | 0.38 | 0.121 | 3 of 40 | 2 of 40 | 0 of 40 |
-| LSTM | `no_ar` + `kmeans_8` | 2.08 | +200 | 202 | 0.41 | 0.118 | 0 of 40 | 0 of 40 | 0 of 40 |
-| Transformer | `no_ar` | 1.99 | +109 | 114 | 0.35 | 0.122 | 4 of 40 | 4 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` | 1.95 | +95 | 105 | 0.43 | 0.118 | 3 of 40 | 1 of 40 | 0 of 40 |
-| Transformer | `ar_bounded` | 1.74 | +64 | 78 | 0.48 | 0.118 | 9 of 40 | 4 of 40 | 1 of 40 |
-| Transformer | `ar_bounded` + `kmeans_8` | 1.94 | +85 | 96 | 0.47 | 0.113 | 6 of 40 | 3 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` + `kmeans_8` | 1.97 | +72 | 87 | 0.44 | 0.113 | 7 of 40 | 7 of 40 | 0 of 40 |
-| Transformer | `no_ar` + `kmeans_8` | 2.00 | +115 | 122 | 0.45 | 0.114 | 3 of 40 | 2 of 40 | 0 of 40 |
-
-**Rate 0.10**, churn 20–80% pooled (40 panels)
-
-| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE | Beats P/NBD: MAPE | Beats P/NBD: \|bias\| | Beats P/NBD: Spearman |
-| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| **Pareto/NBD** | — | 2.19 | +4 | 37 | 0.65 | — | — | — | — |
-| LSTM | `no_ar` | 2.71 | +93 | 98 | 0.55 | 0.177 | 11 of 40 | 4 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` | 12.71 | +315 | 322 | 0.53 | 0.181 | 2 of 40 | 2 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` | 2.42 | +20 | 36 | 0.62 | 0.169 | 26 of 40 | 10 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` + `kmeans_8` | 2.86 | +76 | 78 | 0.56 | 0.166 | 4 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` + `kmeans_8` | 8.21 | +147 | 162 | 0.54 | 0.173 | 2 of 40 | 2 of 40 | 0 of 40 |
-| LSTM | `no_ar` + `kmeans_8` | 3.13 | +138 | 139 | 0.51 | 0.172 | 2 of 40 | 0 of 40 | 0 of 40 |
-| Transformer | `no_ar` | 3.18 | +126 | 130 | 0.52 | 0.178 | 4 of 40 | 1 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` | 3.79 | +148 | 149 | 0.58 | 0.171 | 0 of 40 | 0 of 40 | 0 of 40 |
-| Transformer | `ar_bounded` | 2.73 | +64 | 77 | 0.60 | 0.170 | 12 of 40 | 2 of 40 | 0 of 40 |
-| Transformer | `ar_bounded` + `kmeans_8` | 3.12 | +92 | 97 | 0.57 | 0.164 | 3 of 40 | 1 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` + `kmeans_8` | 3.16 | +81 | 88 | 0.56 | 0.165 | 5 of 40 | 1 of 40 | 0 of 40 |
-| Transformer | `no_ar` + `kmeans_8` | 3.34 | +114 | 116 | 0.56 | 0.167 | 1 of 40 | 0 of 40 | 0 of 40 |
-
-**Rate 0.30**, churn 20–80% pooled (38–40 panels)
-
-| Model | Arm | RMSE | Bias % | MAPE | Spearman | Val. CE | Beats P/NBD: MAPE | Beats P/NBD: \|bias\| | Beats P/NBD: Spearman |
-| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |
-| **Pareto/NBD** | — | 5.17 | −13 | 32 | 0.79 | — | — | — | — |
-| LSTM | `no_ar` | 5.16 | +2 | 21 | 0.72 | 0.304 | 37 of 40 | 20 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` | 16.34 | +131 | 141 | 0.65 | 0.334 | 7 of 40 | 5 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` | 4.94 | −2 | 20 | 0.72 | 0.299 | 35 of 40 | 27 of 40 | 0 of 40 |
-| LSTM | `ar_bounded` + `kmeans_8` | 6.61 | +56 | 56 | 0.67 | 0.300 | 9 of 40 | 0 of 40 | 0 of 40 |
-| LSTM | `ar_unbounded` + `kmeans_8` | 9.06 | +33 | 61 | 0.66 | 0.318 | 8 of 40 | 11 of 40 | 0 of 40 |
-| LSTM | `no_ar` + `kmeans_8` | 7.31 | +78 | 78 | 0.65 | 0.306 | 7 of 40 | 0 of 40 | 0 of 40 |
-| Transformer | `no_ar` | 6.47 | +43 | 56 | 0.60 | 0.327 | 17 of 40 | 11 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` | 8.92 | +89 | 92 | 0.63 | 0.323 | 2 of 38 | 2 of 38 | 0 of 38 |
-| Transformer | `ar_bounded` | 5.98 | +38 | 50 | 0.66 | 0.305 | 15 of 40 | 11 of 40 | 0 of 40 |
-| Transformer | `ar_bounded` + `kmeans_8` | 6.96 | +60 | 64 | 0.65 | 0.301 | 6 of 40 | 4 of 40 | 0 of 40 |
-| Transformer | `ar_unbounded` + `kmeans_8` | 7.00 | +36 | 50 | 0.66 | 0.306 | 7 of 40 | 10 of 40 | 0 of 40 |
-| Transformer | `no_ar` + `kmeans_8` | 7.11 | +64 | 67 | 0.63 | 0.314 | 8 of 40 | 4 of 40 | 0 of 40 |
 
 ### The three best trees per cell, by MAPE
 
@@ -658,7 +544,7 @@ Ranked by mean per-customer Spearman (highest first); layout as above.
 
 - **MAPE leader by cell.** Pareto/NBD leads all 8 cells at rates 0.01–0.05 and the two
   low-churn cells at rate 0.10. LSTM `ar_bounded` leads at rate 0.10 with churn 60–80% and at
-  rate 0.30 with churn 20–40%; LSTM `no_ar` leads at rate 0.30 with churn 60–80%.
+  rate 0.30 with churn 20–40%; LSTM `no_ar` leads at rate 0.30 with churn 60–80%. We can also see that at lower transaction rate, the transformer performs better than the LSTM
 - **Most MAPE leads are not separated.** The runner-up is clearly behind the leader (paired
   interval excluding 0, 10 panels) in only 7 of 16 cells: behind Pareto/NBD at rate 0.05
   with churn 20–60%, behind the LSTM at rate 0.10 with churn 60–80% (Pareto/NBD, by 4
@@ -690,36 +576,6 @@ Ranked by mean per-customer Spearman (highest first); layout as above.
   is rate 0.01, churn 20%, where no correlation is clear. The ordering is loose at the top:
   the `kmeans_8` arms often have a lower CE and a worse MAPE than their `no_cluster`
   counterparts.
-
-<details><summary>Within-panel rank correlation of Val. CE with the holdout, mean over each cell's 10 panels</summary>
-
-| Rate | Churn | n | ρ(CE, MAPE) [95% CI] | ρ(CE, RMSE) [95% CI] | ρ(CE, Spearman) [95% CI] |
-| --- | --- | --- | --- | --- | --- |
-| 0.01 | 20% | 10 | 0 [−0.13, +0.14] | −0.13 [−0.30, +0.04] | −0.11 [−0.27, +0.06] |
-| 0.01 | 40% | 10 | **+0.40 [+0.27, +0.53]** | **+0.30 [+0.13, +0.46]** | **−0.26 [−0.39, −0.11]** |
-| 0.01 | 60% | 10 | **+0.70 [+0.59, +0.79]** | **+0.56 [+0.45, +0.65]** | **−0.51 [−0.63, −0.39]** |
-| 0.01 | 80% | 10 | **+0.69 [+0.56, +0.81]** | **+0.62 [+0.45, +0.76]** | **−0.51 [−0.64, −0.36]** |
-| 0.05 | 20% | 10 | **+0.21 [+0.10, +0.32]** | **+0.30 [+0.18, +0.41]** | **−0.39 [−0.50, −0.31]** |
-| 0.05 | 40% | 10 | **+0.46 [+0.39, +0.53]** | **+0.36 [+0.26, +0.47]** | **−0.38 [−0.51, −0.26]** |
-| 0.05 | 60% | 10 | **+0.39 [+0.30, +0.49]** | **+0.39 [+0.28, +0.50]** | **−0.55 [−0.64, −0.45]** |
-| 0.05 | 80% | 10 | **+0.67 [+0.60, +0.75]** | **+0.66 [+0.58, +0.74]** | **−0.60 [−0.72, −0.46]** |
-| 0.10 | 20% | 10 | **+0.45 [+0.33, +0.57]** | **+0.45 [+0.34, +0.56]** | **−0.20 [−0.30, −0.10]** |
-| 0.10 | 40% | 10 | **+0.30 [+0.14, +0.47]** | **+0.24 [+0.11, +0.37]** | **−0.30 [−0.42, −0.18]** |
-| 0.10 | 60% | 10 | **+0.27 [+0.14, +0.39]** | **+0.19 [+0.08, +0.30]** | **−0.37 [−0.50, −0.25]** |
-| 0.10 | 80% | 10 | **+0.49 [+0.33, +0.62]** | **+0.23 [+0.07, +0.38]** | **−0.32 [−0.47, −0.16]** |
-| 0.30 | 20% | 10 | **+0.53 [+0.42, +0.63]** | **+0.45 [+0.35, +0.56]** | **−0.51 [−0.60, −0.42]** |
-| 0.30 | 40% | 10 | **+0.36 [+0.21, +0.50]** | **+0.43 [+0.28, +0.57]** | **−0.55 [−0.63, −0.47]** |
-| 0.30 | 60% | 10 | **+0.21 [+0.08, +0.35]** | **+0.33 [+0.18, +0.49]** | **−0.51 [−0.59, −0.43]** |
-| 0.30 | 80% | 10 | **+0.28 [+0.15, +0.40]** | **+0.39 [+0.28, +0.48]** | **−0.56 [−0.69, −0.42]** |
-
-</details>
-
-**Shape and death detection** (same setting; from `studies.synthetic_grid`,
-`docs/insights-arm-sweep.md` §6–7). Shape correlation of predicted vs actual weekly totals,
-rates pooled: Pareto/NBD −0.07 to +0.09, LSTM `ar_bounded` 0.29–0.69, Transformer
-`ar_bounded` 0.28–0.51, falling as churn rises. At rate 0.30 only: Pareto/NBD's alive ratio
-R_A is 0.58–0.74 and dead leakage L_D 0.11–0.29; LSTM `ar_bounded` R_A 0.60–0.93, L_D
-0.17–0.27; Transformer `ar_bounded` L_D 0.23–0.66.
 
 ## Impact of cohort size
 
@@ -772,45 +628,6 @@ from +365 to +147; at 3,000, from +156 to +24. The churn trend in the neural bia
 cohort-size effect: at 1,000 generated customers, churn 80% panels keep only about 510 active
 customers against about 800 at churn 20%.
 
-## Impact of seasonality
-
-Seasonality is the reason the LSTM beats Pareto/NBD on dense panels. Ignoring it costs
-Pareto/NBD 14–17 MAPE points at rates 0.05–0.30. Given the true seasonal pattern,
-Pareto/NBD's MAPE at rate 0.30 drops to 17, below the LSTM's 20.
-
-**What can be measured.** Every grid on disk has the same seasonality: peaks at weeks 12, 25,
-30 and 47, amplitude 1.5, width 3. Peak weeks carry 2.2× the off-season volume. The older
-grids reuse seed 42 and are the same panels. No run compares seasonal with non-seasonal
-panels, so the neural models' sensitivity to seasonality is not measured.
-
-**Counterfactual for Pareto/NBD.** Pareto/NBD has no seasonal term, so its weekly forecast is
-a smooth decay. Its 160 stored forecasts were rescored after multiplying each holdout week by
-the true seasonal multiplier, rescaled to mean 1 so the yearly total barely changes. Each
-cell is RMSE / bias % / MAPE, mean over 40 panels, 1,000 customers:
-
-| Pareto/NBD forecast | Rate 0.01 | 0.05 | 0.10 | 0.30 |
-| --- | --- | --- | --- | --- |
-| As fitted (no seasonality) | 0.62 / +35 / 90 | 1.44 / +11 / 44 | 2.19 / +4 / 37 | 5.17 / −13 / 32 |
-| With true seasonality | 0.62 / +35 / 83 | 1.44 / +11 / 30 | 2.19 / +3 / 21 | 5.18 / −14 / 17 |
-| LSTM `ar_bounded`, for reference | 0.77 / +231 / 243 | 1.64 / +44 / 58 | 2.42 / +20 / 36 | 4.94 / −2 / 20 |
-
-The MAPE gain is supported in all 16 cells (claim 7; paired, 10 panels a cell). By churn, the
-pooled mean gain shrinks from 16 points at churn 20% (36 → 20) to 9 at churn 80% (75 → 66).
-
-**Reading.**
-
-- Seasonality moves MAPE only. RMSE on customer totals and bias measure yearly volume, which
-  seasonality does not change.
-- Given the season, Pareto/NBD beats the LSTM on MAPE in 13 of 16 cells, every cell at
-  rates 0.01–0.10 and churn 80% at rate 0.30. The LSTM keeps a small, supported lead at rate
-  0.30 with churn 20–40% (2–3 points), and churn 60% shows no clear difference. So most of
-  the LSTM's dense-panel MAPE wins (claim 1) come from modelling the season, not from
-  modelling customers better; on the densest, least-churned panels a small edge remains.
-- The share of MAPE that is shape error (MAPE minus |bias|) tells the same story: 19–55
-  points for Pareto/NBD, 9–12 for the LSTM with flags.
-- **Open:** a grid without seasonality (amplitude 0), run for Pareto/NBD and the neural
-  models, would measure the neural side directly.
-
 ## Impact of AR features
 
 Bounded flags help both models, most on mid-rate panels (0.05–0.10) and at high churn, and
@@ -823,47 +640,7 @@ has-bought-before; `ar_unbounded` = recency, frequency and age as counters. Each
 on customer totals / bias % / MAPE, mean over 40 panels. The entries pool four cells, so
 they are description only and carry no marks; the tests are per cell, below.
 
-**By purchase rate** (the 4 churn levels pooled):
-
-| Model | AR features | Rate 0.01 | 0.05 | 0.10 | 0.30 |
-| --- | --- | --- | --- | --- | --- |
-| Pareto/NBD | — | 0.62 / +35 / 90 | 1.44 / +11 / 44 | 2.19 / +4 / 37 | 5.17 / −13 / 32 |
-| LSTM | none | 0.84 / +309 / 314 | 2.10 / +199 / 200 | 2.71 / +93 / 98 | 5.16 / +2 / 21 |
-| LSTM | unbounded | 3.38 / +505 / 513 | 11.88 / +582 / 582 | 12.71 / +315 / 322 | 16.34 / +131 / 141 |
-| LSTM | bounded | 0.77 / +231 / 243 | 1.64 / +44 / 58 | 2.42 / +20 / 36 | 4.94 / −2 / 20 |
-| Transformer | none | 0.67 / +74 / 120 | 1.99 / +109 / 114 | 3.18 / +126 / 130 | 6.47 / +43 / 56 |
-| Transformer | unbounded | 0.75 / +89 / 150 | 1.95 / +95 / 105 | 3.79 / +148 / 149 | 8.92 / +89 / 92 |
-| Transformer | bounded | 0.65 / +50 / 103 | 1.74 / +64 / 78 | 2.73 / +64 / 77 | 5.98 / +38 / 50 |
-
-**By churn** (the 4 rates pooled; compare RMSE within a column only):
-
-| Model | AR features | Churn 20% | 40% | 60% | 80% |
-| --- | --- | --- | --- | --- | --- |
-| Pareto/NBD | — | 3.14 / +2 / 36 | 2.69 / +9 / 42 | 2.15 / +10 / 50 | 1.43 / +16 / 75 |
-| LSTM | none | 3.35 / +37 / 42 | 2.97 / +74 / 77 | 2.49 / +127 / 134 | 2.01 / +365 / 380 |
-| LSTM | unbounded | 19.44 / +328 / 330 | 12.08 / +255 / 259 | 7.19 / +333 / 337 | 5.60 / +618 / 632 |
-| LSTM | bounded | 3.24 / +32 / 39 | 2.78 / +49 / 56 | 2.22 / +66 / 79 | 1.54 / +147 / 183 |
-| Transformer | none | 3.99 / +41 / 57 | 3.52 / +71 / 84 | 2.85 / +94 / 110 | 1.96 / +145 / 170 |
-| Transformer | unbounded | 5.16 / +67 / 78 | 4.29 / +72 / 89 | 3.39 / +111 / 128 | 2.27 / +174 / 204 |
-| Transformer | bounded | 3.80 / +41 / 55 | 3.09 / +32 / 56 | 2.65 / +70 / 89 | 1.56 / +73 / 109 |
-
-**Tests: none → bounded** (claim 3 below gives every cell with its interval). Per rate, the
-pooled mean change in |bias| / MAPE / RMSE, then in how many of the rate's four cells each
-change is supported (paired, 10 panels a cell):
-
-| Model | Rate 0.01 | 0.05 | 0.10 | 0.30 |
-| --- | --- | --- | --- | --- |
-| LSTM | −77 / −71 / −0.07; 2 / 2 / 2 of 4 | −152 / −142 / −0.46; 3 / 3 / 3 of 4 | −70 / −62 / −0.29; 3 / 3 / 3 of 4 | −2 / −1 / −0.22; 1 / 3 / 3 of 4 (MAPE: 2 better, 1 worse) |
-| Transformer | −21 / −17 / −0.02; 0 / 1 / 1 of 4 | −41 / −36 / −0.25; 2 / 2 / 3 of 4 | −57 / −53 / −0.45; 2 / 2 / 2 of 4 | −5 / −6 / −0.49; 1 / 1 / 1 of 4 |
-
-Every supported cell above is an improvement except the one LSTM MAPE cell at rate 0.30,
-churn 80% (+3).
-
-**Tests: none → unbounded** (claim 4). The LSTM is worse on MAPE and |bias| in 13 of 16
-cells and on RMSE in all 16, at every rate. The Transformer is worse on MAPE in 5 cells, all
-at rates 0.10–0.30 (pooled means at rate 0.30: |bias| +41, MAPE +36, RMSE +2.4), and in no
-cell at rates 0.01–0.05.
-
+*
 **Reading.**
 
 - The flags matter where silence is informative but the model cannot learn it alone:
@@ -875,6 +652,54 @@ cell at rates 0.01–0.05.
 - Even with flags, the neural bias at churn 80% (+147 LSTM, +73 Transformer) stays far above
   Pareto/NBD's +16 at 1,000 customers. The cohort-size section shows that gap mostly closes
   for the LSTM at 3,000.
+
+## The shape of the miss
+
+Pareto/NBD misses the weekly shape; the neural models miss the level. An unbounded
+counter makes the forecast climb through the year.
+
+**Setting.** Seasonal panels, 1,000 customers, mean over the four purchase rates (40
+panels per entry). The entries are pooled means with no intervals, so they are description
+only. Curves: `scripts/plot_grid_forecasts.py --grid seasonal_4x4x10 --overview` (or
+`--per-cell`), which writes `figures/seasonal_4x4x10__forecast_overview*.png`.
+
+**Decay.** The ratio of second-half to first-half holdout volume. The four seasonal peaks
+straddle both halves, so the actual ratio sits near 1.
+
+| Model | Churn 20% | 40% | 60% | 80% |
+| --- | ---: | ---: | ---: | ---: |
+| **Actual** | 1.06 | 1.00 | 0.97 | 1.00 |
+| Pareto/NBD | 0.95 | 0.89 | 0.83 | 0.77 |
+| LSTM `ar_bounded` | 1.00 | 0.90 | 0.81 | 0.68 |
+| LSTM `no_ar` | 0.99 | 0.88 | 0.82 | 0.66 |
+| Transformer `ar_bounded` | 0.99 | 0.96 | 0.96 | 0.92 |
+| Transformer `no_ar` | 0.98 | 0.99 | 1.01 | 0.99 |
+| LSTM `ar_unbounded` | 1.93 | 1.45 | 1.19 | 0.95 |
+| Transformer `ar_unbounded` | 1.05 | 1.06 | 1.26 | 1.78 |
+
+- Pareto/NBD and the LSTM decay faster than the actuals, the LSTM most at high churn.
+  That is why its cells at rate 0.30 go negative.
+- The Transformer barely decays. Its miss is a level offset: its curve has the right shape
+  but sits above the actuals from week 0.
+- With unbounded counters the LSTM's volume climbs through the holdout. At rate 0.30,
+  churn 20%, it goes from about 250 to 870 a week while the actuals oscillate around 200.
+  The Transformer does the same at high churn.
+
+**Level against shape.** Both metrics are built from the weekly total curve:
+`bias % = 100·Σ(p − a)/Σa` and `MAPE = 100·Σ|p − a|/Σa`. So MAPE ≥ |bias|, and the gap is
+error that cancels in the yearly total but not week by week, i.e. shape error.
+
+| Rate | Model | MAPE | \|bias\| | Shape residual |
+| --- | --- | ---: | ---: | ---: |
+| 0.30 | Pareto/NBD | 32.0 | 13.5 | 18.5 |
+| 0.30 | LSTM `ar_bounded` | 19.8 | 11.3 | 8.5 |
+| 0.10 | Pareto/NBD | 37.3 | 9.4 | 27.9 |
+| 0.10 | LSTM `ar_bounded` | 36.1 | 23.7 | 12.4 |
+| 0.01 | Pareto/NBD | 90.2 | 35.4 | 54.8 |
+| 0.01 | LSTM `ar_bounded` | 243.2 | 231.6 | 11.6 |
+
+Pareto/NBD's error is mostly shape: it draws a flat line under a four-peak season (claim
+7). The neural error is mostly level: its shape residual stays near 10 at every rate.
 
 ## Claims and whether the evidence supports them
 
@@ -2384,4 +2209,4 @@ about 8-fold from rate 0.01 to 0.30, though, so it cannot be pooled across rates
   behave under other seasonal patterns.
 - **Transfer to real data.** The generator is a Pareto/NBD, so the benchmark is correct by
   construction here. On real panels there is no known ceiling (see
-  `docs/benchmarks-real-panels.md`).
+  `docs/insights-real-panels.md`).

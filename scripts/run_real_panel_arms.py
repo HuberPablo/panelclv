@@ -3,7 +3,7 @@
 `grids/seasonal_4x4x10.py` crossed three AR encodings with two cluster settings and
 found that none of them closes the gap to the Pareto/NBD: the best of twelve arms sits
 at 54.2% mean |bias| against the benchmark's 15.8%, and no arm flattens the churn
-gradient (`docs/insights-study.md` §2, §5). That answers the question on SYNTHETIC
+gradient (`docs/insights-synthetic-grid.md`). That answers the question on SYNTHETIC
 panels, where the Pareto/NBD is the true model by construction and therefore the ceiling.
 
 This script asks it on CDNOW and electronics, on the same axes, so the two runs can be
@@ -153,7 +153,7 @@ class Arm:
 
 # The Pareto/NBD sufficient statistics (t_x, x, T). Two of the three are capped by the
 # calibration window and keep counting through the holdout, which is the diagnosed
-# failure (docs/insights-study.md §4.3) -- this arm reproduces it on real panels.
+# failure (docs/insights-real-panels.md §4.2) -- this arm reproduces it on real panels.
 AR_UNBOUNDED = (
     "period_since_last_transaction",
     "cumulative_transactions",
@@ -899,7 +899,7 @@ def plot_tracking(panel: str, suffix: str | None = None) -> Path:
 
     The ensemble -- the mean of the 20 fits -- rather than one fit, because that is what
     a practitioner deploys and the only thing comparable to Pareto/NBD's single
-    deterministic fit (see docs/insights-study.md §9).
+    deterministic fit (see docs/model-selection.md §3.8).
 
     Each model is drawn at its best arm on this panel, so the picture compares models
     rather than one model against another's handicap. This is the plot that shows what

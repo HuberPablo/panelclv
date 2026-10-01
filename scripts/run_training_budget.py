@@ -1,6 +1,6 @@
 """Does training the way the paper trains fix the electronics collapse?
 
-`docs/training-budget.md` measures that every archived neural study stopped while its
+`docs/insight-training-efficiency.md` measures that every archived neural study stopped while its
 validation loss was still falling: patience 7 ends a run at a median epoch of 8-16, and
 the same model trained without early stopping keeps improving to epoch 88-247. The cause
 is not the constant. It is that our recipe is not the reference notebook's -- it trains
@@ -17,7 +17,7 @@ The arms
 `paper`     the notebook's recipe, every hyperparameter PINNED and one trial:
             lr 1e-3, weight decay 0 (AdamW with no decay IS Adam), batch 32,
             patience 5, n_epochs 150. No search, so nothing is confounded by
-            selection -- which matters because `docs/benchmarks-real-panels.md`
+            selection -- which matters because `docs/model-selection.md`
             shows the winning validation loss does not predict the forecast.
 `paper90`   the same pinned recipe with `min_epochs=90`. It exists because `paper`
             alone does not reproduce the notebook's TRAINING, only its settings:
@@ -115,7 +115,7 @@ BASE_SEED = 42
 N_TRIALS = 100
 
 # The LSTM arm under test: no AR channel, no cluster label, the panel's default calendar
-# (year index + week sin/cos). `docs/insights-cluster-ablation.md` §5.1 measures its
+# (year index + week sin/cos). `docs/insights-real-panels.md` §5.1 measures its
 # per-customer Spearman at 0.036 -- it is the cell this experiment is trying to move.
 LSTM_ARM = Arm(name="no_ar-no_cluster-valendin")
 
@@ -311,7 +311,7 @@ def check_complete(arms: list[str]) -> int:
 METRICS = ("bias_percent", "mape_aggregate", "rmse", "spearman")
 
 # The rows this experiment is read against: family N / family H electronics, as
-# `docs/benchmarks-real-panels.md` and `docs/insights-cluster-ablation.md` report them.
+# `docs/benchmarks.md` and `docs/insights-real-panels.md` report them.
 REFERENCE = {
     "ValendinLSTM (family N, patience 7)": dict(bias_percent=46.03, mape_aggregate=70.80,
                                                 rmse=0.3770, spearman=0.032),
@@ -336,7 +336,7 @@ def score(model_dir: Path, actual: np.ndarray, ref_ids: np.ndarray) -> dict[str,
 def report(arms: list[str]) -> None:
     """One table per model: each arm's distribution over its replications.
 
-    Read MAPE and Spearman, not bias: `docs/benchmarks-real-panels.md` measures a refit
+    Read MAPE and Spearman, not bias: `docs/model-selection.md` §2 measures a refit
     noise floor of 8.9 points of sd on electronics, which is wider than the bias
     differences this experiment is likely to produce.
     """

@@ -6,7 +6,7 @@ grids differ in exactly one thing: panel size. Run both and the difference is
 attributable to how many customers the model saw.
 
 The question it asks: the archived grid found aggregate bias monotone in the churn rate
-for both neural models (docs/insights-study.md §2), and every cell of it was generated
+for both neural models (docs/insights-synthetic-grid.md), and every cell of it was generated
 at 1000 customers. Because `require_calibration_activity=True` drops customers with no
 calibration purchase, the *effective* panel ran from 177 customers in the sparse
 low-rate corner to 974 in the dense one — so panel size and regime moved together and
@@ -35,7 +35,7 @@ from . import Arm, GridSpec
 # The archived run of this grid trained one configuration — no AR features, no clusters,
 # the registry's default `valendin` embedder — and found aggregate bias monotone in the
 # panel's churn rate for both neural models (LSTM 40 -> 84 -> 162 -> 358%), against a
-# Pareto/NBD that stays inside +/-16% (docs/insights-study.md §2). The reading there is
+# Pareto/NBD that stays inside +/-16% (docs/insights-synthetic-grid.md). The reading there is
 # that the neural models have no way to represent a customer who has stopped buying.
 #
 # These arms ask whether a *representation* of that customer's history fixes it, and the
@@ -61,12 +61,12 @@ from . import Arm, GridSpec
 # below is the only edit needed to run it, and doubles the bill.
 #
 # `no_ar` x `no_cluster` x `valendin` is the archived configuration, so it doubles as
-# this run's reproduction check: it must land near the numbers in insights-study.md §2
+# this run's reproduction check: it must land near the numbers in insights-synthetic-grid.md (claim 10)
 # or something has moved underneath the grid.
 
 # The Pareto/NBD sufficient statistics. Two of the three are capped by the calibration
 # window and keep counting through the holdout, which is the diagnosed failure
-# (docs/insights-study.md §4.3) — this arm exists to reproduce it where the truth is known.
+# (docs/insights-real-panels.md §4.2) — this arm exists to reproduce it where the truth is known.
 AR_UNBOUNDED = (
     "period_since_last_transaction",
     "cumulative_transactions",

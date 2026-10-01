@@ -24,7 +24,7 @@ The design
 
 **Why the floored arm searches nothing.** On family T the pinned single-trial recipe and
 the 100-trial floored search are statistically indistinguishable on the frozen benchmark
-(MAPE p = 0.32, Spearman p = 0.56, |bias| p = 0.62), and `docs/training-budget.md` §14
+(MAPE p = 0.32, Spearman p = 0.56, |bias| p = 0.62), and `docs/model-selection.md` §3.3
 shows the search's criterion is wrong-signed against the holdout anyway. One trial costs
 30 s where the search costs 22 minutes, and that is what makes four panels affordable.
 

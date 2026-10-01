@@ -247,7 +247,7 @@ def fit_model(
 
     `min_epochs` is a floor under early stopping: no run breaks before it, however long
     the plateau. It exists because the validation curve on these panels is flat for long
-    stretches and then drops — `docs/training-budget.md` §2 measures plateaus of 29–131
+    stretches and then drops — `docs/insight-training-efficiency.md` §3.2 measures plateaus of 29–131
     non-improving epochs *before* a run's own optimum, which no small `patience` survives.
     The floor changes how long the loop keeps looking, never what it selects: the weights
     returned are still the best-by-validation ones. 0 (default) is the historical
@@ -258,7 +258,7 @@ def fit_model(
     before it (1-based) are trained but are not candidates, so the weights returned come
     from that epoch or later, and patience only starts counting there. It exists to test
     whether weights trained longer forecast better than the early best-by-validation
-    ones (`docs/benchmarks-real-panels.md`). 0 (default) makes every epoch a candidate.
+    ones (`docs/insight-training-efficiency.md` §5.4). 0 (default) makes every epoch a candidate.
 
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.

@@ -19,7 +19,7 @@ the customer's history from `ENCODINGS`. Every other panel column is discarded.
                cannot leave their calibration range (`.scratch/ar-encoding-support/`)
     bounded32ratio  both sets together: the flags, which protected the level on the
                panels where it is hard, and the ratio triple, which reached Pareto/NBD's
-               ranking on three of four (docs/benchmarks-real-panels.md)
+               ranking on three of four (docs/insights-real-panels.md §4.3)
 
 Definitions are those of `scripts/run_ar_encoding_ablation.py`, so a result here reads
 straight against that ablation. The saturation constant C is a quarter of the calibration

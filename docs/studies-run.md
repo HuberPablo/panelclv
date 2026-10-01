@@ -138,7 +138,7 @@ sparsest, so each suite reports its own surviving `n_customers` in `data_summary
 | 0.80 | 511 [177, 796] | 1,535 [553, 2,351] |
 
 That is why the churn axis of a single-size grid cannot separate regime from panel size,
-and why family S exists (`docs/insights-arm-sweep.md` §11).
+and why family S exists (`docs/insights-synthetic-grid.md`, claim 12).
 
 Because the generator *is* a Pareto/NBD, that benchmark is correct by construction here
 and is the **ceiling**, not a competitor.
@@ -228,10 +228,10 @@ not as replications of each other.
 its `results.csv` carries no `param_*` spread, and that is the point (§4.6).
 
 Families B, E, F, H, N, O and P are the ones results are read off today. Where they are
-reported: family B in `docs/insights-arm-sweep.md`, family F in
-`docs/insights-cluster-ablation.md`, families N, O, P and R in
-`docs/benchmarks-real-panels.md`, family H in `docs/insights-study.md` §8 (at family G's
-50-path budget) and `docs/benchmarks-real-panels.md` (at H's 200).
+reported: family B in `docs/insights-synthetic-grid.md`, family F in
+`docs/insights-real-panels.md` §5.1, family N in `docs/benchmarks.md`, families E, H, O
+and P in `docs/insights-real-panels.md` §4 and §6, family G in §4.4 and §9 there, and
+family R in `docs/model-selection.md` §3.2.
 
 ### 4.1 Family E is ragged — three arms were never finished at the new depth
 
@@ -304,7 +304,7 @@ cluster column and no calendar variant. That is 4 encodings × 4 panels × 100 r
 **O and N are budget-matched** (100 trials, 500 paths) — unlike family H against family G,
 where the benchmark had 25 trials and the developed models 50. Family Q exists so the
 3-year comparison has a benchmark; it was run on 16 September, after
-`docs/benchmarks-real-panels.md` was written, and its numbers are in §6 below.
+the first benchmark write-up; its numbers are in `docs/insights-real-panels.md` §6.
 
 ### 4.4 Family R — rescoring non-winning trials
 
@@ -334,7 +334,7 @@ from short — for the Transformer and `ValendinLSTM` on both arms.
 - **Pareto/NBD reads the panel, not the engineered features**, so its two arm trees are
   identical by construction; that they came out identical is the check, not a duplicate.
 
-Read in `docs/insights-arm-sweep.md` §11.
+Read in `docs/insights-synthetic-grid.md`, claim 12.
 
 ### 4.6 Family T — the training recipe, not the architecture or the inputs
 
@@ -369,7 +369,7 @@ Three things a reader has to know before comparing a family T row with anything:
   (`.scratch/training-budget/issues/06-report-and-decide.md`).
 - **The `paper` arm pins everything and runs one trial**, so its `param_*` columns are
   constant by design. That is what makes it a control: it removes hyperparameter
-  selection, which `docs/benchmarks-real-panels.md` shows does not predict the forecast.
+  selection, which `docs/model-selection.md` shows does not predict the forecast.
 
 Its two models read different panels — `ValendinLSTM` cannot take `week_sin`/`week_cos`
 (F11, §5) — so the runner builds each model's dataset through the runner that already
@@ -380,7 +380,7 @@ declares it.
 Families T and F each moved one lever and neither knew about the other: T the training
 recipe, F the cluster label. Family U crosses them on all four panels, so the question
 "do they add?" has an answer rather than two separate before-and-afters.
-`scripts/run_factorial.py`, reported in `docs/training-budget.md` §15.
+`scripts/run_factorial.py`, reported in `docs/insights-real-panels.md` §5.2 and `docs/insight-training-efficiency.md` §5.2.
 
 **Crossing them adds little.** In seven of eight (panel, model) cells the increment from
 adding the floor on top of the label has a 95% interval spanning zero, and in all eight
@@ -479,7 +479,7 @@ Ordered by what a result depends on.
 7. **The Transformer on the four-panel runs.** `scripts/run_real_panel_ar.py --model
    transformer` exists and has never been run on any panel, so families O and P are
    LSTM-only. The synthetic grid found the two architectures fail in different corners
-   (`docs/insights-arm-sweep.md` §5), so the four-panel picture is one architecture's.
+   (`docs/insights-synthetic-grid.md`, claim 6), so the four-panel picture is one architecture's.
 8. **Trial-budget confound in family A.** The archived baseline gave the LSTM 10 trials and
    the Transformer 20. Family B re-ran the same arm for both at 100, so use B for any
    LSTM-vs-Transformer statement and treat A as superseded.

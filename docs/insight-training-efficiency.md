@@ -136,6 +136,11 @@ In 20 electronics benchmark studies (2,000 trials, 713 completed), grouped by ba
 | 128 | 178 | 0.0911 | 4 | 35 |
 | 256 | 399 | 0.0886 | 7 | 32 |
 
+Within the 40 pre-experiment electronics studies with no label, more training goes with
+better ranking: Spearman's rank correlation with updates received is **+0.328** (+0.024,
++0.580; best epoch +0.280, not supported). It is one across-study correlation, resampled by
+study.
+
 Batch 256 won all 20 studies. Small-batch trials need more epochs to show their
 advantage, and patience 7 stops them first. Inside a study, the longest-trained trial is
 the best pick of any criterion on electronics (`docs/model-selection.md` §3.5).
@@ -241,7 +246,7 @@ On the paper's own split (260 calibration weeks), with pinned settings, 20 studi
   against the published +2.7%.
 
 The flags/label and attention cells of the same experiment are
-in `docs/benchmarks-real-panels.md` until `docs/insights-real-panels.md` exists.
+in `docs/insights-real-panels.md` §7.
 
 ## 6. What this means relative to Valendin et al.
 
@@ -250,7 +255,7 @@ in `docs/benchmarks-real-panels.md` until `docs/insights-real-panels.md` exists.
 - **A correction of our reproduction.** ADR-0001's temporal split is the one deliberate
   departure, and the paper's stopping rule does not survive it. Every archived neural
   result trained under that combination. The electronics and multichannel benchmark rows
-  in `docs/benchmarks-real-panels.md` are lower bounds on the architecture, not
+  in `docs/benchmarks.md` are lower bounds on the architecture, not
   measurements of it. CDNOW and gift are not shown to be affected.
 - **The narrow thesis claim.** On our electronics and multichannel panels, the weak
   per-customer discrimination of the published LSTM under a temporal split is

@@ -417,7 +417,7 @@ def run_optuna_study(
     they may still be handed a search spec (e.g. patience over `{5, 7, 9}`) and are
     resolved through the same mini-language. Setting `min_epochs` also widens the
     default pruner's warm-up to match, so a floored trial is not pruned before its
-    floor can pay (`docs/training-budget.md` §2).
+    floor can pay (`docs/insight-training-efficiency.md` §3.2).
 
     When `append_timestamp` is True (default) the effective run name is
     `f"{study_name}_{YYYYMMDD_HHMM}"`; that name is used for the Optuna study,

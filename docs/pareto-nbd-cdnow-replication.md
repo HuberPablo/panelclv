@@ -59,7 +59,7 @@ a ceiling.
 The archived runs say something different. On electronics the Pareto/NBD sits at
 **−53.4%** aggregate bias (`docs/loss-functions.md` §4.1) and **−63.7%**
 (`docs/p-slstm.md` §10); on the synthetic seasonal grid, where it is the generating
-process, at **+2.2% to +15.8%** (`docs/insights-study.md` §2). None of those is 1.35%,
+process, at **+2.2% to +15.8%** (`docs/insights-synthetic-grid.md`). None of those is 1.35%,
 and **no Pareto/NBD run on CDNOW existed in this repo at all** — the CDNOW work
 (`Studies/loss_ablation_cdnow`, the AR-encoding shards) is neural-only.
 
@@ -410,7 +410,7 @@ carries the toy panel, the full arm table, and a note on why the first reading w
   the synthetic grid except by argument.
 - **No neural model was run.** This constrains the Pareto/NBD side of an LSTM-versus-
   benchmark comparison on CDNOW and says nothing about the other side; the LSTM's own
-  CDNOW bias figures live in `docs/loss-functions.md` §6 and `docs/insights-study.md` §4.3.
+  CDNOW bias figures live in `docs/loss-functions.md` §6 and `docs/insights-real-panels.md` §4.1.
 - **MCMC settings are the package's defaults** (`mcmc=2500, burnin=500, thin=50,
   chains=2`), which is what the studies use. Longer chains would narrow §7's seed
   spread and were not run.
@@ -457,7 +457,7 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
 | The estimator being reproduced: BTYDplus `pnbd.mcmc.DrawParameters`, `elog2cbs` at occasion granularity | `src/panelclv/benchmarks/pareto_nbd.py`, ported from https://github.com/mplatzer/BTYDplus |
 | Pareto/NBD at −53.4% aggregate bias on electronics | `docs/loss-functions.md` §4.1, from the archived study suite |
 | Pareto/NBD at −63.7% ± 0.35 on electronics, n=3 | `docs/p-slstm.md` §10 |
-| Pareto/NBD at +2.2% to +15.8% on the synthetic seasonal grid | `docs/insights-study.md` §2 |
+| Pareto/NBD at +2.2% to +15.8% on the synthetic seasonal grid | `docs/insights-synthetic-grid.md` |
 | CDNOW panel trimmed to complete weeks under the package calendar | `scripts/build_cdnow_panel.py`; convention in `docs/feature_engineering.md` §3 |
 
 ---
@@ -478,7 +478,7 @@ per-seed numbers land in `.scratch/pnbd-cdnow-replication/results.json`.
    which holds on electronics (±0.35) and not here. A fit is ~16 s, so twenty seeds is
    five minutes.
 3. **Run the neural models on JFH's split.** The Pareto/NBD side of a CDNOW comparison
-   now has a number; the LSTM side does not, on this cohort. `docs/insights-study.md`
+   now has a number; the LSTM side does not, on this cohort. `docs/insights-real-panels.md` §4.1
    §4.3's CDNOW arms use the repo panel and the package's own metric, which is the right
    metric but the wrong 38-week window.
 4. **Longer chains.** §7's ±1.92 over five seeds at the default `mcmc=2500` is wide

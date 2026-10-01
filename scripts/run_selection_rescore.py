@@ -1,8 +1,8 @@
 """Does a rollout over the validation window pick better trials than cross-entropy does?
 
-`docs/training-budget.md` §13.2 measures that one-step teacher-forced cross-entropy on a
+`docs/insight-training-efficiency.md` §3.3 measures that one-step teacher-forced cross-entropy on a
 temporal validation window barely moves after the first epoch, while the forecast keeps
-improving for another 200. `docs/benchmarks-real-panels.md` measures the same thing across
+improving for another 200. `docs/model-selection.md` §3.1 measures the same thing across
 trials: a study's winning validation loss does not predict its holdout bias. Both point at
 the selection criterion rather than the split, and §13.4 names the cheapest decisive test.
 
@@ -70,7 +70,7 @@ STUDIES_BASE = REPO_ROOT / "Studies"
 
 EXPERIMENT = "selection_rescore"
 # Which panel this invocation rescores. `--panel cdnow` is the falsifiable test
-# `docs/training-budget.md` §14.5 sets up: if validation cross-entropy is wrong-signed
+# `docs/model-selection.md` §3.3 reports: if validation cross-entropy is wrong-signed
 # because the calibration era's purchase rate exceeds the holdout era's, the sign should
 # flip on a panel where that relationship differs.
 PANEL = "electronics"

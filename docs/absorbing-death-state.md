@@ -243,8 +243,8 @@ weeks of silence before resuming its decline. Neither curve is flat, which is th
 minimum the proposal needs: a customer's purchase rate is not a constant to be
 recovered, it is a decaying function of how long they have been quiet.
 
-That matters for what the current AR encoding can express. `benchmarks-real-panels.md`
-("The first AR-encoding ablation") establishes that the unbounded recency clock is catastrophic out of range (+235% bias on
+That matters for what the current AR encoding can express. `insights-real-panels.md`
+(§4.1–4.2) establishes that the unbounded recency clock is catastrophic out of range (+235% bias on
 electronics, +335% on CDNOW) and that **bounded activity flags to `K` fix it entirely**.
 But a bounded flag set is non-injective past `K` by construction: every customer silent
 for more than `K` periods lands in the same bucket and is assigned the same rate
@@ -321,7 +321,7 @@ single deterministic numbers and are descriptive.
 
 > **Superseded in part, 21 September 2026.** The ρ ≈ 0 above is real, but it is a property
 > of how those archived models were *trained*, not only of what they were given.
-> `docs/training-budget.md` §15.1 re-runs the same configuration —
+> `docs/insights-real-panels.md` §5.2 re-runs the same configuration —
 > `["Transactions", "week_sin", "week_cos"]`, no AR features, no cluster label — with a
 > training floor instead of patience 7, over 20 replications on all four panels:
 >
@@ -348,13 +348,13 @@ never an input; the models could only infer it from the target's own history thr
 hidden state across a 104-week warm-up, and evidently did not. So these numbers do
 *not* show that an AR-equipped LSTM is recency-blind. What they show is that the target
 history alone does not carry recency through a warm-up of this length, and
-`benchmarks-real-panels.md` independently measures that bounded AR flags lift electronics ρ
-from 0.027 to 0.267 — most of the way to Pareto/NBD, and still with a floor past `K`.
+`insights-real-panels.md` §4.1 independently measures that bounded AR flags lift electronics ρ
+from about 0.04 to 0.26 — most of the way to Pareto/NBD, and still with a floor past `K`.
 
 ## 4. The rollout experiment: what the feedback loop actually costs
 
 The first version of this document asserted that the feedback loop was a second-order
-effect, on the strength of one figure borrowed from `benchmarks-real-panels.md` (a
+effect, on the strength of one figure borrowed from `insights-real-panels.md` §4.2 (a
 teacher-forced pass reproducing +169% of a +235% bias) that was measured on the
 *unbounded* arm. That inference does not survive a direct measurement. This section
 replaces it.
@@ -696,8 +696,8 @@ Everything above is either measured here or cited from a document in this repo.
 | Pareto/NBD `p_alive` and the latent churn time τ | `src/panelclv/benchmarks/pareto_nbd.py:249-258` |
 | Hurdle and zero-inflation are vacuous over a free softmax | `docs/loss-functions.md` §5.6 |
 | The four constraints a loss proposal must satisfy | `docs/loss-functions.md` §1 |
-| Unbounded recency blows the forecast up; bounded flags fix it; the failure is not exposure bias | `docs/benchmarks-real-panels.md`, "The first AR-encoding ablation" |
-| Bounded AR flags lift electronics ρ from 0.027 to 0.267 | `docs/benchmarks-real-panels.md`, same table |
+| Unbounded recency blows the forecast up; bounded flags fix it; the failure is not exposure bias | `docs/insights-real-panels.md` §4.2 |
+| Bounded AR flags lift electronics ρ from about 0.04 to 0.26 | `docs/insights-real-panels.md` §4.1 |
 | Recency escapes its calibration range on 37.7% of electronics holdout cells | `docs/feature_engineering.md` §4.2 |
 | Per-model rollout functions are declared in the registry | `docs/adr/` ADR-0006 |
 | Holdout AR columns are zero placeholders, never read | `docs/feature_engineering.md` §7 (3); `src/panelclv/data_preparation/panel_dataset.py:700-708` |

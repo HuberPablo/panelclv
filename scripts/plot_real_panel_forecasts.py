@@ -1,6 +1,6 @@
 """Weekly holdout volume on each real panel: the actuals against each arm's best study.
 
-The real-panel tables (`docs/benchmarks-real-panels.md`) say how far each arm's total
+The real-panel tables (`docs/insights-real-panels.md`) say how far each arm's total
 volume is from the truth over the whole holdout year; they do not say *when* the miss
 happens. This script draws that: for every panel, the true weekly transaction volume over
 the holdout and, on the same axes, the simulated volume of each arm.

@@ -133,7 +133,7 @@ Studies/seasonal_4x4x10__ParetoNBD/<combo>__<dataset>/
 
 A grid declaring **no** arms keeps the un-suffixed `Studies/<grid>__<Model>/` path —
 `GridSpec.train_base(model, arm=None)`. That is not a courtesy: the archived
-`seasonal_4x4x10` suites are stored under it and `docs/insights-study.md` cites it, so
+`seasonal_4x4x10` suites are stored under it and `docs/insights-synthetic-grid.md` cites it, so
 adding an arm axis must not move a grid's own history.
 
 Within one (model, arm) tree every worker writes disjoint `<combo>__<dataset>/`

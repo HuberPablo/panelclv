@@ -1,6 +1,6 @@
 """The 5y electronics experiments of the LSTM family, repeated for two attention models.
 
-`docs/benchmarks-real-panels.md` ("Pareto/NBD on the paper's electronics split" and
+`docs/benchmarks.md` and `docs/insights-real-panels.md` §7 ("Pareto/NBD on the paper's electronics split" and
 after) ran ValendinLSTM and our LSTM on Valendin et al.'s electronics split: a searched
 family, then the least-biased searched study's settings pinned under three rules for
 the kept epoch, each with no added input, `ar_bounded_52` or `kmeans_8`. This runner

@@ -1,6 +1,6 @@
 """Does a stored electronics forecast vary between customers, and by what did it read?
 
-`docs/benchmarks-real-panels.md` §"The forecast collapse on long sparse panels" claims
+`docs/insights-real-panels.md` §3 claims
 that a neural model whose only *per-customer* input is the transaction count forecasts
 nearly the same number for everyone on electronics, and that adding one persistent
 customer-level channel restores the spread. This script is where that table comes from.
