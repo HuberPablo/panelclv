@@ -339,7 +339,7 @@ Read in `docs/insights-arm-sweep.md` §11.
 ### 4.6 Family T — the training recipe, not the architecture or the inputs
 
 Declared 20 September, specified in `.scratch/training-budget/spec.md` and motivated by
-`docs/training-budget.md`: every archived neural study stopped while its validation loss
+`docs/insight-training-efficiency.md`: every archived neural study stopped while its validation loss
 was still falling, because our training recipe is not the reference notebook's. The
 notebook trains at batch 32 with plain Adam for ~90 epochs — about 2,300 gradient updates
 on electronics — while a family N winner receives about 32.

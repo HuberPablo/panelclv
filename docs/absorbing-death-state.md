@@ -321,7 +321,7 @@ single deterministic numbers and are descriptive.
 
 > **Superseded in part, 21 September 2026.** The ρ ≈ 0 above is real, but it is a property
 > of how those archived models were *trained*, not only of what they were given.
-> `docs/training-budget.md` §15 re-runs the same configuration —
+> `docs/training-budget.md` §15.1 re-runs the same configuration —
 > `["Transactions", "week_sin", "week_cos"]`, no AR features, no cluster label — with a
 > training floor instead of patience 7, over 20 replications on all four panels:
 >

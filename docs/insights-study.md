@@ -21,7 +21,7 @@ panel and one model at a time. The numbers are printed by
   on MAPE, |bias| or RMSE at n = 8 / 8 (independent runs). Its validation-CE advantage is not
   re-tested: the per-seed values were never stored.
 - §5.4: the selection result is now reported per model rather than pooled over 80 studies,
-  matching `docs/training-budget.md` §14; "rollout beats CE in 66 of 80 studies"
+  matching `docs/model-selection.md` §3.3; "rollout beats CE in 66 of 80 studies"
   becomes a paired interval per model (supported for both on holdout MAPE).
 - §8: `kmeans_8` under `ar_bounded` goes from "no evidence of a direction" to a supported
   |bias| improvement on electronics (−12.8 points) with no clear difference on CDNOW; the

@@ -516,7 +516,7 @@ raises before the first trial rather than being silently ignored. `training` hol
 are training control but may still be handed a spec (`"patience": {5, 7, 9}`), so they
 go through the same mini-language. `min_epochs` is a floor under early stopping: no
 trial stops before it, and the default pruner's warm-up widens to match
-(`docs/training-budget.md`).
+(`docs/insight-training-efficiency.md`).
 
 A pinned scalar still reaches `study.best_trial.params`, because it registers as a
 categorical with a single choice. It used to be returned unregistered, so the key was

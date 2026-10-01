@@ -120,76 +120,10 @@ the measurement:
 
 ### A second caveat: every neural row here is undertrained
 
-**Measured 2026-09-20, `docs/training-budget.md`.** The ValendinLSTM and LSTM rows below
-come from models that stopped training while their validation loss was still falling. The
-median winning trial kept the weights from epoch 7–14; with early stopping switched off
-the same model keeps improving to epoch 88–247, and the validation cross-entropy it leaves
-behind is 3.4–5.3% on electronics, 1.4–4.4% on multichannel and 10.7–13.0% on CDNOW.
-
-The cause is that the training recipe here is not the reference notebook's: it trains at
-batch 32 with plain Adam for about 90 epochs — roughly 2,300 gradient updates — while a
-winner in this family receives about 32, because patience 7 stops small-batch trials
-before their advantage appears and the search space does not contain batch 32 at all.
-
-**This has now been tested** (family T, 20 September, 160 suites on vast.ai). On
-electronics, with the architecture, the inputs and the windows held exactly as below,
-training the frozen benchmark for the paper's own ~90 epochs instead of stopping at
-patience 7 gives:
-
-| | bias % | MAPE | Spearman |
-| --- | ---: | ---: | ---: |
-| as published here (reproduced as the control) | +39.8 ± 20.4 | 69.1 | 0.027 ± 0.043 |
-| trained to the paper's epoch count | −5.7 ± 27.0 | **46.8** | **0.177 ± 0.089** |
-
-As differences of condition means with 95% bootstrap intervals, 20 independent
-replications each: MAPE −22.3 (−28.3 to −16.2) and Spearman +0.150 (+0.107 to +0.191),
-against a refit noise of 3.63 MAPE and 0.0105 Spearman on this panel. The developed LSTM
-moves the same way on discrimination. Copying the notebook's optimizer, batch size and
-patience *without* the epoch count shows no clear difference in either at n = 20 (both
-intervals span zero) — it is the training length, not the settings.
-
-**The cause is this package's own doing, not the published method.** Run under the
-paper's own customer-wise validation split, the same recipe trains 28-56 epochs on this
-same panel. It quits at epoch 1 under the temporal split ADR-0001 substitutes for it: a
-temporal window over a 98.6%-zero panel gains about 5.4×10⁻⁵ of cross-entropy an epoch,
-while `fit_model` requires an absolute 10⁻⁴ to count an epoch as an improvement — so the
-average epoch improves by half the threshold it must clear, and patience fires. The split is the right call for a forecasting
-evaluation; what nobody checked is what it did to the stopping rule bolted on beside it.
-
-So **the electronics rows below are a lower bound on what the architecture does, not a
-measurement of it**, and the collapse this document calls "the forecast collapse on long
-sparse panels" is substantially a training artefact on that panel. No number here has been
-restated or withdrawn: family T is a separate family, `archive` reproduces these rows, and
-whether they are regenerated under a training floor is decided in
-`.scratch/training-budget/issues/06-report-and-decide.md`.
-
-**All four panels, 21 September 2026** (family U, 640 suites, `docs/training-budget.md`
-§15). Per-customer Spearman for `ValendinLSTM`, 20 replications a cell, against the rows
-in this document:
-
-Δ is against family U's own `archive / no_cluster` control, with a 95% percentile-bootstrap
-interval, n = 20 / 20; the panel's Spearman refit noise is 0.0105–0.0159. The Pareto/NBD
-column is the mean of its 20 seeded fits.
-
-| panel | control | trained past the plateau | Δ (95% CI) | with a `kmeans_8` label | Δ (95% CI) | Pareto/NBD |
-| --- | ---: | ---: | :---: | ---: | :---: | ---: |
-| cdnow | 0.364 | 0.383 | +0.019 (−0.019, +0.065) | 0.403 | +0.039 (−0.003, +0.086) | 0.450 |
-| electronics | 0.021 | **0.178** | **+0.157 (+0.119, +0.193)** | **0.305** | **+0.283 (+0.264, +0.302)** | 0.314 |
-| gift | 0.349 | 0.280 | **−0.069 (−0.118, −0.027)** | 0.359 | +0.010 (−0.005, +0.026) | 0.378 |
-| multichannel | −0.004 | **0.119** | **+0.123 (+0.099, +0.147)** | **0.178** | **+0.182 (+0.163, +0.199)** | 0.185 |
-
-Three things follow for the rows below. **The collapse is closed on both panels where it
-occurred, to within about ±0.01 of Pareto/NBD** — with both levers applied, electronics
-reaches 0.305, still supported *below* Pareto/NBD's 20 fits (Δ −0.009, 95% CI −0.017 to
-−0.000), and multichannel 0.195, supported slightly above them (+0.010, +0.000 to
-+0.020), both smaller than the refit noise (`docs/training-budget.md` §15.1) — and it
-took either a training floor or a per-customer input; stacking the two adds at most a few
-hundredths of Spearman. **Neither lever shows a clear gain on cdnow or gift**, where the
-intervals span zero, and the floor is supported *negative* on gift. And **a training floor
-is not safe everywhere**: on CDNOW it triples the developed LSTM's MAPE (57.7 to 183.9;
-Δ +126.2, 95% CI +77.2 to +173.2, n = 20 / 20), while the frozen benchmark there shows no
-clear difference (+4.8, −19.8 to +30.8). So the undertraining caveat applies to the **electronics and multichannel rows**
-specifically, not to this document as a whole.
+The ValendinLSTM and LSTM rows stopped training while their validation loss was still
+falling. On electronics and multichannel they are lower bounds on the architecture, not
+measurements of it: `docs/insight-training-efficiency.md`. The training × label factorial
+on ranking is in `docs/training-budget.md` §15.1.
 
 ## Results
 
@@ -995,44 +929,8 @@ Reading:
 
 ### Training the kept weights longer
 
-`scripts/run_epoch_floor_5y.py`, 2026-09-26: the least-biased searched study's settings
-pinned (r13: learning rate 0.002195, batch 32, weight decay 0), one trial, and the kept
-weights restricted to epoch 20 or later (`from20`) or 30 or later (`from30`) with
-`select_from_epoch`; otherwise the family above (patience 7 from the first eligible
-epoch, the ADR-0008 refit, 500 paths, seeds `BASE_SEED + r`). 20 replications per arm.
-The restriction held: the kept epoch was 20–27 in `from20` and 30–37 in `from30`
-(1-based).
-
-| (20 studies each, mean ± sd) | RMSE (customer total) | bias % | MAPE | Spearman |
-| --- | ---: | ---: | ---: | ---: |
-| searched, early epochs (above) | 1.163 ± 0.011 | +13.8 ± 11.1 | 20.5 ± 6.9 | 0.405 |
-| **`from20`** | **1.159 ± 0.012** | **+10.2 ± 7.4** | **17.8 ± 3.2** | 0.403 |
-| `from30` | 1.157 ± 0.014 | +12.7 ± 7.3 | 19.4 ± 3.4 | 0.402 |
-| Valendin et al., Base LSTM (one model) | 1.18 | +2.7 | 16.9 | — |
-
-Reading:
-
-Every comparison below is Δ with a 95% percentile-bootstrap interval, 20 / 20 independent
-studies (`benchmarks_real_panels_effects.py`).
-
-- **Longer training tightens the spread; the means show no clear difference.** From the
-  searched family to `from20` the sd of bias falls from 11.1 to 7.4 points and of MAPE
-  from 6.9 to 3.2, and the worst study goes from +37.4% to +23.9% (description). The
-  means move less and not clearly: MAPE 20.5 → 17.8 (Δ −2.7, −6.2 to +0.3), bias
-  +13.8 → +10.2 (−3.6, −9.4 to +2.1).
-- **Thirty and twenty show no clear difference.** `from30` − `from20`: MAPE +1.5 (−0.5 to
-  +3.5), bias +2.5 (−2.0 to +6.9). Within `from30` a later kept epoch goes with *more*
-  bias (Spearman +0.43 across 20 studies; descriptive). Training longer does not remove
-  the over-forecast.
-- **What remains is a systematic over-forecast of about 10%.** `from20`'s mean bias is
-  +10.2 (95% CI +7.1 to +13.2; "AR flags and the cluster label on electronic_5y" below); 4 of 20 studies per arm
-  are within ±5%. The published +2.7% is a single model and could be a draw from a spread
-  like this one.
-- **Neither the pinning nor the floor moves the mean clearly.** The `nofloor` control
-  below — the same pinned settings with every epoch a candidate — shows no clear
-  difference from the searched family in MAPE (+1.0, −4.2 to +7.4) or bias (−0.7, −8.9
-  to +8.4), and `from20` none from `nofloor` (MAPE −3.7, −9.6 to +0.5). What the floor
-  changes visibly is the spread.
+`scripts/run_epoch_floor_5y.py`: the least-biased searched study's settings pinned, weights
+kept from epoch 20 (`from20`) or 30 (`from30`) on. Results: `docs/insight-training-efficiency.md` §5.4.
 
 ### Adding bounded flags or a cluster label, with and without the floor
 
@@ -1209,16 +1107,9 @@ more than 3 scaled median absolute deviations from its cell's median. 2026-09-15
 
 ### Optuna's validation loss cannot see which runs forecast badly
 
-Selection is analysed in `docs/model-selection.md`. One observation that belongs to training length:
+Selection is analysed in `docs/model-selection.md`; early stopping on multichannel in
+`docs/insight-training-efficiency.md` §2.
 
-- **Very early stopping is common on multichannel.** The best trial stopped at epoch 3
-  or earlier in 55% of ValendinLSTM runs, 41% of LSTM + ratio and 22% of LSTM + log runs
-  there, against 0–2% on every other panel. In multichannel log, the ten most biased
-  runs' best trials stopped at epochs 1–4 (cell median 11), and earlier stopping goes with
-  worse ranking (rank correlation 0.59 between best epoch and Spearman; descriptive, no
-  interval). A model
-  selected that early is barely trained; ADR-0008's refit fine-tunes it but starts from
-  those weights.
 - **No trial crashed.** The 40–75% of trials that did not complete were all `PRUNED` by
   the `MedianPruner`, as designed.
 

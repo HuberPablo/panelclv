@@ -277,7 +277,7 @@ it too, and the archived 0.039 was measured on a model that stopped at epoch 8.
 the label moves Spearman by +0.001 to +0.018 depending on the cell, with 95% bootstrap
 intervals spanning zero in seven of eight and ruling out a gain larger than about +0.035
 anywhere — the order of what an unseeded refit moves on its own
-(`docs/training-budget.md`, "How claims are made"). One cell, multichannel/ValendinLSTM,
+(`docs/model-selection.md` §2). One cell, multichannel/ValendinLSTM,
 does show a supported increment of +0.018. So the label and the training budget overlap
 heavily; whether anything beyond them is reachable is untested, and an apparent plateau is
 not an established ceiling.
