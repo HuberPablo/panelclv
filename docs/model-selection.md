@@ -11,6 +11,9 @@ Conventions in this doc:
 - Criteria and targets are oriented so lower is better, so a **positive** rank
   correlation means the criterion orders trials the way the holdout does.
 - Bold marks an interval that excludes 0.
+- Family letters (E, F, G, …) name the experiment families of `docs/studies-run.md` §2,
+  which holds each one's budget, dates and design. Each is described in a clause where
+  this doc first uses it.
 
 ## 1. How a model is chosen
 
@@ -70,7 +73,7 @@ a magnitude reference, never a threshold.
 | 3.5 | Pick vs a random trial | Family V | What does the argmin cost? |
 | 3.6 | Two-stage re-rank | Family V | Shortlist on CE, re-rank by rollout? |
 | 3.7 | CE across arms | Cluster ablation (family F) | Can calibration choose K? |
-| 3.8 | Ensemble scoring | Family G, CDNOW | Does averaging replications neutralise a bad pick? |
+| 3.8 | Ensemble scoring | Family G (the CDNOW/electronics arm grid at 50 paths), CDNOW | Does averaging replications neutralise a bad pick? |
 
 ### 3.1 The winning CE does not track the forecast across replications
 
@@ -81,7 +84,8 @@ compared is the argmin of its own study.
 
 ### 3.2 Over a whole study: right on two panels, wrong on two (family R)
 
-`keep_only_best_checkpoint` failed to run on 30 of the 80 family N studies, so their
+`keep_only_best_checkpoint` failed to run on 30 of the 80 family N studies (the ValendinLSTM benchmark runs,
+`docs/benchmarks.md`), so their
 losing checkpoints survived. `scripts/run_rescore_trials.py` refit and rolled out each
 one at the study's own forecast seed (17 Sep). Studies with ≥ 5 scored trials (653 trials,
 36 studies) give one rank correlation each. "Winner's place" is where Optuna's pick lands
@@ -223,7 +227,8 @@ for K would have to share the rollout's structure.
 ### 3.8 Score the ensemble beside the distribution
 
 `mape_aggregate` is convex in the prediction, so the error of the averaged forecast is at
-most the average error (Jensen); bias is linear and does not move. Family G, CDNOW, 20
+most the average error (Jensen); bias is linear and does not move. Family G (family H's
+arm grid at 50 paths), CDNOW, 20
 studies × 50 trials × 50 paths, pre-ADR-0009 38-week window:
 
 | CDNOW MAPE | mean of 20 runs | ensemble of 20 |

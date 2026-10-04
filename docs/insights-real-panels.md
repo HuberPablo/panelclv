@@ -20,6 +20,9 @@ Conventions:
   (`docs/loss-functions.md` §4.1).
 - Each panel is stated separately. Refit-noise magnitudes are in
   `docs/model-selection.md` §2.
+- Family letters (E, F, G, …) name the experiment families of `docs/studies-run.md` §2,
+  which holds each one's budget, dates and design. Each is described in a clause where
+  this doc first uses it.
 
 **Caveat on every neural row.** The archived models stopped training early. On
 electronics and multichannel that understates them (`docs/insight-training-efficiency.md`).
@@ -153,7 +156,8 @@ the collapse (`docs/insight-training-efficiency.md` §5.2).
 
 LSTM and Transformer with the encodings of `docs/feature-engineering.md` §4.3, against both
 benchmarks.
-- `ar_encoding` (family E) and `real_panel_arms` (family H) run 50 trials and 200–300
+- `ar_encoding` (family E: LSTM only, seven AR encodings) and `real_panel_arms` (family H:
+  LSTM, Transformer and both benchmarks across 16 feature arms) run 50 trials and 200–300
   paths, against the benchmark's 100 / 500.
 - **On CDNOW they use the pre-ADR-0009 38-week holdout.** So they are compared only with
   each other and with one Pareto/NBD fit on that window (MAPE 18.7), and their Spearman
@@ -283,7 +287,8 @@ Every comparison below is n = 100 / 100 (or 100 / 20 against a benchmark).
 
 ### 4.4 The unbounded blow-up is LSTM-specific
 
-Family G (CDNOW 38-week window and electronics; 20 studies × 50 trials × 50 paths;
+Family G (family H's arm grid, run first at 50 paths and then superseded by H; CDNOW
+38-week window and electronics; 20 studies × 50 trials × 50 paths;
 ensemble of 20):
 
 | CDNOW `ar_unbounded` | LSTM | Transformer |
@@ -631,7 +636,7 @@ promise a better next-period density, which P-sLSTM shows does not survive the r
 
 ## 9. What the aggregate tables hide
 
-Family G, ensembles of 20 forecasts.
+Family G (§4.4), ensembles of 20 forecasts.
 
 **CDNOW has a MAPE floor at about 18.** Detrended, the weekly actuals have a lag-1
 autocorrelation of +0.198, effectively white noise, with sd 13.1 where Poisson sampling
@@ -683,7 +688,8 @@ The fair sentence is "the frozen architecture cannot consume calendar covariates
 
 ## 10. A few bad runs, or bad throughout?
 
-All 2,880 stored forecasts behind the family N, O and P tables were scored one at a time. A
+All 2,880 stored forecasts behind the benchmark (family N, `docs/benchmarks.md`), family O (§4.3) and family P (§6)
+tables were scored one at a time. A
 run is **extreme** if it lies more than 3 scaled MADs from its cell's median.
 
 | cell | bias mean | bias median | extreme runs (bias) | Spearman mean → without extremes |
@@ -711,11 +717,13 @@ run is **extreme** if it lies more than 3 scaled MADs from its cell's median.
 - **`ar_saturating`** is the best level arm on electronics, but was never run on gift or
   multichannel.
 - **Transformer** on gift and multichannel: never run. Families O and P are LSTM-only; the
-  Transformer ran only on CDNOW and electronics (family H) and electronic_5y (family Y).
+  Transformer ran only on CDNOW and electronics (family H) and electronic_5y (family Y, the
+  attention-model runs of §7).
 - **`projected` embedder:** never run anywhere. Every number here uses `valendin`.
 - **ValendinLSTM on the 3-year windows:** 0 of 20 replications.
 - **E2:** the cluster label recomputed before the validation window (§5.3).
-- **CDNOW Spearman** for families E–I is unrecoverable: those families used the
+- **CDNOW Spearman** for families E–I (the AR encodings, the cluster sweep, the arm grids G
+  and H, and the CDNOW loss ablation) is unrecoverable: those families used the
   pre-ADR-0009 window.
 - **Electronics is not the paper's cohort** (829 customers, line items). electronic_5y is
   (`docs/benchmarks.md`).
