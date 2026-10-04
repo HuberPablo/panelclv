@@ -64,6 +64,24 @@ def _validate_targets(targets: torch.Tensor, num_target_classes: int) -> None:
         )
 
 
+def _batch_weight(criterion: nn.Module, targets: torch.Tensor) -> float:
+    """How much one batch's mean loss counts towards the epoch's mean.
+
+    Every criterion here returns a mean over the cells it scored, and the last batch of
+    an epoch is usually smaller than the rest. Averaging the batch means would give each
+    customer in that short batch more weight than the others, and the share would change
+    with the batch size: on electronics the same weights scored 4.1% lower at batch 256
+    than at batch 64. Weighting each batch by what its mean divided by makes the epoch
+    loss the exact per-cell mean whatever the batch size, so Optuna can compare trials
+    that use different ones. That divisor is the cell count, except for class-weighted
+    cross-entropy, whose mean divides by the summed weights of the targets.
+    """
+    weight = getattr(criterion, "weight", None)
+    if isinstance(criterion, nn.CrossEntropyLoss) and weight is not None:
+        return float(weight[targets.reshape(-1)].sum().item())
+    return float(targets.numel())
+
+
 def _select_device(device: str | torch.device | None) -> torch.device:
     if device is None:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -87,9 +105,9 @@ def train_one_epoch(
 ) -> dict[str, float]:
     model.train()
     total_loss = 0.0
+    total_weight = 0.0
     total_correct = 0
     total_count = 0
-    n_batches = 0
 
     for samples, targets in loader:
         samples = samples.to(device)
@@ -109,8 +127,11 @@ def train_one_epoch(
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
-        total_loss += loss.item()
-        n_batches += 1
+        # Weighted by the batch's size, so the epoch loss is a per-cell mean
+        # (see `_batch_weight`).
+        weight = _batch_weight(criterion, targets)
+        total_loss += loss.item() * weight
+        total_weight += weight
 
         with torch.no_grad():
             preds = output.argmax(dim=-1)
@@ -118,7 +139,7 @@ def train_one_epoch(
             total_count += targets.numel()
 
     return {
-        "loss": total_loss / max(n_batches, 1),
+        "loss": total_loss / max(total_weight, 1e-12),
         "accuracy": total_correct / max(total_count, 1),
     }
 
@@ -144,9 +165,9 @@ def validate_one_epoch(
     """
     model.eval()
     total_loss = 0.0
+    total_weight = 0.0
     total_correct = 0
     total_count = 0
-    n_batches = 0
     all_preds: list[torch.Tensor] = []
     all_targets: list[torch.Tensor] = []
 
@@ -168,8 +189,11 @@ def validate_one_epoch(
                 targets = targets[:, val_score_start:]
 
             loss = criterion(output.reshape(-1, num_target_classes), targets.reshape(-1))
-            total_loss += loss.item()
-            n_batches += 1
+            # Weighted by the cells scored, so the validation loss — the number early
+            # stopping and Optuna both read — does not depend on the batch size.
+            weight = _batch_weight(criterion, targets)
+            total_loss += loss.item() * weight
+            total_weight += weight
 
             preds = output.argmax(dim=-1)
             total_correct += (preds == targets).sum().item()
@@ -179,7 +203,7 @@ def validate_one_epoch(
                 all_targets.append(targets.cpu())
 
     metrics = {
-        "loss": total_loss / max(n_batches, 1),
+        "loss": total_loss / max(total_weight, 1e-12),
         "accuracy": total_correct / max(total_count, 1),
     }
     if compute_f1 and all_preds:

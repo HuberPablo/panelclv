@@ -172,3 +172,54 @@ def test_select_from_epoch_counts_patience_only_from_there(tmp_path):
     _, result = _fit_past_the_best_epoch(tmp_path, select_from_epoch=5)
 
     assert len(result.history) == 7
+
+
+# ---------------------------------------------------------------------------
+# The epoch loss is a per-cell mean, whatever the batch size
+# ---------------------------------------------------------------------------
+
+
+def _mixed_validation(batch_size: int) -> DataLoader:
+    """Ten customers split unevenly by every batch size tried, with unequal losses.
+
+    The first seven sit on class 0 and the last three on class 2, so a short final batch
+    holds customers whose loss differs from the rest. That is the case where averaging
+    batch means would over-weight them (on electronics, the 61 customers left over at
+    batch 256 carried a quarter of the score instead of 7%).
+    """
+    classes = torch.tensor([0] * 7 + [2] * 3)
+    samples = classes.view(-1, 1, 1).expand(-1, N_STEPS, 1).float()
+    targets = classes.view(-1, 1).expand(-1, N_STEPS).clone()
+    return DataLoader(TensorDataset(samples, targets), batch_size=batch_size, shuffle=False)
+
+
+@pytest.mark.parametrize("class_weights", [None, torch.tensor([1.0, 2.0, 5.0])])
+def test_validation_loss_does_not_depend_on_the_batch_size(class_weights):
+    """Fixed weights score the same loss at batch 3, 4 and 10, and that loss is the
+    per-cell mean computed in one pass — for plain and for class-weighted CE."""
+    from panelclv.models.losses import build_criterion
+    from panelclv.training.loop import validate_one_epoch
+
+    torch.manual_seed(TORCH_SEED)
+    model = MultinomialLSTMModel(
+        embedder=ProjectedEmbedder(
+            seq_cols=["Transactions"],
+            embedded_cols={"Transactions": N_CLASSES},
+            target_col="Transactions",
+            embedding_dim=4,
+        ),
+        lstm_hidden_size=4,
+        dense_units=4,
+        dropout=0.0,
+    )
+    loss_type = "cross_entropy" if class_weights is None else "weighted_ce"
+    criterion = build_criterion(loss_type, class_weights=class_weights)
+
+    losses = [
+        validate_one_epoch(model, _mixed_validation(bs), criterion, torch.device("cpu"),
+                           N_CLASSES, compute_f1=False)["loss"]
+        for bs in (3, 4, 10)        # 10 is one batch holding everyone: the reference
+    ]
+
+    assert losses[0] == pytest.approx(losses[2], rel=1e-6)
+    assert losses[1] == pytest.approx(losses[2], rel=1e-6)
