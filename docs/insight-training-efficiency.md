@@ -203,7 +203,7 @@ curve looks flat.
 **What this does not show.**
 - **That the forecast improves.** A lower validation loss is not a better holdout
   forecast. Across trials, validation loss does not predict the forecast
-  (`docs/model-selection.md`; §8.2, Finding 2). The forecast evidence for longer training
+  (`docs/model-selection.md`; §8.2, Finding 3). The forecast evidence for longer training
   is §5, at 20 replications per arm.
 - **That it holds generally.** It is one model, one hyperparameter setting borrowed from
   electronics, and 3 runs per panel.
@@ -339,7 +339,7 @@ split, reproduces the notebook's validation loss (§3.1).
 
 **A floor** (`min_epochs`) stops early stopping from firing before that epoch. The kept
 epoch is still the one with the lowest validation loss, so the kept weights can come from
-before the floor (§8.2, Finding 5).
+before the floor (§8.2, Finding 6).
 
 | arm | what it is | settings | trials |
 | --- | --- | --- | ---: |
@@ -506,7 +506,7 @@ budget all at once. E1 changes one at a time (MAPE, n = 20 / 20):
   57.7 in family U. Their LSTMs read different inputs: `Transactions` alone in E1, plus
   `week_sin`/`week_cos` in family U (§4.2).
 - **E1 has no 90-epoch arm.** The remaining suspect is a 90-epoch floor on a 39-week
-  window, untested. §8.2 (Finding 5) narrows how it could act.
+  window, untested. §8.2 (Finding 6) narrows how it could act.
 
 ### 5.4 Electronic_5y: tighter, not better on average
 
@@ -567,30 +567,44 @@ published rows are regenerated under the winner is a decision for an ADR.
 
 ## 8. The worst and best runs
 
-This section lists, panel by panel, the runs that forecast worst and best across families
-T, T′ (= E1) and U (§4.2), then the patterns they share.
+This section shows, configuration by configuration, the runs that forecast worst and best
+across families T, T′ (= E1) and U (§4.2), then what the bad runs share.
 
 **What a run is.** One study: one search's winner (or a pinned arm's single trial), refitted
-and forecast over 200 paths. There are 920 of them. Runs are ranked only within their own
+and forecast over 200 paths. There are 920 of them. Runs are compared only within their own
 panel, never across panels (`docs/statistical-protocol.md` §7).
 
-**What the tables show.** For each panel, the five worst and five best runs by aggregate
-MAPE (how well the total is forecast) and by Spearman (how well customers are ranked), the
-two primary metrics. Every table shows all four metrics.
+**Why the results are split by arm and input set.** A configuration (a *cell*) is panel ×
+arm × model × input set, and holds 20 runs. Results are never pooled across arms or input
+sets: the arm decides which hyperparameters are searched at all, and the inputs change
+which ones the search picks (§8.2, Finding 2). Comparing a `floored` run's batch with an
+`archive` run's, or a label run's learning rate with a no-label run's, would compare two
+different searches.
 
-How to read the columns. Each row is one run. The columns on the left say what was
-trained and how; the five on the right say how its forecast scored.
-- **family, model, arm**: which experiment the run belongs to (§4.2).
-- **label**: family U only. `kmeans_8` means the model also reads a customer-cluster label
-  as an input; `no_cluster` means it does not.
+**What the tables show.** Per panel, then per arm, one table per cell with four rows: the
+cell's median, its best and worst run by aggregate MAPE (how well the total is forecast),
+and its worst run by Spearman (how well customers are ranked). The line above each table
+says how many of the cell's 20 runs fall in the panel's worst 10% by MAPE, by |bias| and by
+Spearman — the three measures that define a bad run (§8.2).
+
+How to read a table:
+- **heading**: family · model · the columns the model reads. *count* is `Transactions`;
+  *week sin/cos* is `week_sin` and `week_cos` (the LSTM's week encoding); *week* is the raw
+  week index ValendinLSTM embeds; *label* is the `kmeans_8` customer-cluster label (family
+  U only). Every winner in a cell reads the same columns (each winner's
+  `selected_features`): no feature subset was searched.
+- **epoch floor** (next to the arm): `min_epochs`, the epoch before which early stopping
+  cannot end training (0 = no floor). It does not force the kept weights to come from
+  after it (§4.1).
 - **batch, lr, wd**: the batch size, learning rate and weight decay the run trained with.
-  In `archive` and `floor50` Optuna chose them; `paper`, `paper90` and `floored` pin
-  batch 32, lr 1e-3 and wd 0, and the LSTM to 128/128 with dropout 0.
+  In `archive` and `floor50` Optuna chose them; `paper`, `paper90` and `floored` pin batch
+  32, lr 1e-3 and wd 0, and the LSTM to 128/128 with dropout 0.
 - **hidden, dense, dropout**: the LSTM's memory width, the dense layer's width and the
   dropout rate. Values marked `*` are ValendinLSTM's frozen published architecture
   (128/128, no dropout, ADR-0004); only its batch, lr and wd were ever searched.
-- **epoch floor**: `min_epochs`, the epoch before which early stopping cannot end training
-  (0 = no floor). It does not force the kept weights to come from after it (§4.1).
+- **median of 20**: each metric's median over the cell's runs. For the settings, the most
+  common batch (with how many of the 20 runs used it, when not all), the most common
+  widths and the median of the rest.
 - **best epoch**: the epoch whose weights were kept; the model saw the data `best epoch + 1`
   times.
 - **updates**: `ceil(N / batch) × (best epoch + 1)` (§1). Read it with **batch**: the same
@@ -599,186 +613,470 @@ trained and how; the five on the right say how its forecast scored.
 - **CV**: the standard deviation of the per-customer predicted holdout totals divided by
   their mean. Near 0 means every customer gets nearly the same forecast: a collapse (§5.2).
 
-*(`.scratch/training-budget/worst_best_runs.py` → `results/worst_best_runs.csv`. The
-recomputed metrics match the archived `factorial.csv` exactly.)*
+*(`.scratch/training-budget/worst_best_runs.py` → `results/worst_best_runs.csv`, recomputed
+metrics matching the archived `factorial.csv` exactly; `per_arm_tables.py` prints the
+tables.)*
 
 ### 8.1 The tables
 
-#### electronics (320 studies)
+#### electronics (320 runs; worst 10% = 32)
 
-*Worst 5 by MAPE*
+**`archive`** (epoch floor 0)
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.6e-4 | 9e-5 | 128* | 128* | 0* | 0 | 89 | 1,170 | 0.0817 | +140.8 | 0.3896 | 144.1 | +0.274 | 1.23 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 5.8e-4 | 9e-6 | 128* | 128* | 0* | 0 | 35 | 468 | 0.0807 | +134.1 | 0.3909 | 137.7 | +0.270 | 1.19 |
-| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 74 | 1,950 | 0.0891 | +98.7 | 0.3786 | 103.4 | +0.235 | 0.18 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 5.1e-4 | 3e-4 | 128* | 128* | 0* | 0 | 24 | 325 | 0.0806 | +85.2 | 0.3814 | 97.3 | +0.325 | 1.03 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 14 | 390 | 0.0832 | +83.0 | 0.3827 | 93.5 | +0.299 | 1.37 |
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 0 by Spearman
 
-*Best 5 by MAPE*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 (9) | 1.4e-3 | 1e-4 | 128 | 128 | 0.29 | 13 | 69 | 0.0844 | +15.8 | 0.3769 | 53.9 | +0.297 | 1.16 |
+| best MAPE | 64 | 1.4e-3 | 6e-6 | 64 | 32 | 0.39 | 24 | 325 | 0.0832 | -0.9 | 0.3768 | 42.6 | +0.312 | 1.38 |
+| worst MAPE | 64 | 5.1e-4 | 3e-3 | 128 | 128 | 0.10 | 38 | 507 | 0.0824 | +69.8 | 0.3793 | 77.1 | +0.289 | 1.15 |
+| worst Spearman | 128 | 2.7e-3 | 5e-6 | 128 | 128 | 0.27 | 4 | 35 | 0.0874 | +27.2 | 0.3775 | 56.9 | +0.138 | 1.16 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 82 | 2,158 | 0.0888 | -10.4 | 0.3761 | 33.8 | +0.188 | 0.32 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 82 | 2,158 | 0.0888 | -10.7 | 0.3761 | 33.9 | +0.258 | 0.31 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 66 | 1,742 | 0.0886 | -8.0 | 0.3759 | 36.2 | +0.194 | 0.24 |
-| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 76 | 2,002 | 0.0901 | +3.2 | 0.3764 | 36.3 | +0.117 | 0.15 |
-| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 66 | 1,742 | 0.0886 | -8.2 | 0.3763 | 36.4 | +0.204 | 0.25 |
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 4 by Spearman
 
-*Worst 5 by Spearman*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (18) | 2.1e-3 | 1e-4 | 128 | 128 | 0.21 | 8 | 36 | 0.0890 | +20.3 | 0.3768 | 53.4 | +0.028 | 0.08 |
+| best MAPE | 256 | 2.6e-4 | 2e-3 | 64 | 128 | 0.05 | 24 | 100 | 0.0892 | -9.4 | 0.3764 | 47.0 | +0.068 | 0.09 |
+| worst MAPE | 256 | 2.1e-3 | 3e-6 | 128 | 128 | 0.08 | 8 | 36 | 0.0887 | +55.4 | 0.3779 | 73.0 | -0.003 | 0.08 |
+| worst Spearman | 256 | 2.7e-3 | 1e-5 | 128 | 32 | 0.18 | 8 | 36 | 0.0891 | +10.6 | 0.3768 | 50.1 | -0.058 | 0.09 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `archive` | `no_cluster` | 256 | 2.7e-3 | 1e-5 | 128 | 32 | 0.18 | 0 | 8 | 36 | 0.0891 | +10.6 | 0.3768 | 50.1 | -0.058 | 0.09 |
-| U | ValendinLSTM | `archive` | `no_cluster` | 256 | 2.5e-3 | 1e-6 | 128* | 128* | 0* | 0 | 7 | 32 | 0.0889 | +48.9 | 0.3774 | 73.5 | -0.049 | 0.08 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 2.1e-4 | 2e-3 | 64 | 32 | 0.26 | 0 | 35 | 144 | 0.0897 | +3.7 | 0.3766 | 53.2 | -0.044 | 0.09 |
-| T | LSTM | `floor50` | — | 256 | 2.5e-3 | 2e-4 | 128 | 128 | 0.16 | 50 | 38 | 156 | 0.0884 | +16.8 | 0.3769 | 52.4 | -0.043 | 0.09 |
-| T | LSTM | `archive` | — | 256 | 2.2e-3 | 2e-4 | 128 | 64 | 0.06 | 0 | 8 | 36 | 0.0891 | +39.8 | 0.3770 | 62.4 | -0.043 | 0.08 |
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 7 by MAPE, 8 by |bias|, 0 by Spearman
 
-*Best 5 by Spearman*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 (17) | 1.1e-3 | 5e-5 | 128* | 128* | 0* | 29 | 383 | 0.0808 | +33.4 | 0.3786 | 59.2 | +0.303 | 1.31 |
+| best MAPE | 64 | 2.0e-3 | 2e-4 | 128* | 128* | 0* | 26 | 351 | 0.0808 | -10.2 | 0.3773 | 38.9 | +0.316 | 1.64 |
+| worst MAPE | 64 | 1.6e-4 | 9e-5 | 128* | 128* | 0* | 89 | 1,170 | 0.0817 | +140.8 | 0.3896 | 144.1 | +0.274 | 1.23 |
+| worst Spearman | 64 | 5.8e-4 | 9e-6 | 128* | 128* | 0* | 35 | 468 | 0.0807 | +134.1 | 0.3909 | 137.7 | +0.270 | 1.19 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 12 | 338 | 0.0825 | -13.3 | 0.3759 | 40.2 | +0.337 | 1.51 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 2.4e-3 | 8e-5 | 128* | 128* | 0* | 0 | 33 | 442 | 0.0802 | +23.6 | 0.3785 | 52.8 | +0.335 | 1.56 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.1e-3 | 2e-3 | 128* | 128* | 0* | 0 | 34 | 455 | 0.0810 | +33.9 | 0.3785 | 53.4 | +0.333 | 1.29 |
-| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 16 | 442 | 0.0868 | +44.3 | 0.3780 | 61.8 | +0.333 | 0.94 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 8.8e-4 | 4e-3 | 128* | 128* | 0* | 0 | 25 | 338 | 0.0809 | +70.6 | 0.3817 | 78.5 | +0.331 | 1.33 |
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 4 by MAPE, 1 by |bias|, 5 by Spearman
 
-#### multichannel (160 studies)
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (19) | 1.9e-3 | 7e-5 | 128* | 128* | 0* | 8 | 36 | 0.0888 | +46.7 | 0.3774 | 68.8 | +0.024 | 0.08 |
+| best MAPE | 256 | 2.6e-3 | 5e-3 | 128* | 128* | 0* | 7 | 32 | 0.0883 | +27.8 | 0.3769 | 50.3 | +0.003 | 0.08 |
+| worst MAPE | 256 | 2.5e-3 | 4e-5 | 128* | 128* | 0* | 6 | 28 | 0.0891 | +55.1 | 0.3782 | 89.5 | +0.049 | 0.08 |
+| worst Spearman | 256 | 2.5e-3 | 1e-6 | 128* | 128* | 0* | 7 | 32 | 0.0889 | +48.9 | 0.3774 | 73.5 | -0.049 | 0.08 |
 
-*Worst 5 by MAPE*
+*T · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 3 by Spearman
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `archive` | `kmeans_8` | 256 | 1.8e-3 | 2e-5 | 128 | 32 | 0.15 | 0 | 3 | 24 | 0.0225 | +297.9 | 0.0582 | 297.9 | +0.159 | 0.42 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 1.8e-3 | 2e-5 | 128 | 64 | 0.34 | 0 | 3 | 24 | 0.0228 | +251.9 | 0.0579 | 254.8 | +0.010 | 0.09 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 1.9e-3 | 1e-6 | 128 | 32 | 0.09 | 0 | 3 | 24 | 0.0228 | +242.2 | 0.0578 | 244.7 | -0.029 | 0.09 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 2.7e-3 | 4e-5 | 128 | 64 | 0.38 | 0 | 2 | 18 | 0.0228 | +192.1 | 0.0576 | 200.4 | +0.023 | 0.10 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 8.7e-4 | 4e-6 | 128 | 32 | 0.24 | 0 | 6 | 42 | 0.0228 | +176.9 | 0.0575 | 184.1 | -0.006 | 0.11 |
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (17) | 2.1e-3 | 2e-4 | 128 | 128 | 0.19 | 8 | 36 | 0.0890 | +32.6 | 0.3770 | 58.1 | +0.028 | 0.08 |
+| best MAPE | 256 | 1.7e-3 | 1e-4 | 32 | 64 | 0.05 | 10 | 44 | 0.0885 | -2.0 | 0.3767 | 47.6 | +0.058 | 0.09 |
+| worst MAPE | 256 | 2.5e-3 | 6e-5 | 128 | 128 | 0.03 | 6 | 28 | 0.0889 | +53.3 | 0.3778 | 71.8 | -0.011 | 0.08 |
+| worst Spearman | 256 | 2.2e-3 | 2e-4 | 128 | 64 | 0.06 | 8 | 36 | 0.0891 | +39.8 | 0.3770 | 62.4 | -0.043 | 0.08 |
 
-*Best 5 by MAPE*
+*T · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 6 by MAPE, 4 by |bias|, 7 by Spearman
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 89 | 3,960 | 0.0236 | -13.6 | 0.0569 | 43.4 | +0.023 | 0.22 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 2.2e-3 | 4e-4 | 128* | 128* | 0* | 0 | 12 | 286 | 0.0188 | -12.2 | 0.0568 | 43.7 | +0.185 | 2.04 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.4e-3 | 1e-6 | 128* | 128* | 0* | 0 | 24 | 550 | 0.0192 | -7.7 | 0.0569 | 45.5 | +0.214 | 2.15 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 89 | 3,960 | 0.0234 | -0.1 | 0.0569 | 46.0 | +0.047 | 0.23 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 81 | 3,608 | 0.0234 | +0.6 | 0.0569 | 46.3 | +0.103 | 0.31 |
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (17) | 1.9e-3 | 4e-5 | 128* | 128* | 0* | 8 | 36 | 0.0889 | +42.6 | 0.3775 | 70.4 | +0.018 | 0.08 |
+| best MAPE | 64 | 2.6e-3 | 7e-5 | 128* | 128* | 0* | 35 | 468 | 0.0895 | +16.3 | 0.3765 | 50.8 | +0.138 | 0.22 |
+| worst MAPE | 256 | 8.3e-4 | 5e-3 | 128* | 128* | 0* | 13 | 56 | 0.0891 | +64.6 | 0.3784 | 90.9 | -0.002 | 0.07 |
+| worst Spearman | 256 | 1.7e-3 | 3e-6 | 128* | 128* | 0* | 9 | 40 | 0.0886 | +48.9 | 0.3778 | 78.3 | -0.028 | 0.08 |
 
-*Worst 5 by Spearman*
+**`floor50`** (epoch floor 50)
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | ValendinLSTM | `archive` | `no_cluster` | 256 | 2.1e-3 | 6e-5 | 128* | 128* | 0* | 0 | 5 | 36 | 0.0228 | +0.2 | 0.0569 | 63.1 | -0.067 | 0.17 |
-| U | ValendinLSTM | `archive` | `no_cluster` | 256 | 1.2e-3 | 1e-4 | 128* | 128* | 0* | 0 | 4 | 30 | 0.0227 | +37.9 | 0.0571 | 80.5 | -0.057 | 0.15 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 1.9e-3 | 3e-5 | 128 | 64 | 0.23 | 0 | 3 | 24 | 0.0228 | +121.1 | 0.0573 | 134.5 | -0.041 | 0.12 |
-| U | LSTM | `archive` | `no_cluster` | 256 | 2.0e-3 | 2e-4 | 128 | 64 | 0.11 | 0 | 3 | 24 | 0.0228 | +55.2 | 0.0571 | 93.7 | -0.038 | 0.14 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 79 | 3,520 | 0.0239 | +24.9 | 0.0570 | 53.6 | -0.036 | 0.16 |
+*T · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 1 by Spearman
 
-*Best 5 by Spearman*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (18) | 7.5e-4 | 1e-4 | 64 | 128 | 0.22 | 26 | 108 | 0.0881 | -2.0 | 0.3765 | 47.9 | +0.083 | 0.10 |
+| best MAPE | 128 | 2.5e-3 | 4e-6 | 128 | 64 | 0.01 | 65 | 462 | 0.0881 | -21.9 | 0.3762 | 43.0 | +0.123 | 0.27 |
+| worst MAPE | 256 | 1.4e-3 | 2e-6 | 128 | 128 | 0.37 | 48 | 196 | 0.0880 | +46.1 | 0.3775 | 73.1 | +0.000 | 0.08 |
+| worst Spearman | 256 | 2.5e-3 | 2e-4 | 128 | 128 | 0.16 | 38 | 156 | 0.0884 | +16.8 | 0.3769 | 52.4 | -0.043 | 0.09 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 33 | 1,496 | 0.0192 | +1.1 | 0.0570 | 49.0 | +0.232 | 2.10 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 24 | 1,100 | 0.0193 | +28.6 | 0.0572 | 53.0 | +0.229 | 2.18 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 71 | 3,168 | 0.0193 | +9.3 | 0.0571 | 52.7 | +0.225 | 2.45 |
-| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 48 | 2,156 | 0.0191 | +10.0 | 0.0574 | 51.3 | +0.224 | 2.96 |
-| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 39 | 1,760 | 0.0188 | +14.9 | 0.0571 | 53.4 | +0.222 | 2.19 |
+*T · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 2 by Spearman
 
-#### cdnow (280 studies)
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (14) | 2.6e-3 | 2e-4 | 128* | 128* | 0* | 67 | 328 | 0.0861 | +7.8 | 0.3764 | 48.6 | +0.189 | 0.17 |
+| best MAPE | 128 | 2.4e-3 | 4e-5 | 128* | 128* | 0* | 76 | 539 | 0.0870 | -18.3 | 0.3761 | 37.7 | +0.202 | 0.20 |
+| worst MAPE | 256 | 2.4e-3 | 2e-5 | 128* | 128* | 0* | 67 | 272 | 0.0856 | +48.2 | 0.3772 | 59.1 | +0.169 | 0.21 |
+| worst Spearman | 256 | 2.1e-3 | 9e-3 | 128* | 128* | 0* | 57 | 232 | 0.0876 | +21.1 | 0.3768 | 49.6 | -0.017 | 0.09 |
 
-*Worst 5 by MAPE*
+**`paper`** (epoch floor 0)
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 27 | 2,072 | 0.0927 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 9 | 740 | 0.0952 | +336.0 | 0.1797 | 341.6 | +0.415 | 0.13 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 8 | 666 | 0.0975 | +333.4 | 0.1750 | 334.1 | +0.228 | 0.06 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 21 | 1,628 | 0.0947 | +305.6 | 0.1773 | 307.4 | +0.414 | 0.17 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 39 | 2,960 | 0.0928 | +269.4 | 0.1659 | 273.1 | +0.393 | 0.20 |
+*T · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 1 by MAPE, 2 by |bias|, 5 by Spearman
 
-*Best 5 by MAPE*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 1 | 52 | 0.0930 | +36.1 | 0.3772 | 62.0 | +0.017 | 0.08 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 1 | 52 | 0.0933 | +6.7 | 0.3766 | 51.7 | -0.009 | 0.09 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 1 | 52 | 0.0930 | +68.1 | 0.3780 | 83.2 | +0.013 | 0.07 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 1 | 52 | 0.0928 | +32.0 | 0.3769 | 60.7 | -0.031 | 0.08 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| T′ | LSTM | `archive` | — | 64 | 2.9e-3 | 9e-6 | 128 | 64 | 0.22 | 0 | 22 | 851 | 0.0910 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 |
-| T′ | LSTM | `paper` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 0 | 11 | 888 | 0.0918 | -6.2 | 0.1465 | 18.5 | +0.434 | 0.95 |
-| T′ | LSTM | `archive` | — | 64 | 2.0e-3 | 3e-4 | 64 | 128 | 0.20 | 0 | 31 | 1,184 | 0.0911 | -6.4 | 0.1465 | 18.5 | +0.428 | 0.94 |
-| T′ | LSTM | `archive` | — | 64 | 9.0e-4 | 4e-4 | 64 | 64 | 0.09 | 0 | 35 | 1,332 | 0.0910 | -1.0 | 0.1461 | 18.7 | +0.426 | 1.00 |
-| T′ | LSTM | `paper` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 0 | 19 | 1,480 | 0.0916 | -4.0 | 0.1463 | 18.7 | +0.417 | 1.03 |
+*T · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 2 by MAPE, 0 by |bias|, 5 by Spearman
 
-*Worst 5 by Spearman*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 1 | 52 | 0.0931 | +30.6 | 0.3773 | 68.9 | +0.014 | 0.08 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 1 | 52 | 0.0930 | +7.3 | 0.3767 | 55.4 | -0.016 | 0.09 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 1 | 52 | 0.0931 | +38.2 | 0.3772 | 77.1 | +0.001 | 0.08 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 1 | 52 | 0.0935 | +30.5 | 0.3777 | 74.9 | -0.030 | 0.08 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| T′ | ValendinLSTM | `floor50` | — | 64 | 2.6e-3 | 1e-4 | 128* | 128* | 0* | 50 | 24 | 925 | 0.0910 | +48.9 | 0.1591 | 91.7 | -0.150 | 0.60 |
-| T′ | ValendinLSTM | `floor50` | — | 64 | 1.2e-3 | 7e-4 | 128* | 128* | 0* | 50 | 32 | 1,221 | 0.0913 | +45.4 | 0.1549 | 77.0 | -0.147 | 0.68 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 46 | 3,478 | 0.0915 | +198.7 | 0.1589 | 203.7 | -0.045 | 0.17 |
-| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 2.4e-3 | 8e-3 | 128* | 128* | 0* | 0 | 13 | 518 | 0.0916 | +17.3 | 0.1513 | 75.8 | +0.029 | 0.41 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 27 | 2,072 | 0.0927 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 |
+**`paper90`** (epoch floor 90)
 
-*Best 5 by Spearman*
+*T · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 2 by MAPE, 4 by |bias|, 0 by Spearman
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.0e-3 | 5e-4 | 128* | 128* | 0* | 0 | 51 | 1,924 | 0.0682 | -3.6 | 0.1492 | 29.4 | +0.470 | 2.62 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.5e-3 | 2e-4 | 128* | 128* | 0* | 0 | 21 | 814 | 0.0691 | +8.5 | 0.1502 | 29.7 | +0.469 | 2.68 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 26 | 1,998 | 0.0686 | +17.9 | 0.1510 | 37.6 | +0.453 | 2.38 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 41 | 3,108 | 0.0680 | +23.1 | 0.1504 | 42.9 | +0.452 | 2.20 |
-| T′ | LSTM | `archive` | — | 64 | 2.9e-3 | 9e-6 | 128 | 64 | 0.22 | 0 | 22 | 851 | 0.0910 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 |
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 71.5 | 1,885 | 0.0891 | +30.4 | 0.3766 | 49.6 | +0.185 | 0.22 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 82 | 2,158 | 0.0888 | -10.4 | 0.3761 | 33.8 | +0.188 | 0.32 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 74 | 1,950 | 0.0891 | +98.7 | 0.3786 | 103.4 | +0.235 | 0.18 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 1 | 52 | 0.0925 | +40.6 | 0.3774 | 63.5 | +0.021 | 0.08 |
 
-#### gift (160 studies)
+*T · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
 
-*Worst 5 by MAPE*
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 56 | 1,482 | 0.0887 | -10.6 | 0.3763 | 45.3 | +0.198 | 0.26 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 71 | 1,872 | 0.0885 | +7.3 | 0.3761 | 37.3 | +0.241 | 0.43 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 80 | 2,106 | 0.0884 | +38.7 | 0.3773 | 62.8 | +0.197 | 0.20 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 1 | 52 | 0.0935 | +27.9 | 0.3769 | 61.7 | +0.008 | 0.08 |
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 2.3e-3 | 5e-4 | 128* | 128* | 0* | 0 | 22 | 759 | 0.0512 | -50.8 | 0.1067 | 51.3 | +0.350 | 0.76 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 6.2e-4 | 5e-3 | 128* | 128* | 0* | 0 | 7 | 264 | 0.0450 | +37.8 | 0.1075 | 50.2 | +0.372 | 1.29 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 39 | 2,600 | 0.0513 | -47.2 | 0.1068 | 48.0 | +0.159 | 0.35 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 8 | 585 | 0.0466 | +12.6 | 0.1072 | 47.1 | +0.345 | 1.32 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 8 | 585 | 0.0466 | +12.8 | 0.1071 | 46.8 | +0.344 | 1.32 |
+**`floored`** (epoch floor 90)
 
-*Best 5 by MAPE*
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 4 by MAPE, 5 by |bias|, 0 by Spearman
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `archive` | `kmeans_8` | 64 | 2.0e-3 | 2e-5 | 128 | 64 | 0.02 | 0 | 31 | 1,056 | 0.0458 | -6.6 | 0.1068 | 20.6 | +0.343 | 1.37 |
-| U | LSTM | `archive` | `no_cluster` | 64 | 2.7e-3 | 1e-5 | 128 | 128 | 0.19 | 0 | 39 | 1,320 | 0.0515 | -11.2 | 0.1065 | 21.3 | +0.354 | 0.79 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 9.5e-4 | 2e-6 | 128* | 128* | 0* | 0 | 33 | 1,122 | 0.0448 | -9.3 | 0.1068 | 21.6 | +0.327 | 1.43 |
-| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 20 | 1,365 | 0.0451 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 |
-| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 39 | 2,600 | 0.0451 | -1.4 | 0.1067 | 22.6 | +0.366 | 1.34 |
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 26.5 | 715 | 0.0824 | +2.9 | 0.3770 | 43.9 | +0.306 | 1.38 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 32 | 858 | 0.0823 | +11.9 | 0.3781 | 36.4 | +0.320 | 1.56 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 14 | 390 | 0.0832 | +83.0 | 0.3827 | 93.5 | +0.299 | 1.37 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 9 | 260 | 0.0912 | -21.2 | 0.3764 | 45.0 | +0.234 | 0.75 |
 
-*Worst 5 by Spearman*
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 1 by MAPE, 2 by |bias|, 0 by Spearman
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 23 | 1,560 | 0.0518 | -9.2 | 0.1070 | 27.5 | +0.014 | 0.11 |
-| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 22 | 1,495 | 0.0520 | -12.9 | 0.1070 | 23.3 | +0.021 | 0.11 |
-| U | ValendinLSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 32 | 2,145 | 0.0508 | -23.9 | 0.1070 | 29.4 | +0.023 | 0.11 |
-| U | ValendinLSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 29 | 1,950 | 0.0505 | +7.9 | 0.1071 | 29.6 | +0.042 | 0.11 |
-| U | LSTM | `archive` | `no_cluster` | 64 | 3.0e-3 | 4e-3 | 32 | 64 | 0.11 | 0 | 39 | 1,320 | 0.0525 | -6.3 | 0.1070 | 22.7 | +0.104 | 0.11 |
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 71.5 | 1,885 | 0.0891 | +26.2 | 0.3765 | 45.9 | +0.197 | 0.22 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 82 | 2,158 | 0.0888 | -10.7 | 0.3761 | 33.9 | +0.258 | 0.31 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 82 | 2,158 | 0.0890 | +89.1 | 0.3778 | 91.8 | +0.233 | 0.58 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 16 | 442 | 0.0927 | +35.1 | 0.3769 | 59.1 | +0.013 | 0.08 |
 
-*Best 5 by Spearman*
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 4 by MAPE, 5 by |bias|, 0 by Spearman
 
-| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 2.6e-3 | 4e-3 | 128* | 128* | 0* | 0 | 18 | 627 | 0.0515 | +2.3 | 0.1064 | 24.3 | +0.384 | 0.62 |
-| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 9.3e-4 | 2e-4 | 128* | 128* | 0* | 0 | 58 | 1,947 | 0.0513 | +24.5 | 0.1067 | 32.0 | +0.381 | 0.52 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 8.1e-4 | 3e-3 | 128* | 128* | 0* | 0 | 24 | 825 | 0.0451 | +5.8 | 0.1071 | 28.4 | +0.381 | 1.44 |
-| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.3e-3 | 4e-6 | 128* | 128* | 0* | 0 | 13 | 462 | 0.0454 | +20.8 | 0.1071 | 38.9 | +0.381 | 1.18 |
-| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 20 | 1,365 | 0.0451 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 |
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 33 | 884 | 0.0814 | +41.9 | 0.3795 | 59.2 | +0.309 | 1.35 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 17 | 468 | 0.0839 | -8.3 | 0.3767 | 38.1 | +0.292 | 1.37 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 43 | 1,144 | 0.0809 | +73.4 | 0.3872 | 87.3 | +0.329 | 1.80 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 42 | 1,118 | 0.0816 | +3.1 | 0.3772 | 41.7 | +0.282 | 1.42 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 58.5 | 1,547 | 0.0886 | -3.4 | 0.3762 | 45.3 | +0.176 | 0.25 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 71 | 1,872 | 0.0885 | +6.2 | 0.3761 | 36.4 | +0.250 | 0.44 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 80 | 2,106 | 0.0884 | +39.8 | 0.3771 | 63.0 | +0.162 | 0.21 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 1 | 52 | 0.0935 | +27.5 | 0.3774 | 61.1 | +0.014 | 0.08 |
+
+#### multichannel (160 runs; worst 10% = 16)
+
+**`archive`** (epoch floor 0)
+
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 (17) | 1.9e-3 | 5e-5 | 128 | 32 | 0.24 | 19 | 407 | 0.0189 | +27.0 | 0.0571 | 54.9 | +0.174 | 1.94 |
+| best MAPE | 64 | 2.3e-3 | 3e-6 | 128 | 128 | 0.24 | 8 | 198 | 0.0189 | -10.7 | 0.0569 | 48.7 | +0.173 | 2.13 |
+| worst MAPE | 256 | 1.8e-3 | 2e-5 | 128 | 32 | 0.15 | 3 | 24 | 0.0225 | +297.9 | 0.0582 | 297.9 | +0.159 | 0.42 |
+| worst Spearman | 64 | 2.5e-4 | 8e-5 | 32 | 64 | 0.33 | 74 | 1,650 | 0.0223 | +29.9 | 0.0570 | 60.2 | +0.101 | 0.82 |
+
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 13 by MAPE, 11 by |bias|, 7 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 (19) | 1.9e-3 | 1e-5 | 128 | 64 | 0.17 | 4 | 30 | 0.0228 | +109.4 | 0.0573 | 134.8 | +0.002 | 0.12 |
+| best MAPE | 64 | 2.8e-3 | 2e-6 | 32 | 64 | 0.06 | 11 | 264 | 0.0241 | +9.0 | 0.0570 | 50.7 | +0.012 | 0.17 |
+| worst MAPE | 256 | 1.8e-3 | 2e-5 | 128 | 64 | 0.34 | 3 | 24 | 0.0228 | +251.9 | 0.0579 | 254.8 | +0.010 | 0.09 |
+| worst Spearman | 256 | 1.9e-3 | 3e-5 | 128 | 64 | 0.23 | 3 | 24 | 0.0228 | +121.1 | 0.0573 | 134.5 | -0.041 | 0.12 |
+
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 1.5e-3 | 2e-5 | 128* | 128* | 0* | 13 | 308 | 0.0188 | +32.4 | 0.0572 | 61.6 | +0.180 | 1.96 |
+| best MAPE | 64 | 2.2e-3 | 4e-4 | 128* | 128* | 0* | 12 | 286 | 0.0188 | -12.2 | 0.0568 | 43.7 | +0.185 | 2.04 |
+| worst MAPE | 64 | 8.8e-4 | 1e-6 | 128* | 128* | 0* | 13 | 308 | 0.0191 | +130.0 | 0.0599 | 141.2 | +0.061 | 1.41 |
+| worst Spearman | 64 | 8.8e-4 | 1e-6 | 128* | 128* | 0* | 13 | 308 | 0.0191 | +130.0 | 0.0599 | 141.2 | +0.061 | 1.41 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 2 by |bias|, 8 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 256 | 1.7e-3 | 1e-4 | 128* | 128* | 0* | 3 | 24 | 0.0228 | +45.2 | 0.0571 | 80.8 | -0.004 | 0.15 |
+| best MAPE | 256 | 1.1e-3 | 4e-4 | 128* | 128* | 0* | 4 | 30 | 0.0228 | +21.5 | 0.0570 | 59.7 | +0.027 | 0.16 |
+| worst MAPE | 256 | 7.8e-4 | 1e-6 | 128* | 128* | 0* | 6 | 42 | 0.0228 | +108.0 | 0.0572 | 123.5 | +0.036 | 0.12 |
+| worst Spearman | 256 | 2.1e-3 | 6e-5 | 128* | 128* | 0* | 5 | 36 | 0.0228 | +0.2 | 0.0569 | 63.1 | -0.067 | 0.17 |
+
+**`floored`** (epoch floor 90)
+
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 25 | 1,144 | 0.0193 | +20.1 | 0.0571 | 52.3 | +0.197 | 2.13 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 31 | 1,408 | 0.0192 | -2.9 | 0.0569 | 46.4 | +0.176 | 2.56 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 4 | 220 | 0.0198 | +71.8 | 0.0576 | 90.7 | +0.081 | 1.75 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 4 | 220 | 0.0198 | +71.8 | 0.0576 | 90.7 | +0.081 | 1.75 |
+
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 1 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 80.5 | 3,586 | 0.0234 | +17.3 | 0.0569 | 51.9 | +0.084 | 0.38 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 89 | 3,960 | 0.0236 | -13.6 | 0.0569 | 43.4 | +0.023 | 0.22 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 71 | 3,168 | 0.0233 | +52.4 | 0.0569 | 67.1 | +0.083 | 0.40 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 79 | 3,520 | 0.0239 | +24.9 | 0.0570 | 53.6 | -0.036 | 0.16 |
+
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 28 | 1,276 | 0.0194 | +12.4 | 0.0572 | 55.2 | +0.193 | 2.19 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 33 | 1,496 | 0.0192 | +1.1 | 0.0570 | 49.0 | +0.232 | 2.10 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 17 | 792 | 0.0195 | +127.8 | 0.0585 | 135.2 | +0.177 | 1.77 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 6 | 308 | 0.0196 | +1.6 | 0.0571 | 55.8 | +0.160 | 1.94 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 72.5 | 3,234 | 0.0234 | +20.8 | 0.0569 | 53.0 | +0.129 | 0.51 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 81 | 3,608 | 0.0235 | +19.3 | 0.0568 | 48.5 | +0.138 | 0.67 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 50 | 2,244 | 0.0232 | +55.3 | 0.0569 | 70.2 | +0.123 | 0.67 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 75 | 3,344 | 0.0234 | -2.6 | 0.0569 | 49.1 | +0.043 | 0.27 |
+
+#### cdnow (280 runs; worst 10% = 28)
+
+**`archive`** (epoch floor 0)
+
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 4 by MAPE, 4 by |bias|, 1 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 (19) | 1.9e-3 | 6e-5 | 128 | 32 | 0.17 | 26 | 999 | 0.0681 | +54.5 | 0.1538 | 59.7 | +0.398 | 2.05 |
+| best MAPE | 64 | 1.8e-3 | 5e-5 | 128 | 64 | 0.05 | 27 | 1,036 | 0.0678 | +2.3 | 0.1495 | 21.8 | +0.394 | 2.64 |
+| worst MAPE | 64 | 1.8e-3 | 2e-5 | 64 | 64 | 0.28 | 26 | 999 | 0.0690 | +190.0 | 0.1669 | 190.0 | +0.364 | 0.97 |
+| worst Spearman | 64 | 2.9e-3 | 5e-4 | 128 | 32 | 0.40 | 31 | 1,184 | 0.0662 | +129.4 | 0.1627 | 131.5 | +0.305 | 1.38 |
+
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 3 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 (19) | 2.2e-3 | 1e-5 | 128 | 64 | 0.11 | 24.5 | 925 | 0.0912 | -3.2 | 0.1477 | 39.9 | +0.399 | 0.97 |
+| best MAPE | 64 | 8.8e-4 | 1e-5 | 128 | 64 | 0.12 | 35 | 1,332 | 0.0913 | +4.0 | 0.1464 | 21.8 | +0.348 | 1.21 |
+| worst MAPE | 128 | 2.3e-3 | 4e-4 | 128 | 128 | 0.09 | 29 | 570 | 0.0920 | +212.0 | 0.1621 | 222.4 | +0.397 | 0.12 |
+| worst Spearman | 64 | 2.7e-3 | 2e-3 | 64 | 128 | 0.31 | 52 | 1,961 | 0.0911 | +113.4 | 0.1559 | 123.6 | +0.222 | 0.26 |
+
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 3 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 2.2e-3 | 3e-5 | 128* | 128* | 0* | 21 | 814 | 0.0687 | +29.2 | 0.1528 | 42.5 | +0.425 | 2.35 |
+| best MAPE | 64 | 1.0e-3 | 5e-4 | 128* | 128* | 0* | 51 | 1,924 | 0.0682 | -3.6 | 0.1492 | 29.4 | +0.470 | 2.62 |
+| worst MAPE | 64 | 2.8e-3 | 2e-5 | 128* | 128* | 0* | 20 | 777 | 0.0693 | +260.0 | 0.2157 | 269.3 | +0.209 | 1.25 |
+| worst Spearman | 64 | 2.8e-3 | 2e-5 | 128* | 128* | 0* | 20 | 777 | 0.0693 | +260.0 | 0.2157 | 269.3 | +0.209 | 1.25 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 3 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 1.8e-3 | 2e-5 | 128* | 128* | 0* | 19.5 | 758 | 0.0912 | -24.4 | 0.1473 | 45.1 | +0.383 | 1.18 |
+| best MAPE | 64 | 2.0e-3 | 6e-6 | 128* | 128* | 0* | 20 | 777 | 0.0910 | -7.8 | 0.1461 | 22.8 | +0.418 | 1.21 |
+| worst MAPE | 64 | 1.8e-3 | 2e-5 | 128* | 128* | 0* | 14 | 555 | 0.0913 | +204.8 | 0.1640 | 209.7 | +0.416 | 0.56 |
+| worst Spearman | 64 | 2.4e-3 | 8e-3 | 128* | 128* | 0* | 13 | 518 | 0.0916 | +17.3 | 0.1513 | 75.8 | +0.029 | 0.41 |
+
+*T′ · LSTM · inputs: count* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 2.1e-3 | 7e-5 | 128 | 128 | 0.20 | 25 | 962 | 0.0909 | -1.9 | 0.1463 | 20.2 | +0.428 | 1.10 |
+| best MAPE | 64 | 2.9e-3 | 9e-6 | 128 | 64 | 0.22 | 22 | 851 | 0.0910 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 |
+| worst MAPE | 64 | 1.7e-3 | 2e-6 | 128 | 128 | 0.28 | 17 | 666 | 0.0910 | -31.1 | 0.1465 | 31.8 | +0.416 | 1.29 |
+| worst Spearman | 64 | 8.1e-4 | 5e-3 | 128 | 128 | 0.40 | 27 | 1,036 | 0.0909 | -26.4 | 0.1459 | 27.7 | +0.402 | 1.62 |
+
+*T′ · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 1 by MAPE, 1 by |bias|, 1 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 1.9e-3 | 3e-5 | 128* | 128* | 0* | 19.5 | 758 | 0.0913 | -20.4 | 0.1471 | 35.3 | +0.391 | 1.08 |
+| best MAPE | 64 | 2.2e-3 | 1e-3 | 128* | 128* | 0* | 11 | 444 | 0.0912 | -5.0 | 0.1464 | 24.1 | +0.387 | 1.04 |
+| worst MAPE | 64 | 2.8e-3 | 8e-6 | 128* | 128* | 0* | 23 | 888 | 0.0916 | +166.8 | 0.1568 | 169.7 | +0.441 | 0.75 |
+| worst Spearman | 64 | 1.8e-3 | 2e-3 | 128* | 128* | 0* | 12 | 481 | 0.0911 | -55.6 | 0.1482 | 56.9 | +0.330 | 1.03 |
+
+**`floor50`** (epoch floor 50)
+
+*T′ · LSTM · inputs: count* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 2.3e-3 | 2e-5 | 128 | 128 | 0.13 | 45 | 1,702 | 0.0906 | +3.5 | 0.1459 | 21.7 | +0.432 | 1.32 |
+| best MAPE | 64 | 2.2e-3 | 7e-6 | 64 | 128 | 0.00 | 31 | 1,184 | 0.0906 | -7.5 | 0.1463 | 18.7 | +0.448 | 1.05 |
+| worst MAPE | 64 | 2.6e-3 | 1e-5 | 64 | 32 | 0.11 | 36 | 1,369 | 0.0906 | +54.3 | 0.1475 | 59.0 | +0.423 | 0.84 |
+| worst Spearman | 64 | 1.4e-3 | 8e-4 | 64 | 128 | 0.33 | 46 | 1,739 | 0.0907 | -21.9 | 0.1461 | 24.9 | +0.393 | 1.36 |
+
+*T′ · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 5 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 1.5e-3 | 2e-4 | 128* | 128* | 0* | 30.5 | 1,165 | 0.0910 | -18.3 | 0.1472 | 35.2 | +0.400 | 1.22 |
+| best MAPE | 64 | 1.3e-3 | 7e-4 | 128* | 128* | 0* | 33 | 1,258 | 0.0911 | -13.6 | 0.1480 | 24.7 | +0.380 | 2.35 |
+| worst MAPE | 64 | 2.6e-3 | 1e-4 | 128* | 128* | 0* | 24 | 925 | 0.0910 | +48.9 | 0.1591 | 91.7 | -0.150 | 0.60 |
+| worst Spearman | 64 | 2.6e-3 | 1e-4 | 128* | 128* | 0* | 24 | 925 | 0.0910 | +48.9 | 0.1591 | 91.7 | -0.150 | 0.60 |
+
+**`paper`** (epoch floor 0)
+
+*T′ · LSTM · inputs: count* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 1 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 12 | 962 | 0.0916 | +1.6 | 0.1465 | 22.3 | +0.411 | 1.04 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 11 | 888 | 0.0918 | -6.2 | 0.1465 | 18.5 | +0.434 | 0.95 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 18 | 1,406 | 0.0916 | +38.0 | 0.1468 | 41.3 | +0.429 | 0.89 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 24 | 1,850 | 0.0913 | -0.7 | 0.1469 | 19.5 | +0.323 | 0.73 |
+
+*T′ · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 5 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 13 | 1,036 | 0.0931 | -10.5 | 0.1474 | 43.0 | +0.378 | 0.96 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 9 | 740 | 0.0923 | -7.2 | 0.1467 | 24.2 | +0.449 | 0.98 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 13 | 1,036 | 0.0933 | +63.4 | 0.1563 | 108.4 | +0.375 | 0.33 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 13 | 1,036 | 0.0934 | -56.5 | 0.1486 | 57.4 | +0.198 | 0.78 |
+
+**`floored`** (epoch floor 90)
+
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 3 by MAPE, 4 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 30 | 2,294 | 0.0693 | +73.4 | 0.1586 | 77.8 | +0.405 | 1.70 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 13 | 1,036 | 0.0689 | -5.7 | 0.1493 | 21.9 | +0.397 | 2.82 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 31 | 2,368 | 0.0692 | +174.2 | 0.1680 | 174.2 | +0.359 | 1.15 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 27 | 2,072 | 0.0717 | +116.4 | 0.1609 | 119.5 | +0.348 | 1.45 |
+
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 15 by MAPE, 14 by |bias|, 4 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 18.5 | 1,443 | 0.0926 | +155.4 | 0.1568 | 160.7 | +0.405 | 0.19 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 16 | 1,258 | 0.0919 | +5.0 | 0.1470 | 22.6 | +0.385 | 1.08 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 27 | 2,072 | 0.0927 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 46 | 3,478 | 0.0915 | +198.7 | 0.1589 | 203.7 | -0.045 | 0.17 |
+
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 24.5 | 1,887 | 0.0715 | +33.6 | 0.1535 | 43.9 | +0.404 | 2.42 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 20 | 1,554 | 0.0730 | +0.8 | 0.1493 | 23.8 | +0.447 | 2.52 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 25 | 1,924 | 0.0712 | +105.0 | 0.1635 | 115.4 | +0.395 | 1.53 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 8 | 666 | 0.0707 | +65.1 | 0.1573 | 88.6 | +0.351 | 1.21 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 2 by MAPE, 2 by |bias|, 2 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 23 | 1,776 | 0.0927 | -7.9 | 0.1474 | 43.4 | +0.387 | 0.99 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 27 | 2,072 | 0.0943 | +1.0 | 0.1463 | 25.7 | +0.431 | 1.01 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 44 | 3,330 | 0.0926 | +199.8 | 0.1634 | 212.3 | +0.407 | 0.28 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 13 | 1,036 | 0.0934 | -50.2 | 0.1485 | 52.3 | +0.232 | 0.70 |
+
+#### gift (160 runs; worst 10% = 16)
+
+**`archive`** (epoch floor 0)
+
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 2 by MAPE, 1 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 (19) | 2.5e-3 | 3e-4 | 128 | 64 | 0.19 | 22.5 | 775 | 0.0457 | -7.3 | 0.1068 | 28.6 | +0.350 | 1.41 |
+| best MAPE | 64 | 2.0e-3 | 2e-5 | 128 | 64 | 0.02 | 31 | 1,056 | 0.0458 | -6.6 | 0.1068 | 20.6 | +0.343 | 1.37 |
+| worst MAPE | 128 | 1.9e-3 | 2e-4 | 128 | 128 | 0.25 | 17 | 306 | 0.0482 | -31.6 | 0.1067 | 44.0 | +0.369 | 1.58 |
+| worst Spearman | 64 | 1.1e-3 | 2e-6 | 128 | 32 | 0.03 | 12 | 429 | 0.0460 | +1.4 | 0.1068 | 29.3 | +0.335 | 1.33 |
+
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 2 by MAPE, 4 by |bias|, 3 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 2.7e-3 | 6e-5 | 128 | 128 | 0.18 | 34 | 1,155 | 0.0516 | -23.4 | 0.1066 | 28.6 | +0.349 | 0.58 |
+| best MAPE | 64 | 2.7e-3 | 1e-5 | 128 | 128 | 0.19 | 39 | 1,320 | 0.0515 | -11.2 | 0.1065 | 21.3 | +0.354 | 0.79 |
+| worst MAPE | 64 | 2.7e-3 | 1e-5 | 64 | 128 | 0.08 | 33 | 1,122 | 0.0514 | -45.2 | 0.1067 | 45.9 | +0.332 | 0.68 |
+| worst Spearman | 64 | 3.0e-3 | 4e-3 | 32 | 64 | 0.11 | 39 | 1,320 | 0.0525 | -6.3 | 0.1070 | 22.7 | +0.104 | 0.11 |
+
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 4 by MAPE, 2 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 1.4e-3 | 3e-5 | 128* | 128* | 0* | 19 | 660 | 0.0451 | -0.7 | 0.1069 | 28.8 | +0.364 | 1.31 |
+| best MAPE | 64 | 9.5e-4 | 2e-6 | 128* | 128* | 0* | 33 | 1,122 | 0.0448 | -9.3 | 0.1068 | 21.6 | +0.327 | 1.43 |
+| worst MAPE | 64 | 6.2e-4 | 5e-3 | 128* | 128* | 0* | 7 | 264 | 0.0450 | +37.8 | 0.1075 | 50.2 | +0.372 | 1.29 |
+| worst Spearman | 64 | 9.5e-4 | 2e-6 | 128* | 128* | 0* | 33 | 1,122 | 0.0448 | -9.3 | 0.1068 | 21.6 | +0.327 | 1.43 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 3 by MAPE, 5 by |bias|, 1 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 64 | 2.2e-3 | 1e-4 | 128* | 128* | 0* | 26.5 | 907 | 0.0514 | -12.7 | 0.1067 | 30.5 | +0.353 | 0.57 |
+| best MAPE | 64 | 2.6e-3 | 4e-3 | 128* | 128* | 0* | 18 | 627 | 0.0515 | +2.3 | 0.1064 | 24.3 | +0.384 | 0.62 |
+| worst MAPE | 64 | 2.3e-3 | 5e-4 | 128* | 128* | 0* | 22 | 759 | 0.0512 | -50.8 | 0.1067 | 51.3 | +0.350 | 0.76 |
+| worst Spearman | 64 | 2.2e-3 | 4e-3 | 128* | 128* | 0* | 41 | 1,386 | 0.0515 | -11.2 | 0.1068 | 28.1 | +0.252 | 0.28 |
+
+**`floored`** (epoch floor 90)
+
+*U · LSTM · inputs: count, week sin/cos, label* — in the panel's worst 10%: 4 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 20 | 1,365 | 0.0453 | -4.1 | 0.1068 | 28.1 | +0.365 | 1.34 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 39 | 2,600 | 0.0451 | -1.4 | 0.1067 | 22.6 | +0.366 | 1.34 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 8 | 585 | 0.0466 | +12.6 | 0.1072 | 47.1 | +0.345 | 1.32 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 11 | 780 | 0.0461 | -16.4 | 0.1067 | 28.7 | +0.331 | 1.39 |
+
+*U · LSTM · inputs: count, week sin/cos* — in the panel's worst 10%: 1 by MAPE, 2 by |bias|, 6 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 46.5 | 3,087 | 0.0510 | -17.6 | 0.1066 | 28.8 | +0.294 | 0.49 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 22 | 1,495 | 0.0520 | -12.9 | 0.1070 | 23.3 | +0.021 | 0.11 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 39 | 2,600 | 0.0513 | -47.2 | 0.1068 | 48.0 | +0.159 | 0.35 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 23 | 1,560 | 0.0518 | -9.2 | 0.1070 | 27.5 | +0.014 | 0.11 |
+
+*U · ValendinLSTM · inputs: count, week, label* — in the panel's worst 10%: 0 by MAPE, 0 by |bias|, 0 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 16 | 1,105 | 0.0451 | -8.8 | 0.1069 | 27.2 | +0.365 | 1.42 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 20 | 1,365 | 0.0451 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 11 | 780 | 0.0448 | +17.6 | 0.1072 | 38.7 | +0.367 | 1.22 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 23 | 1,560 | 0.0449 | -8.0 | 0.1069 | 29.6 | +0.337 | 1.29 |
+
+*U · ValendinLSTM · inputs: count, week* — in the panel's worst 10%: 0 by MAPE, 2 by |bias|, 6 by Spearman
+
+| run | batch | lr | wd | hidden | dense | dropout | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **median of 20** | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 36 | 2,405 | 0.0508 | -14.3 | 0.1066 | 29.7 | +0.322 | 0.44 |
+| best MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 45 | 2,990 | 0.0507 | -4.8 | 0.1069 | 23.3 | +0.189 | 0.22 |
+| worst MAPE | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 28 | 1,885 | 0.0507 | -31.7 | 0.1065 | 33.7 | +0.371 | 0.70 |
+| worst Spearman | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 32 | 2,145 | 0.0508 | -23.9 | 0.1070 | 29.4 | +0.023 | 0.11 |
+
+
 
 ### 8.2 What the bad runs have in common
 
 The question here: when a run forecasts badly, is it because of its model, its
-architecture or its training, and which? The answer is built in four steps: define a bad
-run, measure how much of the badness the configuration explains at all, look inside a
-configuration for settings that predict it, and then describe the failure types the bad
-runs fall into.
+architecture or its training, and which? The answer is built in five steps: define a bad
+run, measure how much of the badness the configuration explains at all, show how the
+inputs change what the search picks, look inside a configuration for settings that predict
+a bad run, and then describe the failure types the bad runs fall into. Every step keeps
+arms and input sets apart.
 
 All of this is descriptive, not a protocol claim: the bad runs are picked by their
 outcome. Two terms:
@@ -809,7 +1107,7 @@ bad on the **ranking** if it is in the worst 10% by Spearman (the secondary meas
   −34%), while its worst by MAPE miss in both directions. Its whole MAPE range is narrow
   (21–51).
 - **A bad total and a bad ranking are mostly different runs** (last column). A run can rank
-  customers well and still miss the total by 140% (the worst electronics row in §8.1), or
+  customers well and still miss the total by 140% (the worst MAPE row of electronics' `U · ValendinLSTM` with the label in §8.1), or
   get the total within 10% and rank customers at chance. So the two are analysed
   separately below.
 - RMSE follows the bias, but only in the third decimal, so it separates nothing
@@ -840,45 +1138,114 @@ training happened to produce).
 - **For the ranking on electronics and multichannel, the configuration decides** (82–84%).
   That is the collapse of failure type A below, which whole cells fall into.
 
-#### Finding 2. Inside a configuration, no searched setting predicts a bad run
+#### Finding 2. The inputs change the hyperparameters the search picks
+
+Family U runs every search twice, once without and once with the cluster label, on the
+same panel, model and arm. Any difference between the two searches' winners comes from the
+one extra input. The table shows, for every searched cell, what the search chose across its
+20 runs and how the cell forecast (medians).
+
+| panel | model | arm | inputs | batch (runs of 20) | lr, median [IQR] | dropout | best epoch | updates | MAPE | bias % | Spearman |
+| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cdnow | T′ · LSTM | `archive` | count | 64: 20 | 2.1e-3 [1.3e-3, 2.6e-3] | 0.20 | 25 | 962 | 20.2 | -1.9 | +0.428 |
+| cdnow | T′ · LSTM | `floor50` | count | 64: 20 | 2.3e-3 [2.1e-3, 2.8e-3] | 0.13 | 45 | 1,702 | 21.7 | +3.5 | +0.432 |
+| cdnow | U · LSTM | `archive` | count, week sin/cos | 64: 19, 128: 1 | 2.2e-3 [1.7e-3, 2.5e-3] | 0.11 | 24.5 | 925 | 39.9 | -3.2 | +0.399 |
+| cdnow | U · LSTM | `archive` | count, week sin/cos, label | 64: 19, 128: 1 | 1.9e-3 [1.4e-3, 2.4e-3] | 0.17 | 26 | 999 | 59.7 | +54.5 | +0.398 |
+| cdnow | T′ · ValendinLSTM | `archive` | count, week | 64: 20 | 1.9e-3 [1.6e-3, 2.5e-3] | 0* | 19.5 | 758 | 35.3 | -20.4 | +0.391 |
+| cdnow | T′ · ValendinLSTM | `floor50` | count, week | 64: 20 | 1.5e-3 [1.1e-3, 2.6e-3] | 0* | 30.5 | 1,165 | 35.2 | -18.3 | +0.400 |
+| cdnow | U · ValendinLSTM | `archive` | count, week | 64: 20 | 1.8e-3 [1.5e-3, 2.3e-3] | 0* | 19.5 | 758 | 45.1 | -24.4 | +0.383 |
+| cdnow | U · ValendinLSTM | `archive` | count, week, label | 64: 20 | 2.2e-3 [1.4e-3, 2.6e-3] | 0* | 21 | 814 | 42.5 | +29.2 | +0.425 |
+| electronics | T · LSTM | `archive` | count, week sin/cos | 256: 17, 128: 3 | 2.1e-3 [1.7e-3, 2.5e-3] | 0.19 | 8 | 36 | 58.1 | +32.6 | +0.028 |
+| electronics | T · LSTM | `floor50` | count, week sin/cos | 256: 18, 128: 2 | 7.5e-4 [4.7e-4, 2.0e-3] | 0.22 | 26 | 108 | 47.9 | -2.0 | +0.083 |
+| electronics | U · LSTM | `archive` | count, week sin/cos | 256: 18, 128: 2 | 2.1e-3 [1.5e-3, 2.7e-3] | 0.21 | 8 | 36 | 53.4 | +20.3 | +0.028 |
+| electronics | U · LSTM | `archive` | count, week sin/cos, label | 64: 9, 256: 9, 128: 2 | 1.4e-3 [5.4e-4, 2.6e-3] | 0.29 | 13 | 69 | 53.9 | +15.8 | +0.297 |
+| electronics | T · ValendinLSTM | `archive` | count, week | 256: 17, 128: 2, 64: 1 | 1.9e-3 [1.1e-3, 2.4e-3] | 0* | 8 | 36 | 70.4 | +42.6 | +0.018 |
+| electronics | T · ValendinLSTM | `floor50` | count, week | 256: 14, 128: 5, 64: 1 | 2.6e-3 [2.3e-3, 2.8e-3] | 0* | 67 | 328 | 48.6 | +7.8 | +0.189 |
+| electronics | U · ValendinLSTM | `archive` | count, week | 256: 19, 128: 1 | 1.9e-3 [1.5e-3, 2.4e-3] | 0* | 8 | 36 | 68.8 | +46.7 | +0.024 |
+| electronics | U · ValendinLSTM | `archive` | count, week, label | 64: 17, 256: 2, 128: 1 | 1.1e-3 [7.2e-4, 2.1e-3] | 0* | 29 | 383 | 59.2 | +33.4 | +0.303 |
+| gift | U · LSTM | `archive` | count, week sin/cos | 64: 20 | 2.7e-3 [2.4e-3, 2.8e-3] | 0.18 | 34 | 1,155 | 28.6 | -23.4 | +0.349 |
+| gift | U · LSTM | `archive` | count, week sin/cos, label | 64: 19, 128: 1 | 2.5e-3 [1.8e-3, 2.9e-3] | 0.19 | 22.5 | 775 | 28.6 | -7.3 | +0.350 |
+| gift | U · ValendinLSTM | `archive` | count, week | 64: 20 | 2.2e-3 [1.9e-3, 2.6e-3] | 0* | 26.5 | 907 | 30.5 | -12.7 | +0.353 |
+| gift | U · ValendinLSTM | `archive` | count, week, label | 64: 20 | 1.4e-3 [1.1e-3, 2.2e-3] | 0* | 19 | 660 | 28.8 | -0.7 | +0.364 |
+| multichannel | U · LSTM | `archive` | count, week sin/cos | 256: 19, 64: 1 | 1.9e-3 [1.2e-3, 2.4e-3] | 0.17 | 4 | 30 | 134.8 | +109.4 | +0.002 |
+| multichannel | U · LSTM | `archive` | count, week sin/cos, label | 64: 17, 128: 2, 256: 1 | 1.9e-3 [1.2e-3, 2.3e-3] | 0.24 | 19 | 407 | 54.9 | +27.0 | +0.174 |
+| multichannel | U · ValendinLSTM | `archive` | count, week | 256: 20 | 1.7e-3 [1.4e-3, 2.3e-3] | 0* | 3 | 24 | 80.8 | +45.2 | -0.004 |
+| multichannel | U · ValendinLSTM | `archive` | count, week, label | 64: 20 | 1.5e-3 [8.8e-4, 2.3e-3] | 0* | 13 | 308 | 61.6 | +32.4 | +0.180 |
+
+*`0*`: ValendinLSTM has no dropout (frozen architecture).*
+
+- **On electronics and multichannel, the label flips the batch size.** Without it, the
+  search picks batch 256 in 17–20 of 20 runs, and training stops after 3–8 epochs and
+  24–36 updates: the too-little-training collapse of type A below (Spearman ≈ 0). With the
+  label it picks batch 64 (9 of 20 for electronics' LSTM, 17–20 otherwise), trains 13–29
+  epochs and ranks customers (Spearman 0.17–0.30). On CDNOW and gift the search picks batch
+  64 with or without the label.
+- **With the label, the search picks a lower learning rate** in 6 of the 8 pairs
+  (electronics 1.4e-3 against 2.1e-3 for the LSTM, 1.1e-3 against 1.9e-3 for ValendinLSTM;
+  equal on multichannel's LSTM; higher on CDNOW's ValendinLSTM), **and more dropout** in all
+  four LSTM pairs (0.29 against 0.21 on electronics, 0.24 against 0.17 on multichannel, 0.17
+  against 0.11 on CDNOW, 0.19 against 0.18 on gift). The widths show no shift.
+- **The label also moves the bias, in a panel-dependent direction.** On CDNOW it turns a
+  near-zero or negative median bias into an over-forecast (LSTM −3.2% → +54.5%,
+  ValendinLSTM −24.4% → +29.2%); on gift it pulls an under-forecast towards zero; on
+  electronics and multichannel, where it prevents the collapse, it lowers the
+  over-forecast.
+- **The arm changes the picks too.** `floor50` keeps the batch of `archive` but, on
+  electronics, its LSTM winners take a lower learning rate (7.5e-4 against 2.1e-3) and its
+  ValendinLSTM winners a higher one (2.6e-3 against 1.9e-3), and both keep a much later
+  epoch (26 and 67 against 8).
+
+So a setting's effect can only be read inside one arm and one input set. That is how the
+next finding and the §8.1 tables are built.
+
+#### Finding 3. Inside a configuration, no searched setting predicts a bad run, except a low learning rate with the label
 
 In the searched arms (`archive`, `floor50`), Optuna picks a different learning rate,
 dropout and so on for each of a cell's 20 runs. If one of those settings caused bad totals,
-runs that drew it would have higher MAPE. The table gives, over the 24 searched cells, the
-rank correlation between each setting and MAPE across a cell's 20 runs.
+runs that drew it would have higher MAPE. The table gives the rank correlation between each
+setting and MAPE across a cell's 20 runs: the median over cells, then in brackets how many
+cells pass +0.3 / −0.3, out of the cells where the setting varies. Arms and input sets are
+kept apart.
 
-| setting | cells where it varies | median correlation with MAPE | cells with r > +0.3 | cells with r < −0.3 |
-| --- | ---: | ---: | ---: | ---: |
-| learning rate | 24 | −0.03 | 2 | 5 |
-| weight decay | 24 | +0.01 | 1 | 1 |
-| dropout | 12 | +0.09 | 3 | 1 |
-| hidden width | 12 | +0.03 | 2 | 0 |
-| dense width | 12 | +0.22 | 3 | 3 |
-| kept epoch | 24 | −0.10 | 1 | 3 |
-| validation loss | 24 | +0.04 | 5 | 1 |
-| batch size | 13 | +0.32 | 7 | 0 |
-| forecast CV (an outcome) | 24 | −0.55 | 0 | 16 |
+| setting | `archive`, no label (12 cells) | `archive`, label (8 cells) | `floor50`, no label (4 cells) |
+| --- | --- | --- | --- |
+| learning rate | -0.01 (1 / 1 of 12) | -0.23 (1 / 3 of 8) | +0.05 (0 / 1 of 4) |
+| batch size | +0.07 (3 / 0 of 6) | +0.38 (3 / 0 of 5) | +0.33 (1 / 0 of 2) |
+| weight decay | -0.05 (0 / 1 of 12) | +0.05 (0 / 0 of 8) | +0.02 (1 / 0 of 4) |
+| dropout | +0.06 (1 / 1 of 6) | +0.05 (1 / 0 of 4) | +0.22 (1 / 0 of 2) |
+| hidden width | +0.13 (2 / 0 of 6) | -0.10 (0 / 0 of 4) | +0.03 (0 / 0 of 2) |
+| dense width | +0.25 (2 / 1 of 6) | -0.02 (1 / 1 of 4) | -0.05 (0 / 1 of 2) |
+| best epoch | -0.08 (0 / 1 of 12) | -0.21 (0 / 1 of 8) | -0.16 (1 / 1 of 4) |
+| validation loss | +0.04 (2 / 1 of 12) | +0.14 (2 / 0 of 8) | +0.03 (1 / 0 of 4) |
+| forecast CV (an outcome) | -0.65 (0 / 7 of 12) | -0.54 (0 / 6 of 8) | -0.42 (0 / 3 of 4) |
 
-- **By chance alone**, with 20 runs, a correlation passes +0.3 about 11% of the time, so
-  2–3 of 24 cells in each column. Learning rate, weight decay, dropout, the widths and the
-  kept epoch stay at that level, with medians near zero and signs that flip between cells.
-- **Batch size is the one setting with a lean, but it barely varies.** The search picks the
-  same batch for a median of 19 of a cell's 20 runs. The odd run on a larger batch tended
-  to be worse: multichannel's `U · LSTM · archive/kmeans_8` ran batch 256 once, and that
-  run is the panel's worst total (MAPE 297.9). So batch acts mostly *between* cells, where
-  the search chooses it (batch 256 without the label on electronics and multichannel, 64
-  with it), not as a knob that varies within one.
-- **The validation loss does not flag a bad run.** Within a cell its correlation with MAPE
-  has a median of +0.04 (CDNOW +0.06, electronics +0.03, gift −0.01, multichannel +0.08).
-  In CDNOW's `U · LSTM · floored/no_cluster` (type B below), it spans 0.0915–0.0975 while
-  MAPE spans 22.6–348.2. This is `docs/model-selection.md`'s finding again, at the level of
-  single runs.
+- **By chance alone**, with 20 runs, a correlation passes +0.3 (or −0.3) about 11% of the
+  time: about 1 of 12 cells, 1 of 8, 0–1 of 4 in each direction. Without the label, every
+  setting stays at that level, with medians near zero and signs that flip between cells.
+- **With the label, a low learning rate goes with a worse total**: median −0.23, 3 of 8
+  cells below −0.3. In 5 of the 8 label cells, the quarter of runs with the lowest learning
+  rate has a higher median MAPE than the rest. The clearest is electronics'
+  `U · ValendinLSTM · archive` with the label (r −0.68): its lowest-learning-rate quarter
+  (≤ 7.2e-4) has median MAPE 97.3 against 53.3, and holds its two worst runs (lr 1.6e-4 and
+  5.8e-4, bias +141% and +134%). Multichannel's ValendinLSTM with the label shows the same
+  (75.6 against 58.4). This is descriptive, from 8 cells.
+- **Batch size has a lean, but it barely varies.** The search picks the same batch for a
+  median of 19 of a cell's 20 runs. The odd run on a larger batch tended to be worse:
+  multichannel's `U · LSTM · archive` with the label ran batch 256 once, and that run is
+  the panel's worst total (MAPE 297.9). So batch acts mostly *between* input sets, as
+  Finding 2 shows, not as a knob that varies within one.
+- **The validation loss does not flag a bad run.** Over all 46 cells, its within-cell
+  correlation with MAPE has a median of +0.04 (CDNOW +0.06, electronics +0.03, gift −0.01,
+  multichannel +0.08). In CDNOW's `U · LSTM · floored/no_cluster` (type B below), it spans
+  0.0915–0.0975 while MAPE spans 22.6–348.2. This is `docs/model-selection.md`'s finding
+  again, at the level of single runs.
 - **Only forecast CV tracks MAPE**: the flatter the forecast across customers, the worse
-  the total, in 16 of 24 cells. But CV is a symptom of the forecast, not a setting anyone
-  chooses. In 43 of the 46 cells, a lower CV goes with a higher bias (median −0.47). The
-  types below say which configurations produce flat forecasts.
+  the total, in 16 of 24 searched cells, with and without the label. But CV is a symptom of
+  the forecast, not a setting anyone chooses. In 43 of the 46 cells, a lower CV goes with a
+  higher bias (median −0.47). The types below say which configurations produce flat
+  forecasts.
 
-#### Finding 3. The bad runs fall into four types
+#### Finding 4. The bad runs fall into four types
 
 Counting which cells the worst 10% come from gives four recognisable types, one or two
 per panel.
@@ -951,15 +1318,15 @@ per panel.
   the extreme). Its worst rankings are the floored no-label cells (12 of 16), the
   long-training collapse of type B in milder form (CV 0.22).
 
-#### Finding 4. How far a recipe trains matters; which epoch one run kept does not
+#### Finding 5. How far a recipe trains matters; which epoch one run kept does not
 
 Type A shows that recipes stopping after a handful of epochs give bad runs. But within a
 cell, the kept epoch barely moves MAPE: the median within-cell correlation is −0.15 over all
 46 cells (electronics −0.22, multichannel −0.24, CDNOW 0.00, gift −0.10), and −0.10 over the
-24 searched cells of Finding 2. The epoch effect of §5 is between arms: it is about how far
+24 searched cells of Finding 3. The epoch effect of §5 is between arms: it is about how far
 a recipe lets training go, not about which epoch one search happened to keep.
 
-#### Finding 5. A floor works by carrying training past the flat stretch, not by keeping late weights
+#### Finding 6. A floor works by carrying training past the flat stretch, not by keeping late weights
 
 - 92% of the 440 floored runs kept weights from *before* their floor epoch. The floor lets
   training continue past the plateau of §3.2 until it finds a lower loss, and that lower
@@ -973,9 +1340,15 @@ a recipe lets training go, not about which epoch one search happened to keep.
 - A bad **total** on electronics, multichannel and CDNOW is an over-forecast. A bad
   **ranking** is a flat forecast.
 - At most half of a bad total is explained by the configuration; the rest is the luck of
-  one search and one training. No searched setting (learning rate, weight decay, dropout,
-  widths, kept epoch) predicts a bad run within a configuration, and neither does the
-  validation loss the search selects on.
+  one search and one training.
+- **The inputs change what the search picks.** Adding the cluster label makes the search
+  choose batch 64 instead of 256 on electronics and multichannel, a lower learning rate
+  and more dropout. Hyperparameters are therefore only compared within one arm and one
+  input set.
+- Within such a configuration, no searched setting (weight decay, dropout, widths, kept
+  epoch) predicts a bad run, and neither does the validation loss the search selects on.
+  The one exception: with the label, the runs that drew a low learning rate tend to
+  over-forecast more.
 - What the configuration does decide comes from three things: **too little training**
   (batch 256 without the label, or stopping at epoch 1) collapses the forecast; **the
   pinned recipe without the label on CDNOW's U inputs** collapses it despite long training;
