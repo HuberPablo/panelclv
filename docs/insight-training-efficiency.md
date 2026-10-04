@@ -578,17 +578,26 @@ panel, never across panels (`docs/statistical-protocol.md` §7).
 MAPE (how well the total is forecast) and by Spearman (how well customers are ranked), the
 two primary metrics. Every table shows all four metrics.
 
-How to read the columns:
-- **run**: family · model · arm (family U: `training/label`) · replication.
-- **CV**: the standard deviation of the per-customer predicted holdout totals divided by
-  their mean. Near 0 means every customer gets nearly the same forecast: a collapse (§5.2).
+How to read the columns. Each row is one run. The columns on the left say what was
+trained and how; the five on the right say how its forecast scored.
+- **family, model, arm**: which experiment the run belongs to (§4.2).
+- **label**: family U only. `kmeans_8` means the model also reads a customer-cluster label
+  as an input; `no_cluster` means it does not.
+- **batch, lr, wd**: the batch size, learning rate and weight decay the run trained with.
+  In `archive` and `floor50` Optuna chose them; `paper`, `paper90` and `floored` pin
+  batch 32, lr 1e-3 and wd 0, and the LSTM to 128/128 with dropout 0.
+- **hidden, dense, dropout**: the LSTM's memory width, the dense layer's width and the
+  dropout rate. Values marked `*` are ValendinLSTM's frozen published architecture
+  (128/128, no dropout, ADR-0004); only its batch, lr and wd were ever searched.
+- **epoch floor**: `min_epochs`, the epoch before which early stopping cannot end training
+  (0 = no floor). It does not force the kept weights to come from after it (§4.1).
 - **best epoch**: the epoch whose weights were kept; the model saw the data `best epoch + 1`
   times.
 - **updates**: `ceil(N / batch) × (best epoch + 1)` (§1). Read it with **batch**: the same
   number of updates means eight times more data at batch 256 than at batch 32 (§1.1).
-- **val CE**: the winner's validation loss, the number the search selected on.
-- `paper`, `paper90` and `floored` pin lr 1e-3, weight decay 0, batch 32, and an LSTM of
-  128/128 with dropout 0. ValendinLSTM's architecture is frozen (ADR-0004).
+- **val CE**: the run's validation loss, the number the search selected on.
+- **CV**: the standard deviation of the per-customer predicted holdout totals divided by
+  their mean. Near 0 means every customer gets nearly the same forecast: a collapse (§5.2).
 
 *(`.scratch/training-budget/worst_best_runs.py` → `results/worst_best_runs.csv`. The
 recomputed metrics match the archived `factorial.csv` exactly.)*
@@ -599,172 +608,169 @@ recomputed metrics match the archived `factorial.csv` exactly.)*
 
 *Worst 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · ValendinLSTM · `archive/kmeans_8` · r18 | +140.8 | 0.3896 | 144.1 | +0.274 | 1.23 | 89 | 1,170 | 64 | 1.6e-04 | 9e-05 | frozen | 0.0817 |
-| U · ValendinLSTM · `archive/kmeans_8` · r15 | +134.1 | 0.3909 | 137.7 | +0.270 | 1.19 | 35 | 468 | 64 | 5.8e-04 | 9e-06 | frozen | 0.0807 |
-| T · LSTM · `paper90` · r11 | +98.7 | 0.3786 | 103.4 | +0.235 | 0.18 | 74 | 1,950 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0891 |
-| U · ValendinLSTM · `archive/kmeans_8` · r14 | +85.2 | 0.3814 | 97.3 | +0.325 | 1.03 | 24 | 325 | 64 | 5.1e-04 | 3e-04 | frozen | 0.0806 |
-| U · LSTM · `floored/kmeans_8` · r16 | +83.0 | 0.3827 | 93.5 | +0.299 | 1.37 | 14 | 390 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0832 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.6e-4 | 9e-5 | 128* | 128* | 0* | 0 | 89 | 1,170 | 0.0817 | +140.8 | 0.3896 | 144.1 | +0.274 | 1.23 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 5.8e-4 | 9e-6 | 128* | 128* | 0* | 0 | 35 | 468 | 0.0807 | +134.1 | 0.3909 | 137.7 | +0.270 | 1.19 |
+| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 74 | 1,950 | 0.0891 | +98.7 | 0.3786 | 103.4 | +0.235 | 0.18 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 5.1e-4 | 3e-4 | 128* | 128* | 0* | 0 | 24 | 325 | 0.0806 | +85.2 | 0.3814 | 97.3 | +0.325 | 1.03 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 14 | 390 | 0.0832 | +83.0 | 0.3827 | 93.5 | +0.299 | 1.37 |
 
 *Best 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| T · LSTM · `paper90` · r08 | -10.4 | 0.3761 | 33.8 | +0.188 | 0.32 | 82 | 2,158 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0888 |
-| U · LSTM · `floored/no_cluster` · r11 | -10.7 | 0.3761 | 33.9 | +0.258 | 0.31 | 82 | 2,158 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0888 |
-| U · LSTM · `floored/no_cluster` · r06 | -8.0 | 0.3759 | 36.2 | +0.194 | 0.24 | 66 | 1,742 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0886 |
-| T · LSTM · `paper90` · r18 | +3.2 | 0.3764 | 36.3 | +0.117 | 0.15 | 76 | 2,002 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0901 |
-| T · LSTM · `paper90` · r03 | -8.2 | 0.3763 | 36.4 | +0.204 | 0.25 | 66 | 1,742 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0886 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 82 | 2,158 | 0.0888 | -10.4 | 0.3761 | 33.8 | +0.188 | 0.32 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 82 | 2,158 | 0.0888 | -10.7 | 0.3761 | 33.9 | +0.258 | 0.31 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 66 | 1,742 | 0.0886 | -8.0 | 0.3759 | 36.2 | +0.194 | 0.24 |
+| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 76 | 2,002 | 0.0901 | +3.2 | 0.3764 | 36.3 | +0.117 | 0.15 |
+| T | LSTM | `paper90` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 66 | 1,742 | 0.0886 | -8.2 | 0.3763 | 36.4 | +0.204 | 0.25 |
 
 *Worst 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `archive/no_cluster` · r18 | +10.6 | 0.3768 | 50.1 | -0.058 | 0.09 | 8 | 36 | 256 | 2.7e-03 | 1e-05 | 128/32/0.18 | 0.0891 |
-| U · ValendinLSTM · `archive/no_cluster` · r04 | +48.9 | 0.3774 | 73.5 | -0.049 | 0.08 | 7 | 32 | 256 | 2.5e-03 | 1e-06 | frozen | 0.0889 |
-| U · LSTM · `archive/no_cluster` · r15 | +3.7 | 0.3766 | 53.2 | -0.044 | 0.09 | 35 | 144 | 256 | 2.1e-04 | 2e-03 | 64/32/0.26 | 0.0897 |
-| T · LSTM · `floor50` · r04 | +16.8 | 0.3769 | 52.4 | -0.043 | 0.09 | 38 | 156 | 256 | 2.5e-03 | 2e-04 | 128/128/0.16 | 0.0884 |
-| T · LSTM · `archive` · r15 | +39.8 | 0.3770 | 62.4 | -0.043 | 0.08 | 8 | 36 | 256 | 2.2e-03 | 2e-04 | 128/64/0.06 | 0.0891 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `archive` | `no_cluster` | 256 | 2.7e-3 | 1e-5 | 128 | 32 | 0.18 | 0 | 8 | 36 | 0.0891 | +10.6 | 0.3768 | 50.1 | -0.058 | 0.09 |
+| U | ValendinLSTM | `archive` | `no_cluster` | 256 | 2.5e-3 | 1e-6 | 128* | 128* | 0* | 0 | 7 | 32 | 0.0889 | +48.9 | 0.3774 | 73.5 | -0.049 | 0.08 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 2.1e-4 | 2e-3 | 64 | 32 | 0.26 | 0 | 35 | 144 | 0.0897 | +3.7 | 0.3766 | 53.2 | -0.044 | 0.09 |
+| T | LSTM | `floor50` | — | 256 | 2.5e-3 | 2e-4 | 128 | 128 | 0.16 | 50 | 38 | 156 | 0.0884 | +16.8 | 0.3769 | 52.4 | -0.043 | 0.09 |
+| T | LSTM | `archive` | — | 256 | 2.2e-3 | 2e-4 | 128 | 64 | 0.06 | 0 | 8 | 36 | 0.0891 | +39.8 | 0.3770 | 62.4 | -0.043 | 0.08 |
 
 *Best 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `floored/kmeans_8` · r07 | -13.3 | 0.3759 | 40.2 | +0.337 | 1.51 | 12 | 338 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0825 |
-| U · ValendinLSTM · `archive/kmeans_8` · r07 | +23.6 | 0.3785 | 52.8 | +0.335 | 1.56 | 33 | 442 | 64 | 2.4e-03 | 8e-05 | frozen | 0.0802 |
-| U · ValendinLSTM · `archive/kmeans_8` · r09 | +33.9 | 0.3785 | 53.4 | +0.333 | 1.29 | 34 | 455 | 64 | 1.1e-03 | 2e-03 | frozen | 0.0810 |
-| U · ValendinLSTM · `floored/kmeans_8` · r07 | +44.3 | 0.3780 | 61.8 | +0.333 | 0.94 | 16 | 442 | 32 | 1.0e-03 | 0 | frozen | 0.0868 |
-| U · ValendinLSTM · `archive/kmeans_8` · r16 | +70.6 | 0.3817 | 78.5 | +0.331 | 1.33 | 25 | 338 | 64 | 8.8e-04 | 4e-03 | frozen | 0.0809 |
-
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 12 | 338 | 0.0825 | -13.3 | 0.3759 | 40.2 | +0.337 | 1.51 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 2.4e-3 | 8e-5 | 128* | 128* | 0* | 0 | 33 | 442 | 0.0802 | +23.6 | 0.3785 | 52.8 | +0.335 | 1.56 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.1e-3 | 2e-3 | 128* | 128* | 0* | 0 | 34 | 455 | 0.0810 | +33.9 | 0.3785 | 53.4 | +0.333 | 1.29 |
+| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 16 | 442 | 0.0868 | +44.3 | 0.3780 | 61.8 | +0.333 | 0.94 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 8.8e-4 | 4e-3 | 128* | 128* | 0* | 0 | 25 | 338 | 0.0809 | +70.6 | 0.3817 | 78.5 | +0.331 | 1.33 |
 
 #### multichannel (160 studies)
 
 *Worst 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `archive/kmeans_8` · r17 | +297.9 | 0.0582 | 297.9 | +0.159 | 0.42 | 3 | 24 | 256 | 1.8e-03 | 2e-05 | 128/32/0.15 | 0.0225 |
-| U · LSTM · `archive/no_cluster` · r12 | +251.9 | 0.0579 | 254.8 | +0.010 | 0.09 | 3 | 24 | 256 | 1.8e-03 | 2e-05 | 128/64/0.34 | 0.0228 |
-| U · LSTM · `archive/no_cluster` · r10 | +242.2 | 0.0578 | 244.7 | -0.029 | 0.09 | 3 | 24 | 256 | 1.9e-03 | 1e-06 | 128/32/0.09 | 0.0228 |
-| U · LSTM · `archive/no_cluster` · r18 | +192.1 | 0.0576 | 200.4 | +0.023 | 0.10 | 2 | 18 | 256 | 2.7e-03 | 4e-05 | 128/64/0.38 | 0.0228 |
-| U · LSTM · `archive/no_cluster` · r08 | +176.9 | 0.0575 | 184.1 | -0.006 | 0.11 | 6 | 42 | 256 | 8.7e-04 | 4e-06 | 128/32/0.24 | 0.0228 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `archive` | `kmeans_8` | 256 | 1.8e-3 | 2e-5 | 128 | 32 | 0.15 | 0 | 3 | 24 | 0.0225 | +297.9 | 0.0582 | 297.9 | +0.159 | 0.42 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 1.8e-3 | 2e-5 | 128 | 64 | 0.34 | 0 | 3 | 24 | 0.0228 | +251.9 | 0.0579 | 254.8 | +0.010 | 0.09 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 1.9e-3 | 1e-6 | 128 | 32 | 0.09 | 0 | 3 | 24 | 0.0228 | +242.2 | 0.0578 | 244.7 | -0.029 | 0.09 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 2.7e-3 | 4e-5 | 128 | 64 | 0.38 | 0 | 2 | 18 | 0.0228 | +192.1 | 0.0576 | 200.4 | +0.023 | 0.10 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 8.7e-4 | 4e-6 | 128 | 32 | 0.24 | 0 | 6 | 42 | 0.0228 | +176.9 | 0.0575 | 184.1 | -0.006 | 0.11 |
 
 *Best 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `floored/no_cluster` · r02 | -13.6 | 0.0569 | 43.4 | +0.023 | 0.22 | 89 | 3,960 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0236 |
-| U · ValendinLSTM · `archive/kmeans_8` · r19 | -12.2 | 0.0568 | 43.7 | +0.185 | 2.04 | 12 | 286 | 64 | 2.2e-03 | 4e-04 | frozen | 0.0188 |
-| U · ValendinLSTM · `archive/kmeans_8` · r16 | -7.7 | 0.0569 | 45.5 | +0.214 | 2.15 | 24 | 550 | 64 | 1.4e-03 | 1e-06 | frozen | 0.0192 |
-| U · LSTM · `floored/no_cluster` · r10 | -0.1 | 0.0569 | 46.0 | +0.047 | 0.23 | 89 | 3,960 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0234 |
-| U · LSTM · `floored/no_cluster` · r04 | +0.6 | 0.0569 | 46.3 | +0.103 | 0.31 | 81 | 3,608 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0234 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 89 | 3,960 | 0.0236 | -13.6 | 0.0569 | 43.4 | +0.023 | 0.22 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 2.2e-3 | 4e-4 | 128* | 128* | 0* | 0 | 12 | 286 | 0.0188 | -12.2 | 0.0568 | 43.7 | +0.185 | 2.04 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.4e-3 | 1e-6 | 128* | 128* | 0* | 0 | 24 | 550 | 0.0192 | -7.7 | 0.0569 | 45.5 | +0.214 | 2.15 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 89 | 3,960 | 0.0234 | -0.1 | 0.0569 | 46.0 | +0.047 | 0.23 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 81 | 3,608 | 0.0234 | +0.6 | 0.0569 | 46.3 | +0.103 | 0.31 |
 
 *Worst 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · ValendinLSTM · `archive/no_cluster` · r10 | +0.2 | 0.0569 | 63.1 | -0.067 | 0.17 | 5 | 36 | 256 | 2.1e-03 | 6e-05 | frozen | 0.0228 |
-| U · ValendinLSTM · `archive/no_cluster` · r19 | +37.9 | 0.0571 | 80.5 | -0.057 | 0.15 | 4 | 30 | 256 | 1.2e-03 | 1e-04 | frozen | 0.0227 |
-| U · LSTM · `archive/no_cluster` · r19 | +121.1 | 0.0573 | 134.5 | -0.041 | 0.12 | 3 | 24 | 256 | 1.9e-03 | 3e-05 | 128/64/0.23 | 0.0228 |
-| U · LSTM · `archive/no_cluster` · r06 | +55.2 | 0.0571 | 93.7 | -0.038 | 0.14 | 3 | 24 | 256 | 2.0e-03 | 2e-04 | 128/64/0.11 | 0.0228 |
-| U · LSTM · `floored/no_cluster` · r09 | +24.9 | 0.0570 | 53.6 | -0.036 | 0.16 | 79 | 3,520 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0239 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | ValendinLSTM | `archive` | `no_cluster` | 256 | 2.1e-3 | 6e-5 | 128* | 128* | 0* | 0 | 5 | 36 | 0.0228 | +0.2 | 0.0569 | 63.1 | -0.067 | 0.17 |
+| U | ValendinLSTM | `archive` | `no_cluster` | 256 | 1.2e-3 | 1e-4 | 128* | 128* | 0* | 0 | 4 | 30 | 0.0227 | +37.9 | 0.0571 | 80.5 | -0.057 | 0.15 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 1.9e-3 | 3e-5 | 128 | 64 | 0.23 | 0 | 3 | 24 | 0.0228 | +121.1 | 0.0573 | 134.5 | -0.041 | 0.12 |
+| U | LSTM | `archive` | `no_cluster` | 256 | 2.0e-3 | 2e-4 | 128 | 64 | 0.11 | 0 | 3 | 24 | 0.0228 | +55.2 | 0.0571 | 93.7 | -0.038 | 0.14 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 79 | 3,520 | 0.0239 | +24.9 | 0.0570 | 53.6 | -0.036 | 0.16 |
 
 *Best 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · ValendinLSTM · `floored/kmeans_8` · r06 | +1.1 | 0.0570 | 49.0 | +0.232 | 2.10 | 33 | 1,496 | 32 | 1.0e-03 | 0 | frozen | 0.0192 |
-| U · LSTM · `floored/kmeans_8` · r06 | +28.6 | 0.0572 | 53.0 | +0.229 | 2.18 | 24 | 1,100 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0193 |
-| U · LSTM · `floored/kmeans_8` · r10 | +9.3 | 0.0571 | 52.7 | +0.225 | 2.45 | 71 | 3,168 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0193 |
-| U · ValendinLSTM · `floored/kmeans_8` · r13 | +10.0 | 0.0574 | 51.3 | +0.224 | 2.96 | 48 | 2,156 | 32 | 1.0e-03 | 0 | frozen | 0.0191 |
-| U · ValendinLSTM · `floored/kmeans_8` · r02 | +14.9 | 0.0571 | 53.4 | +0.222 | 2.19 | 39 | 1,760 | 32 | 1.0e-03 | 0 | frozen | 0.0188 |
-
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 33 | 1,496 | 0.0192 | +1.1 | 0.0570 | 49.0 | +0.232 | 2.10 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 24 | 1,100 | 0.0193 | +28.6 | 0.0572 | 53.0 | +0.229 | 2.18 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 71 | 3,168 | 0.0193 | +9.3 | 0.0571 | 52.7 | +0.225 | 2.45 |
+| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 48 | 2,156 | 0.0191 | +10.0 | 0.0574 | 51.3 | +0.224 | 2.96 |
+| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 39 | 1,760 | 0.0188 | +14.9 | 0.0571 | 53.4 | +0.222 | 2.19 |
 
 #### cdnow (280 studies)
 
 *Worst 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `floored/no_cluster` · r05 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 | 27 | 2,072 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0927 |
-| U · LSTM · `floored/no_cluster` · r16 | +336.0 | 0.1797 | 341.6 | +0.415 | 0.13 | 9 | 740 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0952 |
-| U · LSTM · `floored/no_cluster` · r03 | +333.4 | 0.1750 | 334.1 | +0.228 | 0.06 | 8 | 666 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0975 |
-| U · LSTM · `floored/no_cluster` · r17 | +305.6 | 0.1773 | 307.4 | +0.414 | 0.17 | 21 | 1,628 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0947 |
-| U · LSTM · `floored/no_cluster` · r15 | +269.4 | 0.1659 | 273.1 | +0.393 | 0.20 | 39 | 2,960 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0928 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 27 | 2,072 | 0.0927 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 9 | 740 | 0.0952 | +336.0 | 0.1797 | 341.6 | +0.415 | 0.13 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 8 | 666 | 0.0975 | +333.4 | 0.1750 | 334.1 | +0.228 | 0.06 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 21 | 1,628 | 0.0947 | +305.6 | 0.1773 | 307.4 | +0.414 | 0.17 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 39 | 2,960 | 0.0928 | +269.4 | 0.1659 | 273.1 | +0.393 | 0.20 |
 
 *Best 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| T' · LSTM · `archive` · r09 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 | 22 | 851 | 64 | 2.9e-03 | 9e-06 | 128/64/0.22 | 0.0910 |
-| T' · LSTM · `paper` · r15 | -6.2 | 0.1465 | 18.5 | +0.434 | 0.95 | 11 | 888 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0918 |
-| T' · LSTM · `archive` · r14 | -6.4 | 0.1465 | 18.5 | +0.428 | 0.94 | 31 | 1,184 | 64 | 2.0e-03 | 3e-04 | 64/128/0.20 | 0.0911 |
-| T' · LSTM · `archive` · r15 | -1.0 | 0.1461 | 18.7 | +0.426 | 1.00 | 35 | 1,332 | 64 | 9.0e-04 | 4e-04 | 64/64/0.09 | 0.0910 |
-| T' · LSTM · `paper` · r05 | -4.0 | 0.1463 | 18.7 | +0.417 | 1.03 | 19 | 1,480 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0916 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T′ | LSTM | `archive` | — | 64 | 2.9e-3 | 9e-6 | 128 | 64 | 0.22 | 0 | 22 | 851 | 0.0910 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 |
+| T′ | LSTM | `paper` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 0 | 11 | 888 | 0.0918 | -6.2 | 0.1465 | 18.5 | +0.434 | 0.95 |
+| T′ | LSTM | `archive` | — | 64 | 2.0e-3 | 3e-4 | 64 | 128 | 0.20 | 0 | 31 | 1,184 | 0.0911 | -6.4 | 0.1465 | 18.5 | +0.428 | 0.94 |
+| T′ | LSTM | `archive` | — | 64 | 9.0e-4 | 4e-4 | 64 | 64 | 0.09 | 0 | 35 | 1,332 | 0.0910 | -1.0 | 0.1461 | 18.7 | +0.426 | 1.00 |
+| T′ | LSTM | `paper` | — | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 0 | 19 | 1,480 | 0.0916 | -4.0 | 0.1463 | 18.7 | +0.417 | 1.03 |
 
 *Worst 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| T' · ValendinLSTM · `floor50` · r12 | +48.9 | 0.1591 | 91.7 | -0.150 | 0.60 | 24 | 925 | 64 | 2.6e-03 | 1e-04 | frozen | 0.0910 |
-| T' · ValendinLSTM · `floor50` · r19 | +45.4 | 0.1549 | 77.0 | -0.147 | 0.68 | 32 | 1,221 | 64 | 1.2e-03 | 7e-04 | frozen | 0.0913 |
-| U · LSTM · `floored/no_cluster` · r06 | +198.7 | 0.1589 | 203.7 | -0.045 | 0.17 | 46 | 3,478 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0915 |
-| U · ValendinLSTM · `archive/no_cluster` · r11 | +17.3 | 0.1513 | 75.8 | +0.029 | 0.41 | 13 | 518 | 64 | 2.4e-03 | 8e-03 | frozen | 0.0916 |
-| U · LSTM · `floored/no_cluster` · r05 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 | 27 | 2,072 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0927 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T′ | ValendinLSTM | `floor50` | — | 64 | 2.6e-3 | 1e-4 | 128* | 128* | 0* | 50 | 24 | 925 | 0.0910 | +48.9 | 0.1591 | 91.7 | -0.150 | 0.60 |
+| T′ | ValendinLSTM | `floor50` | — | 64 | 1.2e-3 | 7e-4 | 128* | 128* | 0* | 50 | 32 | 1,221 | 0.0913 | +45.4 | 0.1549 | 77.0 | -0.147 | 0.68 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 46 | 3,478 | 0.0915 | +198.7 | 0.1589 | 203.7 | -0.045 | 0.17 |
+| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 2.4e-3 | 8e-3 | 128* | 128* | 0* | 0 | 13 | 518 | 0.0916 | +17.3 | 0.1513 | 75.8 | +0.029 | 0.41 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 27 | 2,072 | 0.0927 | +347.2 | 0.1760 | 348.2 | +0.150 | 0.10 |
 
 *Best 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · ValendinLSTM · `archive/kmeans_8` · r08 | -3.6 | 0.1492 | 29.4 | +0.470 | 2.62 | 51 | 1,924 | 64 | 1.0e-03 | 5e-04 | frozen | 0.0682 |
-| U · ValendinLSTM · `archive/kmeans_8` · r01 | +8.5 | 0.1502 | 29.7 | +0.469 | 2.68 | 21 | 814 | 64 | 1.5e-03 | 2e-04 | frozen | 0.0691 |
-| U · LSTM · `floored/kmeans_8` · r15 | +17.9 | 0.1510 | 37.6 | +0.453 | 2.38 | 26 | 1,998 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0686 |
-| U · LSTM · `floored/kmeans_8` · r16 | +23.1 | 0.1504 | 42.9 | +0.452 | 2.20 | 41 | 3,108 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0680 |
-| T' · LSTM · `archive` · r09 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 | 22 | 851 | 64 | 2.9e-03 | 9e-06 | 128/64/0.22 | 0.0910 |
-
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.0e-3 | 5e-4 | 128* | 128* | 0* | 0 | 51 | 1,924 | 0.0682 | -3.6 | 0.1492 | 29.4 | +0.470 | 2.62 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.5e-3 | 2e-4 | 128* | 128* | 0* | 0 | 21 | 814 | 0.0691 | +8.5 | 0.1502 | 29.7 | +0.469 | 2.68 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 26 | 1,998 | 0.0686 | +17.9 | 0.1510 | 37.6 | +0.453 | 2.38 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 41 | 3,108 | 0.0680 | +23.1 | 0.1504 | 42.9 | +0.452 | 2.20 |
+| T′ | LSTM | `archive` | — | 64 | 2.9e-3 | 9e-6 | 128 | 64 | 0.22 | 0 | 22 | 851 | 0.0910 | -1.5 | 0.1462 | 18.4 | +0.451 | 1.38 |
 
 #### gift (160 studies)
 
 *Worst 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · ValendinLSTM · `archive/no_cluster` · r12 | -50.8 | 0.1067 | 51.3 | +0.350 | 0.76 | 22 | 759 | 64 | 2.3e-03 | 5e-04 | frozen | 0.0512 |
-| U · ValendinLSTM · `archive/kmeans_8` · r04 | +37.8 | 0.1075 | 50.2 | +0.372 | 1.29 | 7 | 264 | 64 | 6.2e-04 | 5e-03 | frozen | 0.0450 |
-| U · LSTM · `floored/no_cluster` · r15 | -47.2 | 0.1068 | 48.0 | +0.159 | 0.35 | 39 | 2,600 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0513 |
-| U · LSTM · `floored/kmeans_8` · r16 | +12.6 | 0.1072 | 47.1 | +0.345 | 1.32 | 8 | 585 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0466 |
-| U · LSTM · `floored/kmeans_8` · r02 | +12.8 | 0.1071 | 46.8 | +0.344 | 1.32 | 8 | 585 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0466 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 2.3e-3 | 5e-4 | 128* | 128* | 0* | 0 | 22 | 759 | 0.0512 | -50.8 | 0.1067 | 51.3 | +0.350 | 0.76 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 6.2e-4 | 5e-3 | 128* | 128* | 0* | 0 | 7 | 264 | 0.0450 | +37.8 | 0.1075 | 50.2 | +0.372 | 1.29 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 39 | 2,600 | 0.0513 | -47.2 | 0.1068 | 48.0 | +0.159 | 0.35 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 8 | 585 | 0.0466 | +12.6 | 0.1072 | 47.1 | +0.345 | 1.32 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 8 | 585 | 0.0466 | +12.8 | 0.1071 | 46.8 | +0.344 | 1.32 |
 
 *Best 5 by MAPE*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `archive/kmeans_8` · r02 | -6.6 | 0.1068 | 20.6 | +0.343 | 1.37 | 31 | 1,056 | 64 | 2.0e-03 | 2e-05 | 128/64/0.02 | 0.0458 |
-| U · LSTM · `archive/no_cluster` · r15 | -11.2 | 0.1065 | 21.3 | +0.354 | 0.79 | 39 | 1,320 | 64 | 2.7e-03 | 1e-05 | 128/128/0.19 | 0.0515 |
-| U · ValendinLSTM · `archive/kmeans_8` · r15 | -9.3 | 0.1068 | 21.6 | +0.327 | 1.43 | 33 | 1,122 | 64 | 9.5e-04 | 2e-06 | frozen | 0.0448 |
-| U · ValendinLSTM · `floored/kmeans_8` · r16 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 | 20 | 1,365 | 32 | 1.0e-03 | 0 | frozen | 0.0451 |
-| U · LSTM · `floored/kmeans_8` · r07 | -1.4 | 0.1067 | 22.6 | +0.366 | 1.34 | 39 | 2,600 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0451 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `archive` | `kmeans_8` | 64 | 2.0e-3 | 2e-5 | 128 | 64 | 0.02 | 0 | 31 | 1,056 | 0.0458 | -6.6 | 0.1068 | 20.6 | +0.343 | 1.37 |
+| U | LSTM | `archive` | `no_cluster` | 64 | 2.7e-3 | 1e-5 | 128 | 128 | 0.19 | 0 | 39 | 1,320 | 0.0515 | -11.2 | 0.1065 | 21.3 | +0.354 | 0.79 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 9.5e-4 | 2e-6 | 128* | 128* | 0* | 0 | 33 | 1,122 | 0.0448 | -9.3 | 0.1068 | 21.6 | +0.327 | 1.43 |
+| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 20 | 1,365 | 0.0451 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 |
+| U | LSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 39 | 2,600 | 0.0451 | -1.4 | 0.1067 | 22.6 | +0.366 | 1.34 |
 
 *Worst 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · LSTM · `floored/no_cluster` · r19 | -9.2 | 0.1070 | 27.5 | +0.014 | 0.11 | 23 | 1,560 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0518 |
-| U · LSTM · `floored/no_cluster` · r14 | -12.9 | 0.1070 | 23.3 | +0.021 | 0.11 | 22 | 1,495 | 32 | 1.0e-03 | 0 | 128/128/0.00 | 0.0520 |
-| U · ValendinLSTM · `floored/no_cluster` · r11 | -23.9 | 0.1070 | 29.4 | +0.023 | 0.11 | 32 | 2,145 | 32 | 1.0e-03 | 0 | frozen | 0.0508 |
-| U · ValendinLSTM · `floored/no_cluster` · r03 | +7.9 | 0.1071 | 29.6 | +0.042 | 0.11 | 29 | 1,950 | 32 | 1.0e-03 | 0 | frozen | 0.0505 |
-| U · LSTM · `archive/no_cluster` · r13 | -6.3 | 0.1070 | 22.7 | +0.104 | 0.11 | 39 | 1,320 | 64 | 3.0e-03 | 4e-03 | 32/64/0.11 | 0.0525 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 23 | 1,560 | 0.0518 | -9.2 | 0.1070 | 27.5 | +0.014 | 0.11 |
+| U | LSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128 | 128 | 0.00 | 90 | 22 | 1,495 | 0.0520 | -12.9 | 0.1070 | 23.3 | +0.021 | 0.11 |
+| U | ValendinLSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 32 | 2,145 | 0.0508 | -23.9 | 0.1070 | 29.4 | +0.023 | 0.11 |
+| U | ValendinLSTM | `floored` | `no_cluster` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 29 | 1,950 | 0.0505 | +7.9 | 0.1071 | 29.6 | +0.042 | 0.11 |
+| U | LSTM | `archive` | `no_cluster` | 64 | 3.0e-3 | 4e-3 | 32 | 64 | 0.11 | 0 | 39 | 1,320 | 0.0525 | -6.3 | 0.1070 | 22.7 | +0.104 | 0.11 |
 
 *Best 5 by Spearman*
 
-| run | bias % | RMSE | MAPE | Spearman | CV | best epoch | updates | batch | lr | wd | hidden/dense/dropout | val CE |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| U · ValendinLSTM · `archive/no_cluster` · r06 | +2.3 | 0.1064 | 24.3 | +0.384 | 0.62 | 18 | 627 | 64 | 2.6e-03 | 4e-03 | frozen | 0.0515 |
-| U · ValendinLSTM · `archive/no_cluster` · r05 | +24.5 | 0.1067 | 32.0 | +0.381 | 0.52 | 58 | 1,947 | 64 | 9.3e-04 | 2e-04 | frozen | 0.0513 |
-| U · ValendinLSTM · `archive/kmeans_8` · r11 | +5.8 | 0.1071 | 28.4 | +0.381 | 1.44 | 24 | 825 | 64 | 8.1e-04 | 3e-03 | frozen | 0.0451 |
-| U · ValendinLSTM · `archive/kmeans_8` · r13 | +20.8 | 0.1071 | 38.9 | +0.381 | 1.18 | 13 | 462 | 64 | 1.3e-03 | 4e-06 | frozen | 0.0454 |
-| U · ValendinLSTM · `floored/kmeans_8` · r16 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 | 20 | 1,365 | 32 | 1.0e-03 | 0 | frozen | 0.0451 |
+| family | model | arm | label | batch | lr | wd | hidden | dense | dropout | epoch floor | best epoch | updates | val CE | bias % | RMSE | MAPE | Spearman | CV |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 2.6e-3 | 4e-3 | 128* | 128* | 0* | 0 | 18 | 627 | 0.0515 | +2.3 | 0.1064 | 24.3 | +0.384 | 0.62 |
+| U | ValendinLSTM | `archive` | `no_cluster` | 64 | 9.3e-4 | 2e-4 | 128* | 128* | 0* | 0 | 58 | 1,947 | 0.0513 | +24.5 | 0.1067 | 32.0 | +0.381 | 0.52 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 8.1e-4 | 3e-3 | 128* | 128* | 0* | 0 | 24 | 825 | 0.0451 | +5.8 | 0.1071 | 28.4 | +0.381 | 1.44 |
+| U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.3e-3 | 4e-6 | 128* | 128* | 0* | 0 | 13 | 462 | 0.0454 | +20.8 | 0.1071 | 38.9 | +0.381 | 1.18 |
+| U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 20 | 1,365 | 0.0451 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 |
 
 ### 8.2 Patterns
 
@@ -778,7 +784,7 @@ outcome. Two terms:
 **1. Forecasting the total badly and ranking customers badly are mostly different runs.**
 The worst-MAPE and worst-Spearman deciles share only 5 of 32 runs on electronics, 4 of 16
 on multichannel, 5 of 28 on CDNOW and 1 of 16 on gift. A run can rank customers well and
-still miss the total by 140% (electronics r18 above), or get the total within 10% and rank
+still miss the total by 140% (the worst electronics row above), or get the total within 10% and rank
 customers at chance.
 
 **2. The worst totals are over-forecasts.**
