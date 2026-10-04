@@ -152,12 +152,80 @@ the best pick of any criterion on electronics (`docs/model-selection.md` §3.5).
 
 ## 4. What was tested
 
-| Experiment | Panels | Arms | Size |
-| --- | --- | --- | --- |
-| **Family T** (`scripts/run_training_budget.py`, 20 Sep) | electronics | `archive`: lr/wd/batch searched, patience 7, 100 epochs, 100 trials · `paper`: lr 1e-3, wd 0, batch 32, patience 5, 150 epochs, 1 trial · `paper90`: `paper` + `min_epochs=90` · `floor50`: `archive` + `min_epochs=50`, 300 epochs | 2 models × 4 arms × 20 replications, 200 paths |
-| **Family U** (`scripts/run_factorial.py`, 21 Sep) | all four | `archive` vs `floored` (= `paper90`), crossed with `no_cluster` / `kmeans_8` | 2 models × 4 cells × 20 replications. Only the floor half is reported here; the label half is in `docs/insights-real-panels.md` |
-| **E1** (`scripts/run_training_budget.py`; `.scratch/model-selection/e1_cdnow.py`) | cdnow | `archive`, `floor50`, `paper`: each training ingredient as the only change | 2 models × 3 arms × 20 replications |
-| **Epoch floor** (`scripts/run_epoch_floor_5y.py`, 26–28 Sep) | electronic_5y | the least-biased searched study's settings pinned (`nofloor`), then weights kept only from epoch 20 (`from20`) or 30 (`from30`) via `select_from_epoch` | 3 models × 3 rules × 20 replications, 500 paths |
+Four experiments, run in this order, each to answer a question the previous one left
+open. The family letters are the ones in `docs/studies-run.md` §2, which holds each
+family's full specification. All four keep everything else fixed: our temporal split
+(ADR-0001), the ADR-0008 refit, cross-entropy, and the two models' architectures and
+inputs. Only the training recipe changes.
+
+### 4.1 The arms, and what "paper" means
+
+"Paper" always means **the training recipe of Valendin et al.'s reference notebook**
+(`Original_paper_model/banking_transactions_demo.ipynb`, the code published with the
+paper), copied setting by setting. It does **not** mean the paper's data, its split or its
+published numbers. `scripts/validate_valendin_lstm.py` checks that this recipe, run under
+the notebook's own split, reproduces the notebook's validation loss (§3.1).
+
+| arm | what it copies | settings | trials |
+| --- | --- | --- | ---: |
+| `archive` | our own recipe, the one behind every archived result (family N, `docs/benchmarks.md`). It is the control. | lr, weight decay and batch searched over the registry's ranges; patience 7; 100 epochs | 100 |
+| `paper` | the notebook's recipe, literally | Adam defaults (lr 1e-3, no weight decay); batch 32; patience 5; 150 epochs; LSTM 128/128, dropout 0 | 1 |
+| `paper90` | the notebook's recipe **and** its training length | `paper` + `min_epochs=90`, the "±90 epochs" the notebook reports | 1 |
+| `floored` | family U's name for `paper90` | identical to `paper90` | 1 |
+| `floor50` | nothing from the paper: the floor alone, added to our recipe | `archive` + `min_epochs=50`, 300 epochs | 100 |
+
+A **floor** (`min_epochs`) stops early stopping from firing before that epoch. The best
+epoch is still chosen by validation loss, so the kept weights can come from before the
+floor (§8.2, pattern 10). The pinned arms run one trial because pinning removes
+hyperparameter selection, so a difference against `archive` comes from training and not from
+which trial won. Selection does not predict the forecast anyway (`docs/model-selection.md`).
+
+### 4.2 The four experiments
+
+**Family T** (`scripts/run_training_budget.py`, 20 Sep; electronics; ValendinLSTM and LSTM ×
+`archive` / `paper` / `paper90` / `floor50` × 20 replications, 200 paths).
+*Why:* electronics' benchmark forecast is collapsed (MAPE 70.8, Spearman 0.032), and its
+winners got ~32 gradient updates against the notebook's ~2,300 (§3.1). The question is
+whether training the way the paper trains removes the collapse. The arms separate three
+things. `paper` copies the settings. `paper90` copies the settings and the training
+length. `floor50` copies the training length while keeping our search, which is the only
+option for a model with no published recipe, such as our Transformer. Pre-launch probes
+had shown that `paper` alone keeps epoch 1 under our split, which is why `paper90` exists.
+Reported in §5.1.
+
+**Family U** (`scripts/run_factorial.py`, 21 Sep; all four panels; ValendinLSTM and LSTM ×
+{`archive`, `floored`} × {`no_cluster`, `kmeans_8`} × 20 replications).
+*Why:* two levers had each lifted electronics' Spearman separately. Training (family T)
+took it from 0.027 to 0.177, and a cluster label (family F) took it from 0.039 to 0.27.
+Neither experiment knew about the other. Family U crosses them to see whether they add, and
+runs on all four panels to see whether family T's electronics result holds elsewhere. Only
+the training half is reported here (§5.2). The label half is in
+`docs/insights-real-panels.md` §5.2. Family U's LSTM carries no year index, unlike family
+T's, so its electronics LSTM cells are not the same configuration as family T's.
+
+**Family T′ = experiment E1** (`scripts/run_training_budget.py` on CDNOW, 21 Sep;
+ValendinLSTM and LSTM × `archive` / `floor50` / `paper` × 20 replications;
+analysed by `.scratch/model-selection/e1_cdnow.py`).
+*Why:* family U's `floored` arm tripled CDNOW's LSTM error (§5.2, claim 9). But `floored`
+changes the floor, batch, learning rate, weight decay, search and epoch budget all at once.
+E1 runs the same family T runner on CDNOW so that each arm changes one ingredient against
+`archive`. `floor50` changes only the floor, and `paper` only the settings. "T′" (the
+family name in `docs/studies-run.md` and §8) and "E1" (its to-do name in
+`docs/model-selection.md`) are the same 120 suites. Reported in §5.3.
+
+**Family X, the epoch floor on electronic_5y** (`scripts/run_epoch_floor_5y.py`, 26–28 Sep;
+ValendinLSTM, LSTM + `ar_bounded_52` and LSTM + `kmeans_8` × `nofloor` / `from20` /
+`from30` × 20 replications, 500 paths).
+*Why:* this is the only test on the paper's own electronics split (260 calibration weeks,
+`docs/datasets.md`). There the ValendinLSTM benchmark (family W) spread its bias from
+−7.9% to +37.4% at identical validation loss, and a later kept epoch went with lower bias.
+X pins the least-biased study's settings and varies only which epochs may be kept.
+`nofloor` allows any epoch, while `from20` and `from30` allow only epoch 20 or 30 onwards
+(`select_from_epoch`). Unlike `min_epochs`, this forces late weights. Reported in §5.4.
+
+**E4 and E5** are not experiments that ran. They are the to-do names (`docs/studies-run.md`
+§6) for a stopping rule suited to the flat temporal curve and for a floor scaled to the
+calibration length (§7).
 
 ## 5. Results
 
@@ -288,7 +356,7 @@ published rows are regenerated under the winner is an ADR-level decision.
 
 ## 8. The worst and best runs
 
-Every study of families T, T′ and U, ranked inside its panel: 920 studies, each one
+Every study of families T, T′ (= E1) and U (§4.2), ranked inside its panel: 920 studies, each one
 search's winner (or the pinned arm's single trial), refit and forecast over 200 paths.
 Panels are never ranked against each other (`docs/statistical-protocol.md` §7). Each panel
 gets four tables: the five worst and five best runs by aggregate MAPE (level), and by
