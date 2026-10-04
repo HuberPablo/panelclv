@@ -92,7 +92,8 @@ TRAINING_ARMS: dict[str, dict] = {
     # archived neural result was produced under.
     "archive": dict(search=lambda family: {}, n_trials=100,
                     training={"n_epochs": 100, "patience": 7}),
-    # The paper's recipe, pinned, trained for the paper's own ~90 epochs.
+    # The notebook's recipe, pinned, with a 90-epoch floor (family T's `paper90`). 90 is
+    # the notebook's one logged run on its banking data, not the paper's training length.
     "floored": dict(search=lambda family: dict(_PAPER[family]), n_trials=1,
                     training={"n_epochs": 150, "patience": 5, "min_epochs": 90}),
 }

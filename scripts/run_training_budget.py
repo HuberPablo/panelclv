@@ -4,9 +4,9 @@
 validation loss was still falling: patience 7 ends a run at a median epoch of 8-16, and
 the same model trained without early stopping keeps improving to epoch 88-247. The cause
 is not the constant. It is that our recipe is not the reference notebook's -- it trains
-at batch 32 with plain Adam for about 90 epochs (~2,300 gradient updates on electronics)
-while our winners receive about 32, because patience 7 stops small-batch trials before
-their advantage appears and the searched batch set does not contain 32 at all.
+at batch 32 with plain Adam, and on electronics under its own split keeps epoch 28-56,
+while our winners keep epoch 7 at batch 256, because patience 7 stops small-batch trials
+before their advantage appears and the searched batch set does not contain 32 at all.
 
 This experiment tests that on the one panel where the collapse is documented.
 
@@ -22,8 +22,10 @@ The arms
 `paper90`   the same pinned recipe with `min_epochs=90`. It exists because `paper`
             alone does not reproduce the notebook's TRAINING, only its settings:
             measured here, patience 5 at batch 32 stops electronics at epoch 1 with a
-            worse validation loss than `archive`, where the notebook reports ~90
-            epochs on its own data. 90 is the notebook's own figure.
+            worse validation loss than `archive`. 90 is the length of the
+            notebook's one logged run on its banking data; the paper states no
+            epoch count, and 90 is not what the recipe needs on electronics. Read
+            it as a long floor, not as the paper's training length.
 `floor50`   `archive`'s search plus `min_epochs=50`: no trial stops before epoch 50,
             whatever the plateau. The form of the fix available to models that have
             no published recipe. Setting it also widens the Optuna pruner's warm-up,
@@ -143,9 +145,10 @@ ARMS: dict[str, dict[str, object]] = {
                     training={"n_epochs": 100, "patience": 7}),
     "paper":   dict(search=_PAPER,    n_trials=1,
                     training={"n_epochs": 150, "patience": 5}),
-    # The notebook trains ~90 epochs; its patience-5 rule fires only after that. Ours
-    # fires at epoch 1 on electronics (measured), so `paper` alone reproduces the
-    # settings without reproducing the training. This arm reproduces both.
+    # Under our split the recipe's patience-5 rule fires at epoch 1 on electronics
+    # (measured), so `paper` alone copies the settings without letting them train. This
+    # arm adds a 90-epoch floor: the length of the notebook's one logged run on its own
+    # banking data, not a training length the paper reports.
     "paper90": dict(search=_PAPER,    n_trials=1,
                     training={"n_epochs": 150, "patience": 5, "min_epochs": 90}),
     "floor50": dict(search=_SEARCHED, n_trials=N_TRIALS,

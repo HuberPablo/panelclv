@@ -23,8 +23,8 @@ in `docs/model-selection.md` §2.
 | 2 | With early stopping off, validation CE keeps falling to epoch 88–247 | cdnow, electronics, multichannel | established (3 runs each) | 3.2 |
 | 3 | The stop is caused by our temporal split combined with an absolute 1e-4 threshold, not by the panel | electronics | established | 3.3–3.4 |
 | 4 | Under patience 7 the search prefers the batch size that takes the fewest updates | electronics | established, descriptive | 3.5 |
-| 5 | Training to the paper's epoch count improves level and ranking | electronics | **established** (ValendinLSTM MAPE −22.3, Spearman +0.150) | 5.1 |
-| 6 | The paper's settings without its epoch count change nothing | electronics | no clear difference | 5.1 |
+| 5 | The notebook's recipe with a 90-epoch floor (`paper90`) improves level and ranking | electronics | **established** (ValendinLSTM MAPE −22.3, Spearman +0.150) | 5.1 |
+| 6 | The notebook's settings without a floor (`paper`) change nothing | electronics | no clear difference | 5.1 |
 | 7 | A training floor improves ranking | electronics, multichannel | **established** | 5.2 |
 | 8 | …and worsens it | gift | **established** (−0.069) | 5.2 |
 | 9 | The floored paper recipe triples CDNOW's LSTM error | cdnow | **established** (+126.2) | 5.2 |
@@ -100,23 +100,48 @@ epoch ≤ 3 in 55% of ValendinLSTM runs, and earlier stopping goes with worse ra
 
 ## 3. How we know it undertrains, and why
 
-### 3.1 The reference notebook trains about 11× more epochs and 70× more updates
+### 3.1 The reference notebook: its recipe, and an epoch count that does not transfer
 
-| | Valendin et al. notebook | Our studies |
+The "Valendin et al. recipe" this doc refers to is the training setup of the demo notebook
+published with the paper (`Original_paper_model/banking_transactions_demo.ipynb`). It is
+not something the paper itself specifies:
+
+| | Valendin et al. demo notebook | Our studies |
 | --- | --- | --- |
+| data | Czech banking transactions (data.world): 2,239 accounts, calibration 1993–1995, a random 10% of customers held out for validation | our four panels, temporal validation split (ADR-0001) |
 | optimizer | Adam defaults: lr 1e-3, no weight decay | AdamW; lr searched 1e-4–3e-3, weight decay 1e-6–1e-2 |
 | batch size | 32 | searched over {64, 128, 256} |
 | patience / budget | 5 / 150 epochs | 7 / 100 epochs |
-| epochs trained | ~90 ("final validation loss … after ±90 epochs") | median best epoch 7–14 |
+| epochs trained | one logged run: stopped at epoch 90, kept epoch 85 | median best epoch 7–14 (§2) |
 
-On electronics (829 customers), 90 epochs at batch 32 is about **2,300 gradient updates**.
-Our benchmark winners stopped at a median epoch of 7 at batch 256: 8 epochs, about **32
-updates**. The gap is 11× in data seen and 70× in steps taken; the second is larger only
-because our batch is eight times the notebook's (§1.1). Both say the same thing: far less
-training.
-`scripts/validate_valendin_lstm.py` runs the notebook's recipe exactly and reaches the
-published loss. The search space simply cannot express that recipe: batch 32 is absent
-and weight decay has no zero.
+**Where "~90 epochs" comes from.** It comes from the notebook only. Its saved log (one run,
+16 March 2022) ends `Epoch 90: early stopping … best epoch: 85`. Its markdown says the
+validation loss "should end up around 0.44 after ±90 epochs", and a code comment says
+"about 100 epochs in total". **The paper gives no epoch count.** §2.2 trains "until we
+reach a minimum" of the validation error. Appendix B.2 early-stops, restores the best
+epoch, then runs "several fine-tuning epochs" on the full calibration set at a large batch
+and reduced learning rate. Appendix B.1 says learning rate and batch size were *searched*
+(a random walk over architectures and settings), so the paper does not fix those either.
+
+**What the figure cannot say.** 90 is how long one run of the recipe trained on the
+banking data. How many epochs a model needs depends on the panel: its size, its sparsity,
+its calibration length and the validation split. So 90 is not an expected training length
+for any of our panels, and comparing it with our epoch counts says nothing about whether
+our models undertrain.
+
+**What does compare.** §3.4 runs the same recipe on electronics under the notebook's own
+split. It keeps epoch 28–56 (3 replications), i.e. 29–57 epochs and about 750–1,500 updates
+at batch 32. Our electronics benchmark winners kept epoch 7 at batch 256, i.e. 8 epochs
+and about 32 updates. That is 4–7× fewer epochs on the same panel. The update gap is
+wider because our batch is eight times the notebook's, and updates alone do not compare
+across batch sizes (§1.1). The direct evidence that our models stop too early does not
+rest on this comparison at all. It is §3.2: with early stopping off, the validation loss
+keeps falling long after the kept epoch.
+
+`scripts/validate_valendin_lstm.py` runs the notebook's recipe on the notebook's banking
+data and reproduces its validation loss of about 0.44, which checks our implementation of
+the recipe. Our search space cannot express that recipe: batch 32 is absent and weight
+decay has no zero.
 
 ### 3.2 The validation loss keeps falling
 
@@ -181,8 +206,8 @@ In 20 electronics benchmark studies (2,000 trials, 713 completed), grouped by ba
 
 The two currencies rank the batches in opposite orders. Batch 256 takes the fewest steps
 but, by epochs, sees the most data. "Trains least" therefore holds in updates only, and
-under patience 7 every batch size trains little in both: at most 8 epochs, against the
-notebook's ~90.
+under patience 7 every batch size trains little in both: at most 8 epochs, against 29–57
+for the notebook's recipe on the same panel under its own split (§3.4).
 
 Within the 40 pre-experiment electronics studies with no label, more training goes with
 better ranking: Spearman's rank correlation with updates received is **+0.328** (+0.024,
@@ -215,9 +240,16 @@ the notebook's own split, reproduces the notebook's validation loss (§3.1).
 | --- | --- | --- | ---: |
 | `archive` | our own recipe, the one behind every archived result (family N, `docs/benchmarks.md`). It is the control. | lr, weight decay and batch searched over the registry's ranges; patience 7; 100 epochs | 100 |
 | `paper` | the notebook's recipe, literally | Adam defaults (lr 1e-3, no weight decay); batch 32; patience 5; 150 epochs; LSTM 128/128, dropout 0 | 1 |
-| `paper90` | the notebook's recipe **and** its training length | `paper` + `min_epochs=90`, the "±90 epochs" the notebook reports | 1 |
+| `paper90` | the notebook's recipe plus a 90-epoch floor | `paper` + `min_epochs=90` | 1 |
 | `floored` | family U's name for `paper90` | identical to `paper90` | 1 |
 | `floor50` | nothing from the paper: the floor alone, added to our recipe | `archive` + `min_epochs=50`, 300 epochs | 100 |
+
+**Why 90.** It is the length of the notebook's one logged run, on its banking data (§3.1).
+It is not a training length the paper reports, which it never does, and it is not what
+the recipe needs on our panels: on electronics, under the notebook's own split, the same
+recipe keeps epoch 28–56 (§3.4). Read `paper90` as "the notebook's recipe with a 90-epoch
+floor", a long floor that rules out an early stop, not as "training the way the paper
+trained".
 
 A **floor** (`min_epochs`) stops early stopping from firing before that epoch. The best
 epoch is still chosen by validation loss, so the kept weights can come from before the
@@ -230,10 +262,11 @@ which trial won. Selection does not predict the forecast anyway (`docs/model-sel
 **Family T** (`scripts/run_training_budget.py`, 20 Sep; electronics; ValendinLSTM and LSTM ×
 `archive` / `paper` / `paper90` / `floor50` × 20 replications, 200 paths).
 *Why:* electronics' benchmark forecast is collapsed (MAPE 70.8, Spearman 0.032), and its
-winners got ~32 gradient updates against the notebook's ~2,300 (§3.1). The question is
-whether training the way the paper trains removes the collapse. The arms separate three
-things. `paper` copies the settings. `paper90` copies the settings and the training
-length. `floor50` copies the training length while keeping our search, which is the only
+winners kept epoch 7 at batch 256, while the notebook's recipe on the same panel, under
+its own split, keeps epoch 28–56 (§3.4). The question is whether the notebook's recipe,
+trained long enough, removes the collapse. The arms separate three
+things. `paper` copies the settings. `paper90` adds a 90-epoch floor to
+them. `floor50` adds a 50-epoch floor to our own search, which is the only
 option for a model with no published recipe, such as our Transformer. Pre-launch probes
 had shown that `paper` alone keeps epoch 1 under our split, which is why `paper90` exists.
 Reported in §5.1.
@@ -290,10 +323,11 @@ calibration length (§7).
 Means: ValendinLSTM `archive` MAPE 69.1, Spearman 0.027; `paper90` 46.8, 0.177.
 
 - **Copying the paper's settings changes nothing**, because the recipe's own stopping rule
-  keeps epoch 1 and stops after 7 (§3.3). Adding the epoch count cuts MAPE by 22 points
+  keeps epoch 1 and stops after 7 (§3.3). Adding the 90-epoch floor cuts MAPE by 22 points
   and multiplies ranking by about seven.
-- **The invariant is not identified.** `paper90` gets there with ~2,300 updates at batch
-  32, and `floor50` with a few hundred at batch 256. The two also differ in learning rate
+- **The invariant is not identified.** `paper90`'s kept weights come from a median epoch of
+  56 (ValendinLSTM) and 71.5 (LSTM) at batch 32, about 1,500–1,900 updates. `floor50`'s come
+  from epoch 67 and 26 at batch 256, about 330 and 110 updates. The two also differ in learning rate
   and weight decay, so neither updates nor epochs is shown to be what matters (§1.1).
 - **A floor works with the search intact.** Under a floor, the searched `floor50` and the
   pinned `paper90` show no clear MAPE difference on either model. On Spearman the
@@ -385,7 +419,7 @@ in `docs/insights-real-panels.md` §7.
 | Option | Status |
 | --- | --- |
 | Epoch floor (`min_epochs`) | Tested (§5). Pays on electronics and multichannel; not on cdnow; harmful on gift. **Never an unconditional default.** |
-| The paper's recipe | Tested (§5.1). Only works with its epoch count added. |
+| The notebook's recipe | Tested (§5.1). Only works with a floor added. |
 | Adding batch 32 to the search space | Not the fix: at patience 7 it would still stop early. |
 | Relative improvement threshold (a fraction of the current best) | Untested (E4). Addresses §3.3 directly: 10⁻⁴ is 0.11% of electronics' loss and 0.4% of multichannel's. |
 | Patience counted in optimiser steps, not epochs | Untested (E4). 4 batches per epoch at batch 256 against 26 at batch 32. |

@@ -300,8 +300,8 @@ that the ranking is shown to be zero. The superseding note below is the stronger
 evidence on how much recency these models can recover; the recency-lookup rows are
 single deterministic numbers and are descriptive.
 
-> **Superseded in part.** The ρ ≈ 0 above belongs to an *undertrained* model. Trained to the
-> paper's epoch count, the same inputs rank electronics customers at 0.18
+> **Superseded in part.** The ρ ≈ 0 above belongs to an *undertrained* model. Trained with the
+> notebook's recipe and a 90-epoch floor, the same inputs rank electronics customers at 0.18
 > (`docs/insights-real-panels.md` §5.2). That is still short of the 0.296 a single recency
 > integer buys, so the argument below holds in direction and is weaker in magnitude: the
 > gap is 0.18 → 0.30, not 0.00 → 0.30.
