@@ -20,7 +20,7 @@ Conventions:
   (`docs/loss-functions.md` §4.1).
 - Each panel is stated separately. Refit-noise magnitudes are in
   `docs/model-selection.md` §2.
-- Family letters (E, F, G, …) name the experiment families of `docs/studies-run.md` §2,
+- Family letters (E, F, G, …) name the experiment families of `docs/studies-run.md` §4,
   which holds each one's budget, dates and design. Each is described in a clause where
   this doc first uses it.
 

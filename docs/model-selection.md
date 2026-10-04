@@ -11,7 +11,7 @@ Conventions in this doc:
 - Criteria and targets are oriented so lower is better, so a **positive** rank
   correlation means the criterion orders trials the way the holdout does.
 - Bold marks an interval that excludes 0.
-- Family letters (E, F, G, …) name the experiment families of `docs/studies-run.md` §2,
+- Family letters (E, F, G, …) name the experiment families of `docs/studies-run.md` §4,
   which holds each one's budget, dates and design. Each is described in a clause where
   this doc first uses it.
 

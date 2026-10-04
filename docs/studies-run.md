@@ -206,11 +206,40 @@ not as replications of each other.
 ⁵ Family T's `paper` arm pins every hyperparameter, so it runs a single trial by design —
 its `results.csv` carries no `param_*` spread, and that is the point (§4.6).
 
-Where each family is reported: family B and S in `docs/insights-synthetic-grid.md`; families T, T′ and X in
-`docs/insight-training-efficiency.md`; family V in `docs/model-selection.md`; family F in
-`docs/insights-real-panels.md` §5.1, family N in `docs/benchmarks.md`, families E, H, O
-and P in `docs/insights-real-panels.md` §4 and §6, family G in §4.4 and §9 there, and
-family R in `docs/model-selection.md` §3.2.
+### What each family asks, and where it is answered
+
+The question each family was run to answer. Its design and the reason for its arms live in
+the doc that reports it; this table only points there.
+
+| # | Question | Reported in |
+|---|---|---|
+| A | On synthetic Pareto/NBD panels, how far are the LSTM and Transformer from the true model, by regime? | `docs/insights-synthetic-grid.md` claim 10 (as the small-search baseline; superseded by B) |
+| B | Does an AR encoding or a cluster label close that gap, and which architecture fails where? | `docs/insights-synthetic-grid.md` |
+| C | What does the true model score on the synthetic grid: the ceiling every neural row is read against | `docs/insights-synthetic-grid.md` |
+| D | The frozen ValendinLSTM on the synthetic grid | not run (§5) |
+| E | Does bounding or re-encoding the AR counters fix the level blow-up of unbounded recency and tenure? | `docs/insights-real-panels.md` §4.1 |
+| F | Does the same history help more as a cluster label than as a counter, and at which K? | `docs/insights-real-panels.md` §5.1 |
+| G | Family H's arm grid at 50 paths: superseded by H | `docs/insights-real-panels.md` §4.4, §9; `docs/model-selection.md` §3.8 |
+| H | Does B's arm axis (AR × cluster × calendar) transfer to CDNOW and electronics, with both benchmarks alongside? | `docs/insights-real-panels.md` §4.1 |
+| I | Does a proper ordinal loss (squared EMD, or CE + EMD) beat cross-entropy? | `docs/loss-functions.md` |
+| J | The first synthetic grid: neural models against the Pareto/NBD MLE fit | superseded by A/B, not reported |
+| K | J with an ad-hoc AR feature set | superseded by B, not reported |
+| L | A smaller 3×4×10 synthetic grid, LSTM only | superseded, not reported |
+| M | The first cross-entropy runs on electronics, LSTM and Transformer against Pareto/NBD | `docs/loss-functions.md` §4.1 (as a reference row) |
+| N | The two frozen benchmarks on all four panels: the reference row every developed model is compared with | `docs/benchmarks.md` |
+| O | Each AR encoding on all four panels, budget-matched to N | `docs/insights-real-panels.md` §4.3 |
+| P | O on three-year calibration windows | `docs/insights-real-panels.md` §6 |
+| Q | Pareto/NBD on P's windows, so P has a benchmark | `docs/insights-real-panels.md` §6 |
+| R | Over a whole study, does validation CE order trials the way the holdout does? | `docs/model-selection.md` §3.2 |
+| S | Is the churn gradient on the grid a regime effect or a panel-size effect? | `docs/insights-synthetic-grid.md` claim 12 |
+| T | Does training the way the paper trains remove the electronics collapse? | `docs/insight-training-efficiency.md` §4.2, §5.1 |
+| T′ | (E1) Which single training ingredient tripled CDNOW's LSTM error under U's `floored` arm? | `docs/insight-training-efficiency.md` §4.2, §5.3 |
+| U | Do the training floor and the cluster label add, on all four panels? | `docs/insight-training-efficiency.md` §5.2; `docs/insights-real-panels.md` §5.2 |
+| V | Does a validation-window rollout pick better trials than validation CE? | `docs/model-selection.md` §3.3–3.6 |
+| W | The two benchmarks on the paper's own electronics split | `docs/benchmarks.md` |
+| X | On that split, does keeping later weights lower the bias, with and without an added input? | `docs/insight-training-efficiency.md` §5.4; `docs/insights-real-panels.md` §7 |
+| Y | X's procedure repeated for the two attention models | `docs/insights-real-panels.md` §7 |
+| Z | What does the autoregressive rollout cost a trained model, and does a death latch help? | `docs/absorbing-death-state.md` §4 |
 
 ### 4.1 Family E is ragged — three arms were never finished at the new depth
 
@@ -315,58 +344,33 @@ from short — for the Transformer and `ValendinLSTM` on both arms.
 
 Read in `docs/insights-synthetic-grid.md`, claim 12.
 
-### 4.6 Family T — the training recipe, not the architecture or the inputs
+### 4.6 Families T and T′ — the training recipe
 
-Specified in `.scratch/training-budget/spec.md`; reported in
-`docs/insight-training-efficiency.md`.
+Arms, settings and the reason for each are in `docs/insight-training-efficiency.md` §4.
+What a reader of this inventory still needs:
 
-Three recipes, on electronics only, crossed with two models:
-
-| arm | recipe | trials |
-|---|---|---:|
-| `archive` | lr / weight decay / batch searched, `patience=7`, `n_epochs=100` | 100 |
-| `paper` | pinned: `lr=1e-3`, `weight_decay=0.0`, `batch_size=32`, `patience=5`, `n_epochs=150` | 1 |
-| `paper90` | the same, plus `min_epochs=90` — the notebook's own epoch count | 1 |
-| `floor50` | `archive`'s search plus `min_epochs=50`, `n_epochs=300` | 100 |
-
-`archive` gets 100 trials because family N gave this panel 100: a control is only a
-control if it searches what the archive searched. **T′** is the same runner on CDNOW with
-`archive`, `floor50` and `paper` only (experiment E1).
-
-Three things a reader has to know before comparing a family T row with anything:
-
-- **It changes the training recipe only.** The architectures are the ones every other
-  family uses, and the inputs are family N's for `ValendinLSTM` and family H's
-  `no_ar-no_cluster-valendin` for `LSTM`.
+- **It changes the training recipe only.** The inputs are family N's for `ValendinLSTM`
+  and family H's `no_ar-no_cluster-valendin` for `LSTM`. `ValendinLSTM` cannot take
+  `week_sin`/`week_cos` (F11, §5), so the runner builds each model's dataset through the
+  runner that already declares it.
 - **Its `ValendinLSTM` suites sit beside family N, not in place of it.** No published row
-  moves; whether any is regenerated is decided after this reports
+  moves; whether any is regenerated is still to be decided
   (`.scratch/training-budget/issues/06-report-and-decide.md`).
-- **The `paper` arm pins everything and runs one trial**, so its `param_*` columns are
-  constant by design. That is what makes it a control: it removes hyperparameter
-  selection, which `docs/model-selection.md` shows does not predict the forecast.
+- **Its pinned arms run one trial**, so their `param_*` columns are constant by design
+  (footnote ⁵).
+- **T′** is the same runner (`scripts/run_training_budget.py`) on CDNOW with `archive`,
+  `floor50` and `paper` only. It is experiment E1.
 
-Its two models read different panels — `ValendinLSTM` cannot take `week_sin`/`week_cos`
-(F11, §5) — so the runner builds each model's dataset through the runner that already
-declares it.
+### 4.7 Family U — training × cluster label
 
-### 4.7 Family U — the 2×2 that crosses training with inputs
+Design and motivation: `docs/insight-training-efficiency.md` §4.2. Runner:
+`scripts/run_factorial.py`. Two facts a reader must carry when quoting a row:
 
-Families T and F each moved one lever and neither knew about the other: T the training
-recipe, F the cluster label. Family U crosses them on all four panels, so the question
-"do they add?" has an answer rather than two separate before-and-afters.
-`scripts/run_factorial.py`, reported in `docs/insights-real-panels.md` §5.2 and `docs/insight-training-efficiency.md` §5.2.
-
-Two things a reader must carry when quoting a family U row:
-
-- **Its `floored` arm runs ONE pinned trial**, not a search, so its `param_*` columns are
-  constant by design. Whether the search adds anything under a floor is answered only
-  indirectly, by family T's `floor50` against `paper90`
-  (`docs/insight-training-efficiency.md` §5.1).
+- **Its `floored` arm runs one pinned trial**, so its `param_*` columns are constant by
+  design.
 - **Its LSTM carries no year index on any panel**, unlike families H, O and T, which
-  inherited one on electronics. `run_real_panel_arms.py` argues against a year index for
-  CDNOW — constant in calibration, out of range across the holdout — and family U applies
-  that reasoning everywhere for internal consistency. **An electronics LSTM cell here is
-  therefore not the same configuration as family T's**; read family U's own controls.
+  inherited one on electronics. **An electronics LSTM cell here is therefore not the same
+  configuration as family T's**; read family U's own controls.
 
 ### 4.8 Family V — scoring every trial, not just the winner
 

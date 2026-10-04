@@ -153,7 +153,7 @@ the best pick of any criterion on electronics (`docs/model-selection.md` §3.5).
 ## 4. What was tested
 
 Four experiments, run in this order, each to answer a question the previous one left
-open. The family letters are the ones in `docs/studies-run.md` §2, which holds each
+open. The family letters are the ones in `docs/studies-run.md` §4, which holds each
 family's full specification. All four keep everything else fixed: our temporal split
 (ADR-0001), the ADR-0008 refit, cross-entropy, and the two models' architectures and
 inputs. Only the training recipe changes.
