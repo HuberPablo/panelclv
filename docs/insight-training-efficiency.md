@@ -143,10 +143,19 @@ data and reproduces its validation loss of about 0.44, which checks our implemen
 the recipe. Our search space cannot express that recipe: batch 32 is absent and weight
 decay has no zero.
 
-### 3.2 The validation loss keeps falling
+### 3.2 The validation loss keeps falling after patience 7 stops
 
-The frozen benchmark was rerun with early stopping off for 200 epochs, at an archived
-electronics winner's settings, 3 replications per panel:
+**What was measured.** The validation cross-entropy of the frozen ValendinLSTM, epoch by
+epoch, with early stopping switched off for 200 epochs. This is the teacher-forced loss
+on the validation weeks of our temporal split, the same number the stopping rule watches.
+No forecast was made.
+
+**How.** 3 runs on each of electronics, multichannel and CDNOW, all at one fixed setting:
+the hyperparameters one archived electronics study selected (lr 1.15e-3, weight decay
+5.7e-4, batch 256). Multichannel and CDNOW run that electronics setting too, not one of
+their own. Afterwards, the patience-7 rule is replayed on each recorded curve: "patience 7
+stops at" is where it would have stopped, and "improvement forgone" is how far the
+200-epoch minimum lies below the best loss patience 7 had seen.
 
 | panel | patience 7 stops at | its best val CE | best over 200 epochs | at epoch | improvement forgone |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -154,10 +163,27 @@ electronics winner's settings, 3 replications per panel:
 | multichannel | 12–16 | 0.0229–0.0230 | 0.0220–0.0226 | 169–181 | 1.4–4.4% |
 | cdnow | 11 | 0.1078–0.1098 | 0.0946–0.0964 | 88–120 | 10.7–13.0% |
 
-The curve sits flat and then drops. Before reaching its optimum each run went 29–131
-epochs without a single counted improvement, so no patience constant is reliable: at
-patience 40, one of five electronics runs found the later optimum.
-*(`.scratch/training-budget/probe_patience.py`)*
+**What it shows.** The curve is not a smooth descent. It stays flat for a long stretch,
+then drops below where patience 7 gave up. Before reaching its minimum, each run went
+29–131 epochs without one counted improvement, so no fixed patience can be trusted to
+wait it out. §3.3 explains why the curve looks flat.
+
+**What it does not show.**
+- **That the forecast improves.** A lower validation loss is not a better holdout
+  forecast. Across trials, validation loss does not predict the forecast
+  (`docs/model-selection.md`; §8.2, pattern 8). The forecast evidence for longer training
+  is §5, at 20 replications per arm.
+- **That it holds generally.** One model, one hyperparameter setting borrowed from
+  electronics, 3 runs per panel.
+
+**Provenance.** The numbers are from the run recorded in commit `d6cea22` (20 Sep).
+`probe_patience.py` writes `results/patience_probe.csv`, which is no longer on disk, so
+they cannot be re-checked from the repo. A companion script, `end_to_end.py`, forecast the
+holdout on electronics with patience 7 against patience 40 (5 runs per arm). Under patience
+40, one of five runs got past the plateau to the later minimum; the other four still kept
+weights from epochs 6–11. Its output is lost too, and its old write-up describes its long
+arm in two inconsistent ways, so its forecast numbers are not used here.
+*(`.scratch/training-budget/probe_patience.py`, `end_to_end.py`)*
 
 ### 3.3 Why the curve looks flat: the threshold is larger than the slope
 
@@ -166,16 +192,37 @@ Electronics, early stopping off, the notebook's recipe:
 | split | val CE at epoch 0 → 1 | mean gain per epoch after epoch 1 |
 | --- | --- | ---: |
 | temporal (ours, ADR-0001) | 0.1303 → 0.0935 | **8.1×10⁻⁵** |
-| customer-wise (the notebook's) | 0.2433 → 0.1623 | 5.2×10⁻⁴ |
+| customer-wise (the notebook's) | 0.2433 → 0.1623 | 3.4×10⁻⁴ |
 
 Under the temporal split the average epoch improves by **less than the 10⁻⁴ it must
-clear**; under the customer-wise split, by five times that threshold. The temporal slope
-is the run on disk (`.scratch/training-budget/results/why_flat.csv`, best 0.0887 at epoch
-61). An earlier run reported 5.4×10⁻⁵, but its output was overwritten.
+clear**; under the customer-wise split, by about 3.4 times it. Both slopes are the drop
+from epoch 1 to the best epoch (61 under both splits), divided by the epochs between, from
+the run on disk (`.scratch/training-budget/results/why_flat.csv`; 120 epochs, one run per
+split). An earlier run reported 5.4×10⁻⁵ and 5.2×10⁻⁴, but its output was overwritten.
 
-Epoch 1 is not stuck at initialisation. It trades zero-cell accuracy for purchase-cell
-accuracy (CE on positive cells 9.51 → 5.87). Everything after that is slow refinement on
-the 1.4% of cells that carry 84–87% of the loss, while the forecast keeps improving.
+**What the first two epochs learn.** A *cell* is one customer in one validation week. For
+each cell the model gives a probability to every possible count, and the cell's loss is
+−log of the probability it gave to the count that actually happened. Under the temporal
+split, 98.6% of cells have a true count of 0 and 1.4% have a purchase. Epochs are numbered
+from 0, so epoch 0 is the model after its first pass over the training data.
+
+| | loss on zero cells | loss on purchase cells | overall |
+| --- | ---: | ---: | ---: |
+| epoch 0 | 0.0004, i.e. P(0) ≈ 99.96% | 9.51, i.e. P(true count) ≈ 0.007% | 0.1303 |
+| epoch 1 | 0.0135, i.e. P(0) ≈ 98.7% | 5.87, i.e. P(true count) ≈ 0.28% | 0.0935 |
+
+After one pass the model predicts that nobody ever buys. It is almost perfect on the
+silent cells and badly wrong whenever someone does buy. The second pass moves a little
+probability from "0" to purchases. That costs a little on the silent cells, but the model
+becomes about 40 times less wrong on the purchase cells, and the overall loss falls by 28%.
+So the large early drop is real learning, not a model stuck at its starting weights.
+
+From then on the purchase cells, 1.4% of the cells, carry 74–86% of the loss. The overall
+number can only move by predicting better *which* customer buys *when*. It does so slowly
+and noisily: purchase-cell loss wanders between 5.2 and 5.7 for the rest of the run, and
+the overall loss creeps from 0.0935 to 0.0887 at epoch 61. That creep is the 8×10⁻⁵ per
+epoch in the table, too small to clear the 10⁻⁴ threshold. This run makes no forecast, so
+it says nothing about whether the holdout forecast improves over those epochs; that is §5.
 
 ### 3.4 It is the split, not the panel
 
