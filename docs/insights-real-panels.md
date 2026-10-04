@@ -188,6 +188,7 @@ benchmarks.
 | cdnow | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +334.1 ± 525.2 | 345.7 ± 522.3 | 0.2652 ± 0.1899 | n/a |
 | cdnow | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | −0.5 ± 23.2 | 26.7 ± 12.4 | 0.1479 ± 0.0007 | n/a |
 | cdnow | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −11.8 ± 9.9 | 21.0 ± 3.3 | 0.1475 ± 0.0002 | n/a |
+| cdnow | Transformer no_ar (`real_panel_arms`) | **19** | 50 / 200 | +32.1 ± 108.1 | 51.2 ± 101.8 | 0.1518 ± 0.0105 | n/a |
 | cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 ± 17.3 | 25.6 ± 6.9 | 0.1479 ± 0.0006 | n/a |
 
 - **Electronics: the flags beat both benchmarks on MAPE** (45–48 against 70.8 and 65.7;
@@ -197,6 +198,10 @@ benchmarks.
 - **`ar_saturating` has the family's best level** (MAPE 43.3 ± 3.6, 22.4 below Pareto/NBD)
   and ranks 0.015 below Pareto/NBD (−0.020, −0.009). It was never run on gift or
   multichannel.
+- **CDNOW Transformer `no_ar` is dominated by one run.** It is the 19-of-20 suite
+  (`docs/studies-run.md` §4.2), scored from its stored forecasts against the
+  pre-ADR-0009 panel. Study 14 forecasts +469% bias; the other 18 give bias +7.9 ± 23.5
+  and MAPE 28.0 ± 12.8. Median bias +6.9, median MAPE 24.7.
 - **CDNOW: the flags only shift the level down.** Bias Δ −7.8 (−12.2, −3.5) and −11.4
   (−22.4, −1.1) against `no_ar`. Every CDNOW arm has a higher MAPE than the one Pareto/NBD
   fit on its window; `real_panel_arms` flags are closest (+2.3, +0.9 to +3.8).
