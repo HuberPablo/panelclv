@@ -203,7 +203,7 @@ curve looks flat.
 **What this does not show.**
 - **That the forecast improves.** A lower validation loss is not a better holdout
   forecast. Across trials, validation loss does not predict the forecast
-  (`docs/model-selection.md`; §8.2, pattern 8). The forecast evidence for longer training
+  (`docs/model-selection.md`; §8.2, Finding 2). The forecast evidence for longer training
   is §5, at 20 replications per arm.
 - **That it holds generally.** It is one model, one hyperparameter setting borrowed from
   electronics, and 3 runs per panel.
@@ -339,7 +339,7 @@ split, reproduces the notebook's validation loss (§3.1).
 
 **A floor** (`min_epochs`) stops early stopping from firing before that epoch. The kept
 epoch is still the one with the lowest validation loss, so the kept weights can come from
-before the floor (§8.2, pattern 10).
+before the floor (§8.2, Finding 5).
 
 | arm | what it is | settings | trials |
 | --- | --- | --- | ---: |
@@ -506,7 +506,7 @@ budget all at once. E1 changes one at a time (MAPE, n = 20 / 20):
   57.7 in family U. Their LSTMs read different inputs: `Transactions` alone in E1, plus
   `week_sin`/`week_cos` in family U (§4.2).
 - **E1 has no 90-epoch arm.** The remaining suspect is a 90-epoch floor on a 39-week
-  window, untested. §8.2 (pattern 10) narrows how it could act.
+  window, untested. §8.2 (Finding 5) narrows how it could act.
 
 ### 5.4 Electronic_5y: tighter, not better on average
 
@@ -772,109 +772,215 @@ recomputed metrics match the archived `factorial.csv` exactly.)*
 | U | ValendinLSTM | `archive` | `kmeans_8` | 64 | 1.3e-3 | 4e-6 | 128* | 128* | 0* | 0 | 13 | 462 | 0.0454 | +20.8 | 0.1071 | 38.9 | +0.381 | 1.18 |
 | U | ValendinLSTM | `floored` | `kmeans_8` | 32 | 1.0e-3 | 0 | 128* | 128* | 0* | 90 | 20 | 1,365 | 0.0451 | -9.5 | 0.1067 | 22.5 | +0.380 | 1.47 |
 
-### 8.2 Patterns
+### 8.2 What the bad runs have in common
 
-These patterns are descriptive, not protocol claims: the runs were picked by their
+The question here: when a run forecasts badly, is it because of its model, its
+architecture or its training, and which? The answer is built in four steps: define a bad
+run, measure how much of the badness the configuration explains at all, look inside a
+configuration for settings that predict it, and then describe the failure types the bad
+runs fall into.
+
+All of this is descriptive, not a protocol claim: the bad runs are picked by their
 outcome. Two terms:
-- a **cell** is one combination of family, panel, model and arm, holding 20 studies. A
-  *within-cell correlation* is a rank correlation over those 20, summarised by its median
-  over the 46 cells;
-- a **decile** is a panel's 10% worst or best runs (16–32 studies).
+- a **cell** is one configuration: family, panel, model and arm (and label for family U).
+  It holds 20 runs that differ only in their search and training randomness;
+- the **worst 10%** of a panel is its 32 (electronics), 28 (CDNOW) or 16 (multichannel,
+  gift) worst runs on one metric.
 
-**1. Forecasting the total badly and ranking customers badly are mostly different runs.**
-The worst-MAPE and worst-Spearman deciles share only 5 of 32 runs on electronics, 4 of 16
-on multichannel, 5 of 28 on CDNOW and 1 of 16 on gift. A run can rank customers well and
-still miss the total by 140% (the worst electronics row above), or get the total within 10% and rank
-customers at chance.
+*(`.scratch/training-budget/bad_run_patterns.py` prints every number below.)*
 
-**2. The worst totals are over-forecasts.**
-- On electronics, multichannel and CDNOW, every run in the worst-MAPE decile
-  over-forecasts, by a median of +68%, +130% and +187%.
-- What is left of the error after removing the bias, `MAPE − |bias|`, is only 4–13 points
-  in those runs, against 15–39 in the best decile. So the worst runs get the weekly shape
-  roughly right and the level wrong.
-- Gift is the exception. Its worst runs miss in both directions: under-forecasts of −45 to
-  −51% without the label, mostly over-forecasts of up to +38% with it. Its whole range is
-  narrow (MAPE 21–51).
+#### What counts as a bad run
+
+A run is bad on the **total** if it is in its panel's worst 10% by MAPE or by |bias|, and
+bad on the **ranking** if it is in the worst 10% by Spearman (the secondary measure).
+
+| panel | worst 10% | shared by MAPE and \|bias\| | median bias of the worst-MAPE runs | over-forecasts among them | shared by MAPE and Spearman |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| electronics | 32 | 25 | +68% | 32 of 32 | 5 |
+| multichannel | 16 | 14 | +130% | 16 of 16 | 4 |
+| CDNOW | 28 | 27 | +187% | 28 of 28 | 5 |
+| gift | 16 | 7 | −1% | 8 of 16 | 1 |
+
+- **On three panels, a bad total is a total that is too high.** MAPE and |bias| pick almost
+  the same runs, and every one of them over-forecasts. What is left of MAPE once the bias
+  is removed, `MAPE − |bias|`, is only 4–13 points in those runs, against 15–39 in the best
+  10%: the weekly shape is roughly right and the level is wrong.
+- **Gift is the exception.** Its worst runs by |bias| under-forecast (15 of 16, median
+  −34%), while its worst by MAPE miss in both directions. Its whole MAPE range is narrow
+  (21–51).
+- **A bad total and a bad ranking are mostly different runs** (last column). A run can rank
+  customers well and still miss the total by 140% (the worst electronics row in §8.1), or
+  get the total within 10% and rank customers at chance. So the two are analysed
+  separately below.
 - RMSE follows the bias, but only in the third decimal, so it separates nothing
   (`docs/statistical-protocol.md` §4).
 
-**3. A collapsed forecast over-forecasts.** In 43 of the 46 cells, a lower forecast CV goes
-with a higher bias (median within-cell correlation −0.47). The clearest case is CDNOW's
-`U · LSTM · floored/no_cluster`, the cell behind the +126 MAPE blow-up of §5.2:
+#### Finding 1. The configuration explains at most half of a bad total
+
+If bad runs came from bad configurations, the 20 runs of a cell would score alike and
+cells would differ. The table splits each metric's variance into the part between cells
+(configuration) and the part between runs of the same cell (what one search and one
+training happened to produce).
+
+| panel | MAPE | \|bias\| | Spearman |
+| --- | ---: | ---: | ---: |
+| electronics | 28% | 16% | 82% |
+| multichannel | 45% | 33% | 84% |
+| CDNOW | 46% | 45% | 12% |
+| gift | 4% | 20% | 29% |
+
+*Share of the variance that lies between cells.*
+
+- **For the total, half or more of the spread is between runs of the same configuration.**
+  On gift, almost all of it. A configuration sets a run's typical error, but where one run
+  lands around that typical error is largely chance.
+- The clearest case is a fully pinned recipe. `T · LSTM · paper90` on electronics fixes
+  every setting, and its 20 runs include the panel's best run (MAPE 33.8, kept epoch 82)
+  and its third worst (MAPE 103.4, kept epoch 74).
+- **For the ranking on electronics and multichannel, the configuration decides** (82–84%).
+  That is the collapse of failure type A below, which whole cells fall into.
+
+#### Finding 2. Inside a configuration, no searched setting predicts a bad run
+
+In the searched arms (`archive`, `floor50`), Optuna picks a different learning rate,
+dropout and so on for each of a cell's 20 runs. If one of those settings caused bad totals,
+runs that drew it would have higher MAPE. The table gives, over the 24 searched cells, the
+rank correlation between each setting and MAPE across a cell's 20 runs.
+
+| setting | cells where it varies | median correlation with MAPE | cells with r > +0.3 | cells with r < −0.3 |
+| --- | ---: | ---: | ---: | ---: |
+| learning rate | 24 | −0.03 | 2 | 5 |
+| weight decay | 24 | +0.01 | 1 | 1 |
+| dropout | 12 | +0.09 | 3 | 1 |
+| hidden width | 12 | +0.03 | 2 | 0 |
+| dense width | 12 | +0.22 | 3 | 3 |
+| kept epoch | 24 | −0.10 | 1 | 3 |
+| validation loss | 24 | +0.04 | 5 | 1 |
+| batch size | 13 | +0.32 | 7 | 0 |
+| forecast CV (an outcome) | 24 | −0.55 | 0 | 16 |
+
+- **By chance alone**, with 20 runs, a correlation passes +0.3 about 11% of the time, so
+  2–3 of 24 cells in each column. Learning rate, weight decay, dropout, the widths and the
+  kept epoch stay at that level, with medians near zero and signs that flip between cells.
+- **Batch size is the one setting with a lean, but it barely varies.** The search picks the
+  same batch for a median of 19 of a cell's 20 runs. The odd run on a larger batch tended
+  to be worse: multichannel's `U · LSTM · archive/kmeans_8` ran batch 256 once, and that
+  run is the panel's worst total (MAPE 297.9). So batch acts mostly *between* cells, where
+  the search chooses it (batch 256 without the label on electronics and multichannel, 64
+  with it), not as a knob that varies within one.
+- **The validation loss does not flag a bad run.** Within a cell its correlation with MAPE
+  has a median of +0.04 (CDNOW +0.06, electronics +0.03, gift −0.01, multichannel +0.08).
+  In CDNOW's `U · LSTM · floored/no_cluster` (type B below), it spans 0.0915–0.0975 while
+  MAPE spans 22.6–348.2. This is `docs/model-selection.md`'s finding again, at the level of
+  single runs.
+- **Only forecast CV tracks MAPE**: the flatter the forecast across customers, the worse
+  the total, in 16 of 24 cells. But CV is a symptom of the forecast, not a setting anyone
+  chooses. In 43 of the 46 cells, a lower CV goes with a higher bias (median −0.47). The
+  types below say which configurations produce flat forecasts.
+
+#### Finding 3. The bad runs fall into four types
+
+Counting which cells the worst 10% come from gives four recognisable types, one or two
+per panel.
+
+| type | where | cells holding the bad runs | training | forecast |
+| --- | --- | --- | --- | --- |
+| **A. Too little training, collapse** | multichannel (total and ranking), electronics (ranking, and 13 of its 32 worst totals) | `archive/no_cluster` and T's `archive`/`paper` | batch 256 or stopped at epoch 1, 4–9 epochs, 27–48 updates | flat (CV ≈ 0.1), over-forecast, ranking at chance |
+| **B. Long training, collapse** | CDNOW (total) | `U · LSTM · floored/no_cluster` | batch 32, no dropout, ~25 epochs, ~1,300 updates | flat, over-forecast by +100 to +350%, ranking intact |
+| **C. Label, wide spread** | electronics (16 of its 32 worst totals) | label runs, mostly ValendinLSTM | ordinary: batch 32–64, ~27 epochs | spread out (CV ≈ 1.3), over-forecast by ~+72%, best ranking |
+| **D. No type** | gift | spread over all seven cells | — | under-forecast without the label |
+
+**A. Too little training leads to collapse** (electronics ranking, multichannel both).
+- 13 of multichannel's 16 worst totals and 7 of its 16 worst rankings come from one cell,
+  `U · LSTM · archive/no_cluster`; ValendinLSTM's `archive/no_cluster` adds 8 more of the
+  worst rankings. On electronics, 22 of the 32 worst rankings ran at batch 256, and the
+  other 10 are `paper` runs that kept epoch 1. The same collapsed runs also give 13 of
+  electronics' 32 worst totals (10 ValendinLSTM `archive` runs at batch 256, 3 `paper` runs
+  at epoch 1).
+- These runs kept epoch 3.5 (multichannel) and 8 (electronics) at the median: 4.5 and 9
+  epochs, 27 and 48 updates. That is short by both measures, not just a few large-batch
+  steps. None had the label.
+- The result is a collapse: every one of the 40 `archive/no_cluster` runs on multichannel,
+  and 79 of 80 on electronics, has CV < 0.2. Across all runs, CV and Spearman correlate at
+  0.91 on electronics and 0.89 on multichannel, so on these panels a ranking failure *is*
+  a collapse.
+- The other side confirms it: the best 10% by MAPE kept epoch 67.5 (electronics) and 64
+  (multichannel) at the median, with 1,742 and 2,860 updates.
+
+**B. Long training can collapse too** (CDNOW total).
+- 15 of CDNOW's 28 worst totals come from `U · LSTM · floored/no_cluster`, the cell behind
+  the +126 MAPE blow-up of §5.2. Its runs split in two:
 
 | runs in the cell | CV | bias % |
 | --- | ---: | ---: |
 | 12 of 20 | < 0.25 | +99 to +347 |
 | 4 of 20 | > 0.8 | +5 to +74 |
 
-In 8 of the 12 collapsed runs, Spearman stays at 0.39–0.43, so the model still orders
-customers correctly. What it loses is the spread between them. This fits a forecast that
-gives every customer something close to the average rate, including the many who have
-stopped buying. `docs/absorbing-death-state.md` discusses that mechanism; it is not tested
-here.
+- These runs are not short: the collapsed runs on CDNOW and gift received a median of
+  1,443 and 1,560 updates, mostly at batch 32, i.e. 25 and 30 epochs. 11 of CDNOW's 12 and
+  5 of gift's 7 collapsed runs come from `floored/no_cluster`: batch 32, no dropout, no
+  weight decay, no label. This is the floor's harm on gift (claim 8) and its blow-up on
+  CDNOW (claim 9), seen run by run.
+- In 8 of the 12 collapsed runs, Spearman stays at 0.39–0.43: the model still orders
+  customers, but gives every one something close to the average rate, including the many
+  who have stopped buying. `docs/absorbing-death-state.md` discusses that mechanism; it is
+  not tested here.
+- **The recipe alone does not explain it.** `T′ · LSTM · paper` runs the same pinned recipe
+  on CDNOW, supplies two of its five best totals, and does not collapse (CV ≈ 1). The two
+  cells read different inputs: `Transactions` alone in T′, plus `week_sin` and `week_cos`
+  in U (each winner's `selected_features`). So the CDNOW collapse comes from the recipe
+  combined with that input set. Which part of the difference matters is not identified.
 
-**4. On electronics and multichannel, a ranking failure is a collapse, and the collapse
-comes from too little training.**
-- Across all runs, CV and Spearman correlate at 0.91 on electronics and 0.89 on
-  multichannel.
-- The worst-Spearman decile kept epoch 8 (electronics) and 3.5 (multichannel) at the
-  median: 9 and 4.5 epochs, 48 and 27 updates. It ran at batch 256 in 69% and 94% of runs,
-  and never had the label. That is short by both measures, not just few large-batch steps.
-- Every one of the 40 `archive/no_cluster` runs on multichannel, and 79 of 80 on
-  electronics, collapsed (CV < 0.2).
+**C. The label widens the spread of the total** (electronics total).
+- 16 of electronics' 32 worst totals carry the cluster label (11 of them ValendinLSTM).
+  They trained ordinarily (batch 32 or 64, kept epoch 26 at the median) and their
+  forecasts are not flat (CV 1.31) but over-forecast by +72% at the median. Label runs also
+  rank customers best: every run in electronics' best 10% by Spearman has the label, and
+  15 of 16 on multichannel do.
+- The label does not raise the typical error. On electronics, family U's median MAPE is
+  54.2 with the label and 53.8 without. It widens the spread around it: MAPE sd 20.4
+  against 13.5, and 29.8 against 10.0 for `ValendinLSTM · archive`. The bad label runs are
+  that wider tail.
+- They reached a lower validation loss (0.081 against 0.089) and still produced the worst
+  totals: a better selection score did not protect the total.
 
-**5. On CDNOW and gift, the collapse does not come from too little training.**
-- The collapsed runs there received a median of 1,443 (CDNOW) and 1,560 (gift) updates,
-  mostly at batch 32, i.e. 25 and 30 epochs: long by both measures.
-- 11 of CDNOW's 12 and 5 of gift's 7 collapsed runs come from `floored/no_cluster`: batch
-  32, no dropout, no weight decay, no label. This is the floor's harm on gift (§5.2,
-  claim 8) and its blow-up on CDNOW (claim 9), seen run by run.
-- **The recipe alone does not explain it.** On CDNOW, `T′ · LSTM · paper` runs the same
-  pinned recipe, supplies two of the five best runs by MAPE, and does not collapse (CV ≈
-  1). The two cells read different inputs: `Transactions` alone in T′, plus `week_sin` and
-  `week_cos` in U (each winner's `selected_features`). So the CDNOW collapse comes from the
-  recipe combined with that input set. Which part of the difference matters is not
-  identified.
+**D. Gift has no type.**
+- Only 4% of gift's MAPE variance lies between cells. Its worst totals come from six of
+  its eight cells, with no cell holding more than four.
+- What it does show is a direction: without the label, runs under-forecast (−45 to −51% at
+  the extreme). Its worst rankings are the floored no-label cells (12 of 16), the
+  long-training collapse of type B in milder form (CV 0.22).
 
-**6. The cluster label prevents collapse and gives the best ranking, but widens the
-spread of the total.**
-- Every run in electronics' best-Spearman decile has the label, and 15 of 16 on
-  multichannel do.
-- But four of electronics' five worst-MAPE runs carry it too. With the label, the MAPE sd
-  of `ValendinLSTM · archive` is 29.8, against 10.0 without.
-- Those label runs reached a lower validation loss (0.081 against 0.089) and still
-  produced the worst totals. A better selection score did not protect the total.
+#### Finding 4. How far a recipe trains matters; which epoch one run kept does not
 
-**7. Long training improves the total on electronics and multichannel, but not reliably
-for the LSTM.**
-- The best-MAPE decile kept epoch 67.5 (electronics) and 64 (multichannel) at the median,
-  with 1,742 and 2,860 updates.
-- Multichannel's worst-MAPE decile kept epoch 3.5 with 27 updates, and 13 of its 16 runs
-  are `LSTM · archive/no_cluster`.
-- But one recipe produced both extremes on electronics. `T · LSTM · paper90` holds the best
-  run (r08, MAPE 33.8, epoch 82) and the third worst (r11, MAPE 103.4, epoch 74). That
-  cell's MAPE sd is 19.0, against 7.8 for `archive`.
+Type A shows that recipes stopping after a handful of epochs give bad runs. But within a
+cell, the kept epoch barely moves MAPE: the median within-cell correlation is −0.15 over all
+46 cells (electronics −0.22, multichannel −0.24, CDNOW 0.00, gift −0.10), and −0.10 over the
+24 searched cells of Finding 2. The epoch effect of §5 is between arms: it is about how far
+a recipe lets training go, not about which epoch one search happened to keep.
 
-**8. The validation loss does not flag a bad run.** Within a cell, the correlation between
-the winner's validation loss and its holdout MAPE has a median of +0.04 (CDNOW +0.06,
-electronics +0.03, gift −0.01, multichannel +0.08). In the CDNOW cell of pattern 3, the
-validation loss spans 0.0915–0.0975 while MAPE spans 22.6–348.2. This is
-`docs/model-selection.md`'s finding again, at the level of single runs.
+#### Finding 5. A floor works by carrying training past the flat stretch, not by keeping late weights
 
-**9. Within a cell, the kept epoch matters little.** The within-cell correlation between
-best epoch and MAPE has a median of −0.15 (electronics −0.22, multichannel −0.24, CDNOW
-0.00, gift −0.10). The epoch effect of §5 is between arms: it is about how far a recipe
-lets training go, not about which epoch one search happened to keep.
-
-**10. A floor works by carrying training past the flat stretch, not by keeping late
-weights.**
 - 92% of the 440 floored runs kept weights from *before* their floor epoch. The floor lets
   training continue past the plateau of §3.2 until it finds a lower loss, and that lower
   loss often lies before the floor anyway.
-- CDNOW's blown-up runs kept epochs 8–61. So §5.3's remaining suspect, a 90-epoch floor on
-  a 39-week window, cannot act by handing the forecast overtrained weights. It would have
-  to act through which early epoch gets selected, or through the refit.
+- CDNOW's blown-up runs (type B) kept epochs 8–61. So §5.3's remaining suspect, a 90-epoch
+  floor on a 39-week window, cannot act by handing the forecast overtrained weights. It
+  would have to act through which early epoch gets selected, or through the refit.
+
+#### In short
+
+- A bad **total** on electronics, multichannel and CDNOW is an over-forecast. A bad
+  **ranking** is a flat forecast.
+- At most half of a bad total is explained by the configuration; the rest is the luck of
+  one search and one training. No searched setting (learning rate, weight decay, dropout,
+  widths, kept epoch) predicts a bad run within a configuration, and neither does the
+  validation loss the search selects on.
+- What the configuration does decide comes from three things: **too little training**
+  (batch 256 without the label, or stopping at epoch 1) collapses the forecast; **the
+  pinned recipe without the label on CDNOW's U inputs** collapses it despite long training;
+  **the cluster label** prevents collapse and gives the best ranking but widens the spread
+  of the total, so its worst runs over-forecast heavily.
 
 ## 9. Limits
 
