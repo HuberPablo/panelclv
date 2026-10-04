@@ -22,7 +22,7 @@ in `docs/model-selection.md` §2.
 | 1 | Patience, not the epoch budget, ends every archived run | all four | established | 2 |
 | 2 | With early stopping off, validation CE keeps falling to epoch 88–247 | cdnow, electronics, multichannel | established (3 runs each) | 3.2 |
 | 3 | The stop is caused by our temporal split combined with an absolute 1e-4 threshold, not by the panel | electronics | established | 3.3–3.4 |
-| 4 | Under patience 7 the search prefers the batch size that trains least | electronics | established, descriptive | 3.5 |
+| 4 | Under patience 7 the search prefers the batch size that takes the fewest updates | electronics | established, descriptive | 3.5 |
 | 5 | Training to the paper's epoch count improves level and ranking | electronics | **established** (ValendinLSTM MAPE −22.3, Spearman +0.150) | 5.1 |
 | 6 | The paper's settings without its epoch count change nothing | electronics | no clear difference | 5.1 |
 | 7 | A training floor improves ranking | electronics, multichannel | **established** | 5.2 |
@@ -42,8 +42,44 @@ restores the best epoch's weights.
 - `best_epoch` is stored per trial: it is the epoch whose weights were kept.
 - The number of epochs actually run is not stored. With no floor and a completed trial
   it is `best_epoch + 1 + patience`.
-- When comparing runs, condition on **gradient updates** received,
-  `ceil(N / batch_size) × (best_epoch + 1)`, not on epochs.
+- How much a kept model trained is reported in two currencies, always with its batch
+  size: **epochs**, `best_epoch + 1`, the passes over the N training customers, and
+  **gradient updates**, `ceil(N / batch_size) × (best_epoch + 1)`, the optimiser steps.
+  Neither alone is comparable across batch sizes (§1.1).
+
+### 1.1 Why updates alone do not measure training
+
+One update at batch 256 is not worth one update at batch 32. The larger batch averages
+the gradient over eight times as many customers, so each step points more reliably
+downhill, but it costs eight times the data. The literature describes the trade-off
+with a **critical batch size**, set by how noisy the gradient is (McCandlish et al.,
+2018). Well below it, doubling the batch roughly halves the updates needed and leaves
+the data needed unchanged, so epochs are the fair currency. Well above it, a larger batch
+barely cuts the updates needed, so updates are. In between, both count, and where the
+switch happens depends on the model, the data and the optimiser (Shallue et al., 2019).
+The learning rate is part of the same quantity: SGD's gradient noise scales roughly as
+lr × N / batch (Smith et al., 2018), large-batch SGD needs its learning rate scaled up
+linearly with the batch (Goyal et al., 2017), and Adam by about its square root (Malladi
+et al., 2022). The large-batch "generalisation gap" largely closes once large batches
+get as many updates as small ones (Hoffer et al., 2017). That is the case for counting
+updates, under those scaling rules, not a licence to compare raw counts across settings.
+
+Our searches vary batch, learning rate and weight decay jointly, under AdamW, so an
+update count compared across trials mixes all three. Batch 256 on electronics' 829
+customers takes four steps per epoch and is close to full-batch descent, where updates
+are likely the binding currency. But a trial with few updates at batch 256 can still have
+seen *more* data than one with more updates at batch 64 (§3.5). The doc therefore reports
+batch, epochs and updates side by side, and does not rest an undertraining claim on an
+update count. The direct evidence is §3.2: with early stopping off, validation loss keeps
+falling long after the kept epoch.
+
+References: Goyal et al. (2017), *Accurate, Large Minibatch SGD*, arXiv:1706.02677.
+Hoffer, Hubara & Soudry (2017), *Train Longer, Generalize Better*, NeurIPS. McCandlish,
+Kaplan, Amodei et al. (2018), *An Empirical Model of Large-Batch Training*,
+arXiv:1812.06162. Smith, Kindermans, Ying & Le (2018), *Don't Decay the Learning Rate,
+Increase the Batch Size*, ICLR. Shallue et al. (2019), *Measuring the Effects of Data
+Parallelism on Neural Network Training*, JMLR. Malladi, Lyu, Panigrahi & Arora (2022), *On
+the SDEs and Scaling Rules for Adaptive Gradient Algorithms*, NeurIPS.
 
 ## 2. Patience ends every run
 
@@ -64,7 +100,7 @@ epoch ≤ 3 in 55% of ValendinLSTM runs, and earlier stopping goes with worse ra
 
 ## 3. How we know it undertrains, and why
 
-### 3.1 The reference notebook trains about 70× longer
+### 3.1 The reference notebook trains about 11× more epochs and 70× more updates
 
 | | Valendin et al. notebook | Our studies |
 | --- | --- | --- |
@@ -74,7 +110,10 @@ epoch ≤ 3 in 55% of ValendinLSTM runs, and earlier stopping goes with worse ra
 | epochs trained | ~90 ("final validation loss … after ±90 epochs") | median best epoch 7–14 |
 
 On electronics (829 customers), 90 epochs at batch 32 is about **2,300 gradient updates**.
-Our benchmark winners stopped at a median epoch of 7 at batch 256, about **32 updates**.
+Our benchmark winners stopped at a median epoch of 7 at batch 256: 8 epochs, about **32
+updates**. The gap is 11× in data seen and 70× in steps taken; the second is larger only
+because our batch is eight times the notebook's (§1.1). Both say the same thing: far less
+training.
 `scripts/validate_valendin_lstm.py` runs the notebook's recipe exactly and reaches the
 published loss. The search space simply cannot express that recipe: batch 32 is absent
 and weight decay has no zero.
@@ -134,16 +173,22 @@ test task (ADR-0001). What went unchecked is what it does to the stopping rule.
 
 In 20 electronics benchmark studies (2,000 trials, 713 completed), grouped by batch size:
 
-| batch | completed | best val CE | median best epoch | median updates |
-| ---: | ---: | ---: | ---: | ---: |
-| 64 | 136 | 0.0899 | 3 | 52 |
-| 128 | 178 | 0.0911 | 4 | 35 |
-| 256 | 399 | 0.0886 | 7 | 32 |
+| batch | completed | best val CE | median best epoch | median epochs | median updates |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 136 | 0.0899 | 3 | 4 | 52 |
+| 128 | 178 | 0.0911 | 4 | 5 | 35 |
+| 256 | 399 | 0.0886 | 7 | 8 | 32 |
+
+The two currencies rank the batches in opposite orders. Batch 256 takes the fewest steps
+but, by epochs, sees the most data. "Trains least" therefore holds in updates only, and
+under patience 7 every batch size trains little in both: at most 8 epochs, against the
+notebook's ~90.
 
 Within the 40 pre-experiment electronics studies with no label, more training goes with
 better ranking: Spearman's rank correlation with updates received is **+0.328** (+0.024,
-+0.580; best epoch +0.280, not supported). It is one across-study correlation, resampled by
-study.
++0.580; best epoch, i.e. epochs, +0.280, not supported). It is one across-study
+correlation, resampled by study, and batch, learning rate and weight decay vary with it,
+so it does not say which currency matters (§1.1).
 
 Batch 256 won all 20 studies. Small-batch trials need more epochs to show their
 advantage, and patience 7 stops them first. Inside a study, the longest-trained trial is
@@ -248,7 +293,8 @@ Means: ValendinLSTM `archive` MAPE 69.1, Spearman 0.027; `paper90` 46.8, 0.177.
   keeps epoch 1 and stops after 7 (§3.3). Adding the epoch count cuts MAPE by 22 points
   and multiplies ranking by about seven.
 - **The invariant is not identified.** `paper90` gets there with ~2,300 updates at batch
-  32, and `floor50` with a few hundred at batch 256.
+  32, and `floor50` with a few hundred at batch 256. The two also differ in learning rate
+  and weight decay, so neither updates nor epochs is shown to be what matters (§1.1).
 - **A floor works with the search intact.** Under a floor, the searched `floor50` and the
   pinned `paper90` show no clear MAPE difference on either model. On Spearman the
   searched LSTM ranks worse (−0.100, −0.138 to −0.063).
@@ -368,8 +414,9 @@ How to read the columns:
 - **run**: family · model · arm (U: `training/label`) · replication.
 - **CV**: std / mean of the per-customer predicted holdout totals. Near 0 means every
   customer gets nearly the same forecast, i.e. a collapse (§5.2).
-- **best epoch**: the epoch whose weights were kept. **updates**:
-  `ceil(N / batch) × (best epoch + 1)` (§1).
+- **best epoch**: the epoch whose weights were kept; the model saw the data `best epoch + 1`
+  times. **updates**: `ceil(N / batch) × (best epoch + 1)` (§1). Read updates together
+  with **batch**: the same count means 8× more data at batch 256 than at batch 32 (§1.1).
 - **val CE**: the winner's validation cross-entropy, the quantity the search selected on.
 - `paper`, `paper90` and `floored` pin lr 1e-3, wd 0, batch 32, LSTM 128/128 with dropout 0.
   ValendinLSTM's architecture is frozen (ADR-0004).
@@ -587,11 +634,13 @@ not tested here.
 undertraining.** Across all runs, CV and Spearman correlate at 0.91 on electronics and 0.89
 on multichannel. The worst-Spearman decile there kept epoch 8 and 3.5 (median), received 48
 and 27 updates, ran at batch 256 in 69% and 94% of runs, and had no label in all of them.
+That is short in both currencies: 9 and 4.5 epochs, not just few large-batch steps.
 Every one of the 40 `archive/no_cluster` runs on multichannel, and 79 of 80 on electronics,
 collapsed (CV < 0.2).
 
 **5. On CDNOW and gift, collapse is not caused by too little training.** The collapsed
-runs there received a median of 1,443 (CDNOW) and 1,560 (gift) updates. 11 of CDNOW's 12
+runs there received a median of 1,443 (CDNOW) and 1,560 (gift) updates, mostly at batch
+32, which is 25 and 30 epochs: long in both currencies. 11 of CDNOW's 12
 and 5 of gift's 7 collapsed runs come from `floored/no_cluster`: batch 32, no dropout, no
 weight decay, no label. This is the floor's harm on gift (§5.2, claim 8) and its blow-up on
 CDNOW (claim 9), seen run by run. **The recipe alone does not explain it.** On CDNOW,
