@@ -146,3 +146,9 @@ for m, name in SETTINGS.items():
         cells.append("—" if r.notna().sum() == 0 else
                      f"{r.median():+.2f} ({(r > 0.3).sum()} / {(r < -0.3).sum()} of {r.notna().sum()})")
     print(f"| {name} | " + " | ".join(cells) + " |")
+
+print("\n== MAPE spread inside a cell: searched vs fixed-hyperparameter arms (median over cells)")
+c = d.assign(fixed=d.arm.isin(["paper", "paper90", "floored"])).groupby(
+    ["panel", "fam", "model", "arm", "label"]).agg(
+    fixed=("fixed", "first"), sd=("mape_aggregate", "std"))
+print(c.groupby(["panel", "fixed"]).sd.median().round(1))

@@ -1337,23 +1337,72 @@ a recipe lets training go, not about which epoch one search happened to keep.
 
 #### In short
 
-- A bad **total** on electronics, multichannel and CDNOW is an over-forecast. A bad
-  **ranking** is a flat forecast.
-- At most half of a bad total is explained by the configuration; the rest is the luck of
-  one search and one training.
-- **The inputs change what the search picks.** Adding the cluster label makes the search
-  choose batch 64 instead of 256 on electronics and multichannel, a lower learning rate
-  and more dropout. Hyperparameters are therefore only compared within one arm and one
-  input set.
-- Within such a configuration, no searched setting (weight decay, dropout, widths, kept
-  epoch) predicts a bad run, and neither does the validation loss the search selects on.
-  The one exception: with the label, the runs that drew a low learning rate tend to
-  over-forecast more.
-- What the configuration does decide comes from three things: **too little training**
-  (batch 256 without the label, or stopping at epoch 1) collapses the forecast; **the
-  pinned recipe without the label on CDNOW's U inputs** collapses it despite long training;
-  **the cluster label** prevents collapse and gives the best ranking but widens the spread
-  of the total, so its worst runs over-forecast heavily.
+**Terms.**
+- **Cluster label (`kmeans_8`)**: an extra input column. Each customer is assigned to one of
+  8 groups by k-means on three summaries of their purchase history: number of repeat
+  purchases `x`, time of last purchase `t_x`, and time observed `T`. These are the
+  statistics Pareto/NBD is fitted on. Family U runs every configuration twice, without this
+  column (`no_cluster`) and with it (`kmeans_8`).
+- **Configuration**: one panel, one arm, one model and one set of input columns, run 20
+  times.
+- **Collapse**: the model gives every customer almost the same forecast (CV near 0), so it
+  cannot rank customers (Spearman ≈ 0).
+- **Bad run**: in its panel's worst 10% by MAPE or |bias| (total), or by Spearman
+  (ranking).
+
+**What a bad run looks like.** On electronics, multichannel and CDNOW, a bad total is
+always an over-forecast; on gift, an under-forecast. A bad ranking is a collapsed
+forecast. The two are mostly different runs (1–5 shared per panel).
+
+**1. The cluster column decides the batch size the search picks, and that decides the
+collapse.**
+- On electronics and multichannel *without* the cluster column, Optuna picks batch 256 in
+  17–20 of 20 runs. Training stops after 3–8 epochs (24–36 updates) and the forecast
+  collapses. This produces 13 of multichannel's 16 worst totals and most of electronics'
+  worst rankings.
+- *With* the cluster column, Optuna picks batch 64, training runs 13–29 epochs, nothing
+  collapses, and Spearman is 0.17–0.30. It also picks a lower learning rate (6 of 8 pairs)
+  and more dropout (4 of 4 LSTM pairs).
+- On CDNOW and gift, Optuna picks batch 64 either way.
+
+**2. The cluster column prevents collapse but makes the total less stable.**
+- On electronics, median MAPE is the same with and without it (54 against 54), but the
+  spread between runs is wider (sd 20 against 13). Runs with the column supply 16 of the
+  32 worst totals.
+- On CDNOW, adding it turns a near-zero bias into an over-forecast (LSTM median −3% →
+  +55%).
+
+**3. Within one configuration, no hyperparameter explains which runs are bad.**
+- Learning rate, weight decay, dropout, widths and kept epoch correlate with MAPE no more
+  often than chance. The validation loss does not flag bad runs either (median correlation
+  +0.04).
+- One exception: with the cluster column, a low learning rate goes with worse totals. On
+  electronics' ValendinLSTM, the quarter of runs with the lowest learning rate has median
+  MAPE 97 against 53, and contains the two worst runs. This rests on 8 configurations, so
+  it is a lead, not a finding.
+
+**4. About half the spread between runs is luck.**
+- Configurations with every hyperparameter fixed spread as much as searched ones (median
+  MAPE sd 33 against 36 on CDNOW, 11 against 9 on electronics, 5 against 7 on gift).
+- The variation comes from random weight initialisation and data shuffling, not from
+  Optuna's choices. One fixed recipe on electronics (`T · LSTM · paper90`) produced both
+  the panel's best run (MAPE 34) and its third worst (MAPE 103).
+- Multichannel is the exception (sd 38 searched against 10 fixed), because of its
+  collapsing no-cluster `archive` configurations.
+
+**5. One collapse comes after long training.** On CDNOW, the LSTM with the fixed `floored`
+recipe and no cluster column collapses after about 25 epochs at batch 32, over-forecasting
+by +100 to +350%. The same recipe reading only `Transactions` (family T′, without
+`week_sin`/`week_cos`) does not collapse. The cause is the recipe combined with those extra
+inputs; which part matters is unknown.
+
+**Implications.**
+- On electronics and multichannel without the cluster column, remove batch 256 from the
+  search or impose a minimum number of epochs.
+- With the cluster column, test a lower bound on the learning rate.
+- Always report a configuration as the distribution over its 20 runs.
+
+All of this is descriptive: each point needs its own experiment before it becomes a claim.
 
 ## 9. Limits
 
