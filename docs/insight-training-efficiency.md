@@ -185,44 +185,54 @@ weights from epochs 6–11. Its output is lost too, and its old write-up describ
 arm in two inconsistent ways, so its forecast numbers are not used here.
 *(`.scratch/training-budget/probe_patience.py`, `end_to_end.py`)*
 
-### 3.3 Why the curve looks flat: the threshold is larger than the slope
+### 3.3 Why the curve looks flat: each epoch gains less than the rule requires
 
-Electronics, early stopping off, the notebook's recipe:
+The stopping rule counts an epoch as progress only if the validation loss drops by more
+than 10⁻⁴ (§1). Under our temporal split, the loss drops by less than that in a typical
+epoch. The rule therefore sees no progress and stops, even though the loss is still going
+down.
 
-| split | val CE at epoch 0 → 1 | mean gain per epoch after epoch 1 |
-| --- | --- | ---: |
-| temporal (ours, ADR-0001) | 0.1303 → 0.0935 | **8.1×10⁻⁵** |
-| customer-wise (the notebook's) | 0.2433 → 0.1623 | 3.4×10⁻⁴ |
+The measurement: electronics, the notebook's recipe, early stopping off, 120 epochs, one
+run under each split.
 
-Under the temporal split the average epoch improves by **less than the 10⁻⁴ it must
-clear**; under the customer-wise split, by about 3.4 times it. Both slopes are the drop
-from epoch 1 to the best epoch (61 under both splits), divided by the epochs between, from
-the run on disk (`.scratch/training-budget/results/why_flat.csv`; 120 epochs, one run per
-split). An earlier run reported 5.4×10⁻⁵ and 5.2×10⁻⁴, but its output was overwritten.
+| split | val loss after epoch 1 | best val loss (epoch 61) | average drop per epoch | vs the 10⁻⁴ threshold |
+| --- | ---: | ---: | ---: | ---: |
+| temporal (ours, ADR-0001) | 0.0935 | 0.0887 | 8.1×10⁻⁵ | 0.8× |
+| customer-wise (the notebook's) | 0.1623 | 0.1419 | 3.4×10⁻⁴ | 3.4× |
 
-**What the first two epochs learn.** A *cell* is one customer in one validation week. For
-each cell the model gives a probability to every possible count, and the cell's loss is
-−log of the probability it gave to the count that actually happened. Under the temporal
-split, 98.6% of cells have a true count of 0 and 1.4% have a purchase. Epochs are numbered
-from 0, so epoch 0 is the model after its first pass over the training data.
+Under the notebook's split a typical epoch clears the threshold easily, so training
+continues (§3.4). Under ours it falls short.
 
-| | loss on zero cells | loss on purchase cells | overall |
-| --- | ---: | ---: | ---: |
-| epoch 0 | 0.0004, i.e. P(0) ≈ 99.96% | 9.51, i.e. P(true count) ≈ 0.007% | 0.1303 |
-| epoch 1 | 0.0135, i.e. P(0) ≈ 98.7% | 5.87, i.e. P(true count) ≈ 0.28% | 0.0935 |
+**Why the drop is so small under our split.** The validation loss is an average over
+every customer-week in the validation window. For each week, the model assigns a
+probability to every possible purchase count. The loss for that week is −log of the
+probability given to the count that actually happened, so a confident wrong prediction
+costs a lot. Under our split, 98.6% of the customer-weeks have no purchase.
 
-After one pass the model predicts that nobody ever buys. It is almost perfect on the
-silent cells and badly wrong whenever someone does buy. The second pass moves a little
-probability from "0" to purchases. That costs a little on the silent cells, but the model
-becomes about 40 times less wrong on the purchase cells, and the overall loss falls by 28%.
-So the large early drop is real learning, not a model stuck at its starting weights.
+The first two epochs show what this does. (Epochs are numbered from 0, so epoch 0 is the
+end of the first pass over the training data.)
 
-From then on the purchase cells, 1.4% of the cells, carry 74–86% of the loss. The overall
-number can only move by predicting better *which* customer buys *when*. It does so slowly
-and noisily: purchase-cell loss wanders between 5.2 and 5.7 for the rest of the run, and
-the overall loss creeps from 0.0935 to 0.0887 at epoch 61. That creep is the 8×10⁻⁵ per
-epoch in the table, too small to clear the 10⁻⁴ threshold. This run makes no forecast, so
-it says nothing about whether the holdout forecast improves over those epochs; that is §5.
+| after | weeks with no purchase | weeks with a purchase | average over all weeks |
+| --- | --- | --- | ---: |
+| epoch 0 | loss 0.0004 (P(no purchase) ≈ 99.96%) | loss 9.51 (P(true count) ≈ 0.007%) | 0.1303 |
+| epoch 1 | loss 0.0135 (P(no purchase) ≈ 98.7%) | loss 5.87 (P(true count) ≈ 0.28%) | 0.0935 |
+
+- **After epoch 0** the model predicts that almost nobody buys. That is nearly right for
+  the silent weeks and badly wrong for the weeks with a purchase.
+- **After epoch 1** it moves a little probability toward purchases. The silent weeks get
+  slightly worse, the purchase weeks get about 40 times better, and the average loss falls
+  by 28%. This is the easy gain, and it is real learning, not a model stuck where it
+  started.
+- **After that,** most of the remaining loss sits in the purchase weeks: 1.4% of the weeks
+  carry 74–86% of the loss for the rest of the run. Lowering it means predicting which
+  customer buys in which week, which is hard. The average improves slowly and unevenly,
+  from 0.0935 to 0.0887 over the next 60 epochs, which is the 8.1×10⁻⁵ per epoch above.
+
+This run only tracks the validation loss. It makes no forecast, so it cannot say whether
+the forecast keeps improving over those epochs; §5 tests that.
+
+*(`.scratch/training-budget/why_flat.py` → `results/why_flat.csv`. An earlier run
+reported slopes of 5.4×10⁻⁵ and 5.2×10⁻⁴, but its output was overwritten.)*
 
 ### 3.4 It is the split, not the panel
 
