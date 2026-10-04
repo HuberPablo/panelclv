@@ -452,10 +452,12 @@ Ordered by what a result depends on.
    to finish; the two `ar_unbounded` arms are deliberate.
 6. **One replication short** — `Transformer / cdnow / no_ar-no_cluster-valendin` at 19/20
    (family H). Cheap to finish, and defensible to leave.
-7. **The Transformer on the four-panel runs.** `scripts/run_real_panel_ar.py --model
-   transformer` exists and has never been run on any panel, so families O and P are
-   LSTM-only. The synthetic grid found the two architectures fail in different corners
-   (`docs/insights-synthetic-grid.md`, claim 6), so the four-panel picture is one architecture's.
+7. **The Transformer on gift and multichannel.** It has never run on either panel. It did
+   run on CDNOW and electronics (family H) and on electronic_5y (family Y), but
+   `scripts/run_real_panel_ar.py --model transformer` was never launched, so families O and
+   P are LSTM-only. The synthetic grid found the two architectures fail in different corners
+   (`docs/insights-synthetic-grid.md`, claim 6), so the gift and multichannel picture is one
+   architecture's.
 8. **Trial-budget confound in family A.** The archived baseline gave the LSTM 10 trials and
    the Transformer 20. Family B re-ran the same arm for both at 100, so use B for any
    LSTM-vs-Transformer statement and treat A as superseded.

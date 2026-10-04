@@ -705,7 +705,8 @@ run is **extreme** if it lies more than 3 scaled MADs from its cell's median.
 
 - **`ar_saturating`** is the best level arm on electronics, but was never run on gift or
   multichannel.
-- **Transformer** on the four-panel runs (families O and P): never run.
+- **Transformer** on gift and multichannel: never run. Families O and P are LSTM-only; the
+  Transformer ran only on CDNOW and electronics (family H) and electronic_5y (family Y).
 - **`projected` embedder:** never run anywhere. Every number here uses `valendin`.
 - **ValendinLSTM on the 3-year windows:** 0 of 20 replications.
 - **E2:** the cluster label recomputed before the validation window (§5.3).
