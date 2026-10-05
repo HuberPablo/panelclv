@@ -186,6 +186,7 @@ the `param_embedder` column, so their embedder is inferred rather than recorded.
 | **R** | **`run_rescore_trials`** | vast + local | **17 Sep** | all four | ValendinLSTM | as N | — | **698 refits** | 500 | 0 (rescores N) | **complete**, written to `Rescored/` |
 | **T** | **`training_budget`** | vast | **20 Sep** | electronics | ValendinLSTM, LSTM | 4 recipes: `archive`, `paper`, `paper90`, `floor50` (§4.6) | 100 / **1**⁵ | **20** | **200** | **160** | **complete** |
 | **U** | **`factorial`** | vast | **21 Sep** | **all four** | ValendinLSTM, LSTM | 2×2: {`archive`, `floored`} × {`no_cluster`, `kmeans_8`} (§4.7) | 100 / **1**⁵ | **20** | **200** | **640** | **complete** |
+| **U′** | **`scorefix`** | local | **4 Oct** | electronics | ValendinLSTM, LSTM | family U's `archive` × `no_cluster` cell, rerun with the per-cell validation score (§4.10) | 100 | **20** | **200** | **40** | **complete** |
 | **T′** | **`training_budget` on CDNOW (E1)** | vast | **21 Sep** | cdnow | ValendinLSTM, LSTM | `archive`, `floor50`, `paper` | 100 / 1 | 20 | 200 | **120** | **complete** |
 | **V** | **`selection_rescore`** | vast | **21 Sep** | electronics, cdnow | ValendinLSTM, LSTM | `archive` only; scores every trial twice (§4.8) | 100 | 40 / 10 | 100 | **90** | **complete** |
 | **W** | **`real_panel_benchmarks_cal5y`** | vast + local | **26–28 Sep** | electronic_5y | ValendinLSTM, ParetoNBD | count + embedded week | 100 | 20 (+ 20 seeded Pareto/NBD fits) | 500 | **41** | **complete** |
@@ -235,6 +236,7 @@ the doc that reports it; this table only points there.
 | T | Does training the way the paper trains remove the electronics collapse? | `docs/insight-training-efficiency.md` §4.2, §5.1 |
 | T′ | (E1) Which single training ingredient tripled CDNOW's LSTM error under U's `floored` arm? | `docs/insight-training-efficiency.md` §4.2, §5.3 |
 | U | Do the training floor and the cluster label add, on all four panels? | `docs/insight-training-efficiency.md` §5.2; `docs/insights-real-panels.md` §5.2 |
+| U′ | Did the batch-dependent validation score steer family U's search, and does fixing it change what is selected and how it forecasts? | `docs/model-selection.md` §3.9; ADR-0010 |
 | V | Does a validation-window rollout pick better trials than validation CE? | `docs/model-selection.md` §3.3–3.6 |
 | W | The two benchmarks on the paper's own electronics split | `docs/benchmarks.md` |
 | X | On that split, does keeping later weights lower the bias, with and without an added input? | `docs/insight-training-efficiency.md` §5.4; `docs/insights-real-panels.md` §7 |
@@ -399,6 +401,18 @@ The four floored feature cells of X were trained twice. The `nofloor` workers re
 them and overwrote the first draw, whose forecasts are lost: a worker started without the
 finished suites on its disk retrains them.
 
+### 4.10 Family U′ — the per-cell validation score
+
+Driver: `.scratch/score-fix/run_cell.py`; comparison: `.scratch/score-fix/compare.py`.
+Suites `Studies/scorefix__<model>__electronics__archive-no_cluster__rNN`. It reruns one
+family U cell after ADR-0010 with that as the only change. Two facts a reader must carry:
+
+- **Its search space is the archive's, not today's registry.** Weight decay is searched
+  over (1e-6, 1e-2) log and batch over {64, 128, 256}, as when family U ran; the registry
+  has since pinned weight decay to 0 and added batch 32.
+- **Its validation losses are per-cell means.** They are not comparable with family U's or
+  any other archived `val_loss` (§7).
+
 ---
 
 ## 5. Where `ValendinLSTM` can and cannot run
@@ -477,6 +491,19 @@ Ordered by what a result depends on.
 ---
 
 ## 7. Known inconsistencies
+
+**Every search before 4 October 2026 selected on a batch-dependent validation score.**
+Until commit af2b14b the validation CE was a mean of per-batch means, so the same weights
+scored up to 6% lower (electronics, multichannel) or 13% higher (gift) at batch 256 than
+their true mean (ADR-0010, `docs/model-selection.md` §3.9). Consequences:
+
+- Every family that ran more than one trial per study chose its winners under that score.
+  On electronics and multichannel it favoured batch 256. Only family U′ has been rerun
+  with the fix.
+- An archived `val_loss` or `best_objective_value` is comparable neither with one written
+  after the fix nor with an archived one at a different batch size.
+- Single-trial arms (`paper`, `paper90`, `floored`, family X) select nothing between
+  trials. They are affected only through which epoch early stopping keeps.
 
 **The pre-ADR-0009 CDNOW window breaks two report paths.** `run_ar_encoding_ablation.py
 --panel cdnow --report` and `run_cluster_ablation.py --panel cdnow --report` both raise

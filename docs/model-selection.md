@@ -19,7 +19,9 @@ Conventions in this doc:
 
 1. Optuna trains up to 100 trials (`tuning/optuna_tuning.py`).
 2. The trial with the lowest **teacher-forced validation cross-entropy (CE)** on the
-   temporal validation window wins (ADR-0001).
+   temporal validation window wins (ADR-0001). Since 4 October 2026 that CE is the exact
+   per-cell mean whatever the trial's batch size (ADR-0010); every archived search
+   before it compared trials on a CE that moved with the batch size (§3.9).
 3. The winner is refit for 5 epochs over the full calibration window, unseeded
    (`DEFAULT_REFIT_EPOCHS`, `trials/refit.py`; ADR-0008).
 4. The refit is rolled out over the 52-week holdout and scored.
@@ -74,6 +76,7 @@ a magnitude reference, never a threshold.
 | 3.6 | Two-stage re-rank | Family V | Shortlist on CE, re-rank by rollout? |
 | 3.7 | CE across arms | Cluster ablation (family F) | Can calibration choose K? |
 | 3.8 | Ensemble scoring | Family G (the CDNOW/electronics arm grid at 50 paths), CDNOW | Does averaging replications neutralise a bad pick? |
+| 3.9 | Batch-dependent score, and its fix | Family U's stored winners, 4 panels; family U′ (electronics · `archive` · no cluster label rerun with the fix, 40 studies) | Did the score itself favour one batch size, and did that change what was selected? |
 
 ### 3.1 The winning CE does not track the forecast across replications
 
@@ -244,6 +247,80 @@ deterministic fit. The distribution is what shows a single fit is unreliable. Re
 both. This has not been recomputed on the current recipe or on another panel; it needs
 the dataset code from before `fe37ee5`.
 
+### 3.9 The validation score depended on the batch size, and steered the search
+
+**The score read differently at each batch size for the same weights.** Up to commit
+af2b14b, the validation CE was the mean of per-batch means. The validation loader runs at
+the trial's batch size in fixed customer order, so the short last batch counted as much as
+a full one. At batch 256 on electronics, the 61 highest-id customers carried 25% of the
+score instead of 7%. Scoring family U's stored winners at every batch size, weights fixed,
+against the true per-cell mean (3 winners per model per panel; `ValendinLSTM` and `LSTM`
+agree to 0.4 points):
+
+| panel | the short batch's loss vs the average | batch 32 | batch 64 | batch 128 | batch 256 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| electronics | 0.79× | −0.2% | −0.1% | −1.6% | **−4.1%** |
+| multichannel | 0.29× | −0.4% | −0.3% | −0.3% | **−6.2%** |
+| cdnow | 1.35× | +0.4% | +0.2% | +1.1% | **+2.8%** |
+| gift | 2.28× | +1.1% | +3.0% | +6.7% | **+13.4%** |
+
+- **The bias is larger than what the search decides on.** The winning CE varies by
+  0.08–3.1% across replications (§2), so a 4–6% discount, or a 3–13% penalty, outweighs
+  any real difference between trials of different batch sizes.
+- **It matches what the archived searches did.** Batch 256 was drawn in 61% and 51% of all
+  electronics and multichannel trials (TPE samples more of what scores well), against 8–9%
+  on CDNOW and gift. Without the cluster label, 17–20 of 20 winners per cell on electronics
+  and multichannel ran batch 256, then stopped after 3–8 epochs and collapsed
+  (`docs/insight-training-efficiency.md` §8, failure type A).
+- **The direction is an accident of customer order.** On electronics and multichannel the
+  highest ids buy less than average, so the short batch lowers the score; on CDNOW and gift
+  they buy more, so it raises it.
+
+**The fix** (ADR-0010) weights each batch by the cells it scored, so the CE is the exact
+per-cell mean. Shuffling validation was rejected: at batch 256 it leaves a 95% range of
+±3–9% around the true mean on every panel.
+
+**The rerun.** Family U′ reruns electronics · `archive` · no cluster label with the fix as
+the only change: the archive's search space restored (weight decay searched, batch over
+{64, 128, 256}), the same seeds, 100 trials, patience 7, pruner, refit and 200 paths;
+20 replications per model (`.scratch/score-fix/`). Δ is rerun minus archive, resampled
+independently: training is unseeded and the two searches diverge after their first trial,
+so a shared seed does not make replications pairs.
+
+| | LSTM archive | LSTM rerun | ValendinLSTM archive | ValendinLSTM rerun |
+| --- | --- | --- | --- | --- |
+| trials at batch 256 | 68% | 16% | 70% | 18% |
+| winners' batch | 256: 18, 128: 2 | 64: 12, 128: 6, 256: 2 | 256: 19, 128: 1 | 64: 11, 128: 8, 256: 1 |
+| best epoch, mean | 11.1 | 7.8 | 7.8 | 16.7 |
+
+| Δ rerun − archive | LSTM | ValendinLSTM |
+| --- | --- | --- |
+| MAPE | −3.0 [−7.5, +1.5] | **−9.4 [−16.0, −3.0]** |
+| bias % | −8.0 [−20.1, +4.0] | **−11.4 [−21.8, −1.6]** |
+| Spearman | +0.017 [−0.009, +0.044] | **+0.055 [+0.013, +0.099]** |
+| forecast CV | **+0.008 [+0.004, +0.013]** | **+0.071 [+0.022, +0.129]** |
+| best epoch | −3.4 [−7.7, +0.6] | **+8.9 [+1.6, +16.9]** |
+
+- **The fix removed the preference for batch 256.** That establishes the score as the cause
+  of the archived searches' batch choice on this cell.
+- **ValendinLSTM forecasts better.** Its batch-64 winners kept epoch 27 at the median, and
+  5 of those 11 runs no longer collapse (CV 0.2–0.5, Spearman about 0.2); the best reaches
+  MAPE 36 at a bias near 0. The other 15 runs still collapse, so the cell's median CV
+  barely moves (0.081 to 0.083): the mean gain comes from the runs that escaped.
+- **The LSTM does not.** At batch 64 its winners keep epoch 3.5 at the median: about 58
+  updates, the same few dozen as at batch 256. It still collapses (CV 0.09, Spearman
+  0.05). Batch 256 was one route to stopping too early, not the only one: patience 7 on a
+  flat validation curve stops it at any batch size (`docs/insight-training-efficiency.md`
+  §3).
+
+**What it means for the archive.** Every searched result before af2b14b was selected under
+this score: every family in `docs/studies-run.md` that ran more than one trial per study,
+including the `archive` and `floor50` arms of families T, T′ and U, the benchmark searches
+of family N and the LSTM arms of families O and P. On electronics and
+multichannel those searches leaned to batch 256; on CDNOW and gift they leaned away from
+it. Only this one cell has been rerun, so how much each archived number moved is known
+here alone. Arms that run one pinned trial select nothing between trials.
+
 ## 4. Does this arise with Valendin et al.'s code?
 
 Read from their notebook (`Original_paper_model/banking_transactions_demo.ipynb`):
@@ -281,6 +358,7 @@ Read from their notebook (`Original_paper_model/banking_transactions_demo.ipynb`
 | S7 | Average or seed the refit | refit noise | Untested. Redundant if S6 is used. |
 | S8 | Rolling-origin validation (2–3 cut points) | one flat window; CDNOW blow-ups | Untested. The one untried selection change aimed at S1's failure. |
 | S9 | Make trials worth distinguishing (a per-customer input) | collapsed panels | A precondition, not a rule (`docs/insights-real-panels.md`). |
+| S10 | Score validation as a per-cell mean, independent of batch size | a score that moved with a searched hyperparameter | **Adopted** (ADR-0010, §3.9). Archived searches predate it. |
 | E2 | Recompute `kmeans_8` before the validation window | possible label leak into selection | Owed. Until it runs, selection results on cluster arms carry this caveat (`docs/feature-engineering.md` §5). |
 
 **Recommendation.**

@@ -21,6 +21,7 @@ independent replications.
 | Pareto/NBD | **20 hierarchical-Bayes MCMC fits per panel**, replication r seeded 42 + r (suites `real_panel_benchmarks__ParetoNBD__<panel>__r00` … `r19`; r00 is the single fit this document first reported). A fit is reproducible under its seed but not across seeds, so Pareto/NBD is a replicated condition like the neural model. No embedder, no trials. |
 | Metrics | `compute_forecast_metrics` (`bias_percent`, `mape_aggregate`, `rmse`) plus Spearman of per-customer holdout totals, the last recomputed from the stored `Predictions/` because it needs the panel actuals. Regenerate all four with `python scripts/run_real_panel_benchmarks.py --report`. |
 | Archive | family N of `docs/studies-run.md` — 84 suites, 13 September 2026. |
+| Selection score | **Before ADR-0010.** Each ValendinLSTM search chose its winner on a validation loss that moved with the batch size: about 4% low at batch 256 on electronics and 6% low on multichannel, 3% and 13% high on CDNOW and gift. On electronics with family U's inputs, rerunning with the fix lowered ValendinLSTM's MAPE by 9.4 points (`docs/model-selection.md` §3.9). These benchmark rows have not been rerun. |
 
 Windows — two calibration years and one holdout year, the second calibration year used
 for validation (ADR-0001). CDNOW's panel spans 77 weeks, so it keeps the published split

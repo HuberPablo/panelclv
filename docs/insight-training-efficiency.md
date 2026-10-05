@@ -574,6 +574,15 @@ across families T, T′ (= E1) and U (§4.2), then what the bad runs share.
 and forecast over 200 paths. There are 920 of them. Runs are compared only within their own
 panel, never across panels (`docs/statistical-protocol.md` §7).
 
+**Every search in this section ran under a batch-dependent validation score.** Until
+ADR-0010 (4 October 2026) the validation loss was a mean of per-batch means, which read
+4.1% low at batch 256 on electronics, 6.2% low on multichannel, and 2.8% and 13.4% high on
+CDNOW and gift. The searched arms (`archive`, `floor50`) chose their winners under it, and
+the **val CE** column of a searched run carries it. Rerunning electronics · `archive` · no
+cluster label with the fix moved the winners off batch 256 (18–19 of 20 to 1–2 of 20),
+lowered ValendinLSTM's MAPE by 9.4 points and left the LSTM collapsed
+(`docs/model-selection.md` §3.9). The tables below are the archived runs, unchanged.
+
 **Why the results are split by arm and input set.** A configuration (a *cell*) is panel ×
 arm × model × input set, and holds 20 runs. Results are never pooled across arms or input
 sets: the arm decides which hyperparameters are searched at all, and the inputs change
@@ -1180,6 +1189,12 @@ one extra input. The table shows, for every searched cell, what the search chose
   label it picks batch 64 (9 of 20 for electronics' LSTM, 17–20 otherwise), trains 13–29
   epochs and ranks customers (Spearman 0.17–0.30). On CDNOW and gift the search picks batch
   64 with or without the label.
+  - *Most of the batch-256 preference was the score, not the label.* The archived
+    validation loss read 4–5% low at batch 256 on electronics with or without the label,
+    and 6–7% low on multichannel. Without the label, the real gain of a smaller batch is
+    smaller than that discount; with it, the gain (about 9% lower loss) outweighs it. With
+    the score fixed, the no-label searches on electronics pick batch 64 or 128 in 37 of 40
+    studies (`docs/model-selection.md` §3.9).
 - **With the label, the search picks a lower learning rate** in 6 of the 8 pairs
   (electronics 1.4e-3 against 2.1e-3 for the LSTM, 1.1e-3 against 1.9e-3 for ValendinLSTM;
   equal on multichannel's LSTM; higher on CDNOW's ValendinLSTM), **and more dropout** in all
@@ -1309,7 +1324,9 @@ per panel.
   against 13.5, and 29.8 against 10.0 for `ValendinLSTM · archive`. The bad label runs are
   that wider tail.
 - They reached a lower validation loss (0.081 against 0.089) and still produced the worst
-  totals: a better selection score did not protect the total.
+  totals: a better selection score did not protect the total. Part of that gap is the
+  archived score: the label runs ran mostly at batch 64, the no-label runs at batch 256,
+  where the score read about 4% low, so the true gap is larger than it looks.
 
 **D. Gift has no type.**
 - Only 4% of gift's MAPE variance lies between cells. Its worst totals come from six of
@@ -1355,7 +1372,8 @@ always an over-forecast; on gift, an under-forecast. A bad ranking is a collapse
 forecast. The two are mostly different runs (1–5 shared per panel).
 
 **1. The cluster column decides the batch size the search picks, and that decides the
-collapse.**
+collapse.** Part of this was an artefact of the archived validation score, which favoured
+batch 256 on electronics and multichannel (ADR-0010); see the last bullet.
 - On electronics and multichannel *without* the cluster column, Optuna picks batch 256 in
   17–20 of 20 runs. Training stops after 3–8 epochs (24–36 updates) and the forecast
   collapses. This produces 13 of multichannel's 16 worst totals and most of electronics'
@@ -1364,6 +1382,9 @@ collapse.**
   collapses, and Spearman is 0.17–0.30. It also picks a lower learning rate (6 of 8 pairs)
   and more dropout (4 of 4 LSTM pairs).
 - On CDNOW and gift, Optuna picks batch 64 either way.
+- With the score fixed, electronics' no-label searches pick batch 64 or 128 in 37 of 40
+  studies. ValendinLSTM then trains longer and improves (MAPE −9.4 [−16.0, −3.0]), but the
+  LSTM still stops after about 4 epochs and collapses (`docs/model-selection.md` §3.9).
 
 **2. The cluster column prevents collapse but makes the total less stable.**
 - On electronics, median MAPE is the same with and without it (54 against 54), but the
@@ -1397,8 +1418,10 @@ by +100 to +350%. The same recipe reading only `Transactions` (family T′, with
 inputs; which part matters is unknown.
 
 **Implications.**
-- On electronics and multichannel without the cluster column, remove batch 256 from the
-  search or impose a minimum number of epochs.
+- The batch-dependent validation score is fixed (ADR-0010). Rerun the searched cells on
+  multichannel, where its bias was largest, before quoting their numbers.
+- The LSTM's collapse on electronics survives the fix: test a minimum number of epochs or
+  a different pruner on top of it.
 - With the cluster column, test a lower bound on the learning rate.
 - Always report a configuration as the distribution over its 20 runs.
 
@@ -1406,6 +1429,10 @@ All of this is descriptive: each point needs its own experiment before it become
 
 ## 9. Limits
 
+- Every searched run in this doc predates ADR-0010 and was selected under a validation
+  score that moved with the batch size. Only one cell (electronics · `archive` · no cluster
+  label) has been rerun with the fix (`docs/model-selection.md` §3.9); validation losses
+  quoted across batch sizes are not comparable.
 - Four panels plus electronic_5y, each reported separately. No measured panel
   characteristic predicts where a floor helps.
 - §3.2–3.4 rest on 3 runs per panel at one hyperparameter setting.
