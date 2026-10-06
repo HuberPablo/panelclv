@@ -185,15 +185,60 @@ one.
 | family | what | status |
 | --- | --- | --- |
 | U′ | electronics · `archive` · no cluster label, rerun with the fixed score; archive search space restored | complete, §3.1 (`.scratch/score-fix/`) |
+| EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning | running on vast.ai |
 
-## 5. Next tests, in order
+## 5. Tests owed
 
-1. **Multichannel rerun** with the fixed score: `archive` · no cluster label, both models,
-   20 replications (about 4 hours locally). Its bias was the largest (−6.2%).
-2. **Pruner comparison** on electronics · `archive` · no cluster label: current rule,
-   Hyperband, off; 20 replications each.
-3. **Training floor** for the LSTM on the same cell, on top of the fix.
-4. **Refit learning rate:** checkpoint against refit forecasts, by tuned learning rate.
+Every test changes one thing against a fixed-score baseline and is compared on MAPE, bias
+and Spearman with independent bootstrap intervals, plus which batch, learning rate and
+kept epoch the search picks, the number of collapsed runs, and GPU time per study.
 
-Each test changes one thing against the fixed-score baseline, and each is compared on
-MAPE, bias and Spearman with independent bootstrap intervals.
+| # | Test | Changes | Question |
+| --- | --- | --- | --- |
+| 0 | **Epoch probe** (§5.1) | nothing; every trial trains 150 epochs and its curve is recorded | when do trials become distinguishable, and when does a single run leave its flat start? Sets the pruner's warm-up and `min_epochs` from data |
+| 1 | **Current vs new settings** | the fixed score plus a `min_epochs` floor set by test 0, ValendinLSTM, all four panels | do the two changes together improve the forecast? Baseline: family U `archive` · no cluster label (no rerun needed) |
+| 2 | **Pruner** | current `MedianPruner` vs `HyperbandPruner` (`min_resource` from test 0, η = 3) vs none | does pruning at epoch 4 discard trials that would have won, and does pruning pay at all? |
+| 2b | **Hyperband η** | η = 3 vs η = 2, only if test 2 favours Hyperband | does gentler pruning change the winners? |
+| 3 | **Improvement threshold** | absolute 1e-4 vs a relative one, on multichannel | does the 4× stricter rule cut multichannel's training short? |
+| 4 | **Refit learning rate** | checkpoint vs refit forecasts, related to each winner's tuned learning rate | does refitting at 1e-3 damage winners tuned at a low rate? |
+
+### 5.1 Test 0: the epoch probe
+
+**Why.** The pruner's warm-up (3 epochs) and the `min_epochs` floor (0, 50 or 90 in the
+archive) were set by convention or precedent. Both should be set where the curves say:
+- the **warm-up** (or Hyperband's first rung) where *trials* become distinguishable from
+  one another, since pruning before that point discards trials at random;
+- the **floor** past the point where a *single run* leaves its flat start, since early
+  stopping before that point ends runs that had not begun to learn.
+
+**Design.** `scripts/run_epoch_probe.py`, run on vast.ai.
+- ValendinLSTM only, with count and week as inputs and no cluster label: family U's
+  `archive` · no cluster label configuration, on all four panels.
+- **20 trials per panel**, each a set of training settings drawn at random from the
+  archive search space (learning rate 1e-4–3e-3 log, weight decay 1e-6–1e-2 log, batch
+  {64, 128, 256}). Random rather than TPE, so the trials represent the space rather than
+  one search's preferences. The same 20 draws on every panel, seeded from one config
+  value.
+- Each trial trains **150 epochs with no early stopping and no pruning**, under the fixed
+  score (ADR-0010). The validation loss is recorded at every epoch.
+- At epochs 5, 10, 20, 30, 50, 75, 100 and 150 the weights are **rolled out over the
+  validation window** (warm-up on the periods before it, 100 paths) and scored with
+  `compute_forecast_metrics` plus Spearman, the family V procedure. The holdout is never
+  touched, so nothing chosen from this probe has seen the data it will be tested on.
+- 80 work items (4 panels × 20 trials). Output per item in
+  `Studies/epoch_probe__ValendinLSTM__<panel>__tNN/`: `history.csv` (per epoch) and
+  `rollouts.csv` (per checkpoint), with `results.csv` written last as the completion
+  marker the fleet tooling checks.
+
+**Analysis** (`--report`), per panel:
+- **Distinguishable:** the first epoch at which the trials' ranking agrees with their
+  final ranking (rank correlation ≥ 0.8), by validation loss and by validation-rollout
+  MAPE. This gives the warm-up.
+- **Flat start:** for each trial, the first epoch whose validation loss beats epoch 1's by
+  more than the stopping rule's 1e-4, and the epoch where it reaches half of its total
+  improvement; the median over trials gives the floor. Alongside: the epoch at which
+  patience 7 would have stopped each trial, and how far that is from its best.
+- Plots of validation loss and rollout MAPE against epoch, one line per trial.
+
+The floor it gives replaces the 50 proposed for test 1, and the warm-up gives test 2's
+`min_resource`.
