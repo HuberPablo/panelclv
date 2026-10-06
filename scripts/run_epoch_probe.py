@@ -119,12 +119,27 @@ def work_list() -> list[tuple[str, str, int]]:
     return [(c, p, t) for t in range(N_TRIALS) for c in CALS for p in panels_of(c)]
 
 
+# Customers rolled out at once. The warm-up reads every customer's whole pre-validation
+# history in one pass; on the 5y split (3,755 customers x 208 weeks) that needs about
+# 8 GB and crashed an 8 GB card. A customer's rollout never reads another's, so chunking
+# changes nothing but the memory peak (and which random draws each customer gets).
+ROLLOUT_CHUNK = 1000
+
+
 def score_validation_rollout(model, view: dict, seed: int, device: str) -> dict:
     """Roll a copy of `model` out over the validation window and score it."""
     rollout = copy.deepcopy(model).to_rollout()
-    forecast = rollout_for(FAMILY)(rollout, view, n_simulations=N_PATHS, seed=seed,
-                                   device=device, return_simulations=False)
-    pred, actual = forecast["prediction_mean"], forecast["actual"]
+    preds, actuals = [], []
+    n = np.asarray(view["calibration"]).shape[0]
+    for i, start in enumerate(range(0, n, ROLLOUT_CHUNK)):
+        part = dict(view)
+        part["calibration"] = view["calibration"][start:start + ROLLOUT_CHUNK]
+        part["holdout"] = view["holdout"][start:start + ROLLOUT_CHUNK]
+        forecast = rollout_for(FAMILY)(rollout, part, n_simulations=N_PATHS, seed=seed + i,
+                                       device=device, return_simulations=False)
+        preds.append(forecast["prediction_mean"])
+        actuals.append(forecast["actual"])
+    pred, actual = np.concatenate(preds), np.concatenate(actuals)
     return {**compute_forecast_metrics(actual, pred),
             "spearman": spearman(pred.sum(axis=1), actual.sum(axis=1)),
             "forecast_cv": float(pred.sum(axis=1).std() / max(pred.sum(axis=1).mean(), 1e-12))}
