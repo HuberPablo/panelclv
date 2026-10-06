@@ -187,6 +187,7 @@ one.
 | U′ | electronics · `archive` · no cluster label, rerun with the fixed score; archive search space restored | complete, §3.1 (`.scratch/score-fix/`) |
 | EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning, 2y windows | complete, §5.1 (76 items on vast.ai, 4 locally; $0.84) |
 | EP-3y/5y | the same probe on the 3y windows (electronics, gift, multichannel) and the 5y electronics split | complete, §5.2 (78 items on vast.ai, 2 locally) |
+| SR | holdout test of PQ1: ValendinLSTM searches under patience 7 and under PQ1, all 8 panel-calibrations, 20 replications each | complete, §5.3 (320 studies on vast.ai, 7 Oct; $8.74) |
 
 ## 5. Tests owed
 
@@ -197,7 +198,7 @@ kept epoch the search picks, the number of collapsed runs, and GPU time per stud
 | # | Test | Changes | Question |
 | --- | --- | --- | --- |
 | 0 | **Epoch probe** (§5.1) | nothing; every trial trains 150 epochs and its curve is recorded | when do trials become distinguishable, and when does a single run leave its flat start? Sets the pruner's warm-up and `min_epochs` from data |
-| 1 | **Current vs new settings** | the fixed score, Prechelt's PQ1 stopping rule (§5.2) and no pruning, ValendinLSTM, all four panels | do the changes together improve the holdout forecast? Baseline: family U `archive` · no cluster label (no rerun needed) |
+| 1 | **Current vs new settings** | Prechelt's PQ1 stopping rule (§5.2) against patience 7, under the fixed score, ValendinLSTM, all eight panel-calibrations | does PQ1 improve the holdout forecast? **Done with the pruner on in both arms (§5.3)**; PQ1 with pruning off is still owed |
 | 2 | **Pruner** | current `MedianPruner` vs `HyperbandPruner` (`min_resource` from test 0, η = 3) vs none | does pruning at epoch 4 discard trials that would have won, and does pruning pay at all? |
 | 2b | **Hyperband η** | η = 3 vs η = 2, only if test 2 favours Hyperband | does gentler pruning change the winners? |
 | 3 | **Improvement threshold** | absolute 1e-4 vs a relative one, on multichannel | does the 4× stricter rule cut multichannel's training short? |
@@ -561,3 +562,63 @@ the gap between the current rule and the best fixed epoch on every one, and beat
 fixed epoch on three. What remains is **one
 holdout test** with the settings frozen: test 1.
 
+### 5.3 Holdout test of PQ1
+
+§5.2 chose PQ1 on the validation window. This tests it on the holdout, inside full
+searches.
+
+**Design.** `scripts/run_stopping_rule.py`. ValendinLSTM (count and week, both embedded),
+100 TPE trials, 20 replications, 500 paths, the ADR-0008 refit: family N's protocol. Two
+arms under today's code, including the per-cell score (ADR-0010), identical but for the
+stopping rule: `patience7` and `pq1` (`fit_model(stop_pq=1.0)`). Both allow 200 epochs;
+the search space is the archive's (weight decay searched, batch {64, 128, 256}); **the
+default pruner is on in both arms**. All eight panel-calibrations of §5.2. Δ is PQ1 minus
+patience 7, resampled independently (training is unseeded and the two searches diverge
+from their first trial). Bold marks an interval that excludes 0.
+
+| panel | median kept epoch | Δ MAPE | Δ \|bias\| % | Δ bias % | Δ Spearman |
+| --- | --- | --- | --- | --- | --- |
+| 2y cdnow | 21.5 → 23 | −11.3 [−28.8, +3.3] | −8.8 [−27.5, +7.9] | −16.7 [−45.2, +9.9] | −0.032 [−0.089, +0.009] |
+| 2y electronics | 6.5 → 54 | **−7.9 [−14.9, −1.1]** | −3.8 [−14.1, +6.4] | −3.5 [−21.7, +14.7] | **+0.166 [+0.113, +0.217]** |
+| 2y gift | 26.5 → 35.5 | +0.5 [−3.3, +4.2] | +1.0 [−6.1, +8.0] | **−10.4 [−20.7, −0.5]** | +0.006 [−0.003, +0.015] |
+| 2y multichannel | 17.5 → 65.5 | −5.1 [−11.5, +1.6] | −7.8 [−19.4, +4.2] | **−16.1 [−30.3, −1.6]** | **+0.135 [+0.105, +0.162]** |
+| 3y electronics | 39 → 65 | +2.5 [−2.4, +7.3] | +9.8 [−0.2, +19.8] | **−20.1 [−36.2, −3.7]** | +0.041 [−0.020, +0.101] |
+| 3y gift | 30.5 → 46 | +1.3 [−0.6, +3.2] | −0.2 [−4.9, +4.4] | +4.2 [−3.7, +11.5] | −0.003 [−0.007, +0.002] |
+| 3y multichannel | 30 → 63 | −8.1 [−17.7, +0.8] | −13.1 [−29.7, +3.1] | −13.2 [−31.4, +4.4] | **+0.135 [+0.087, +0.180]** |
+| 5y electronics | 22.5 → 28.5 | −2.5 [−5.8, +0.9] | −4.9 [−10.5, +0.8] | −4.3 [−11.3, +3.0] | +0.002 [−0.001, +0.004] |
+
+The arms' levels (patience 7 → PQ1): MAPE 52.4 → 41.1, 57.9 → 49.9, 29.0 → 29.5,
+60.8 → 55.7, 43.3 → 45.7, 26.3 → 27.6, 67.2 → 59.1 and 20.1 → 17.6; Spearman 0.41 → 0.38,
+0.11 → 0.27, 0.37 → 0.37, 0.03 → 0.16, 0.23 → 0.27, 0.44 → 0.43, 0.10 → 0.24 and
+0.40 → 0.41, in the table's order. RMSE moves only in the fourth decimal on every panel.
+
+**What it shows.**
+- **PQ1 helps where patience 7 cut training shortest.** On 2y electronics, 2y
+  multichannel and 3y multichannel, the winners' kept epoch rises from 6.5–30 to 54–65.
+  Customer ranking improves on all three (Spearman +0.13 to +0.17, the only effect
+  supported on every one of them): the collapse of `docs/insight-training-efficiency.md`
+  §8 type A recedes. The total improves too, supported on 2y electronics (MAPE −7.9) and
+  in the same direction on the two multichannel panels (MAPE −5 and −8, |bias| −8 and
+  −13, intervals reaching just past 0).
+- **Where patience 7 already trained long enough, PQ1 changes nothing measurable**: 2y
+  gift, 3y gift, CDNOW and 5y electronics, whose kept epochs move by only 1.5–16. CDNOW's
+  MAPE −11 and 5y's −2.5 point the right way with wide intervals.
+- **One cost: a shift towards under-forecasting.** The bias falls on every panel but 3y
+  gift, and the shift is supported on 2y gift (−10) and 3y electronics (−20, to −29%).
+  On 3y electronics that turns a −9% under-forecast into −29%, and |bias| rises by about
+  10 points (interval just reaching 0). Longer training lowers the forecast level; where
+  patience 7 over-forecast this helps, where it already under-forecast it hurts.
+- **The holdout gain is far smaller than the validation gain.** On the validation window
+  PQ1 lowered MAPE by 19–37 points (§5.2); on the holdout it moves it by +2.5 to −11. Two reasons are
+  visible here. The pruner, on in both arms, keeps cutting long trials, so PQ1's winners
+  stop at a median epoch of 23–66, against 33–105 for the probe's unpruned runs. And the
+  validation window is not the holdout: the over-forecast that longer training removes on
+  the validation window is partly absent from the holdout (`docs/model-selection.md`
+  §3.3).
+
+**Verdict.** PQ1 is a defensible replacement for patience 7: it never makes the ranking
+worse, makes it clearly better on the three panels where training was shortest, and
+lowers the total error there. It is not a uniform improvement in the level of the
+forecast, and on one panel it overshoots into under-forecasting. The test of the full
+setting §5.2 recommends — PQ1 **with pruning off** — has not been run; with the pruner on,
+this measures PQ1 as a drop-in change to the archived search.
