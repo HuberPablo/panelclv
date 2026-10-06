@@ -522,6 +522,28 @@ PQ1 in full (MAPE / |bias| % / Spearman / collapsed trials of 20):
   earlier), and PQ1 reaches Spearman 0.30: the panel size, not only training
   length, decides whether ValendinLSTM learns to tell customers apart.
 
+**How the runs went.** Both probes ran on rented vast.ai boxes, 20 (2y) and 30 (3y and
+5y) at a time, driven by `VastAI/state/probe_run.sh` and `probecal_run.sh`, and cost
+$0.84 and $1.04. Things a reader re-running them should know:
+- **Six items ran on the workstation's GPU** (2y electronics t04, t09, t14, t19; 5y
+  electronics t08; 3y gift t16), after their vast.ai boxes failed to start repeatedly.
+  Same code, different hardware; training is unseeded in any case, so a local item is one
+  more draw, not a different condition.
+- **The 5y validation rollout ran out of GPU memory** on two 8 GB cards: the warm-up read
+  all 3,755 customers' 208 weeks in one pass (about 8 GB). The probe now rolls customers
+  out in chunks of 1,000 (`ROLLOUT_CHUNK` in `scripts/run_epoch_probe.py`). A customer's
+  rollout never reads another's, so this changes only the memory peak and which random
+  draws each customer gets. The items those boxes lost were rerun with the fix; items
+  that finished before it are unaffected.
+- **35 of 85 rented boxes failed to start**: 14 on a host driver too old for the image
+  (CUDA error 804, `VastAI/known_failures.md` F2, because the driver's offer query lacked
+  the CUDA floor), the rest never finished loading, were unreachable or vanished. Failed
+  boxes produce no results, so this cost time and a little money, not data.
+- **A box that was retrying when the fleet drained could have retrained a finished
+  item**, overwriting it with a new draw. None did: every launch was seeded with the
+  finished items' completion markers, and the local items ran only after the vast.ai
+  boxes for the same workers had been destroyed.
+
 ![3y electronics](figures/epoch-probe/cal3y/electronics.png)
 
 ![3y gift](figures/epoch-probe/cal3y/gift.png)

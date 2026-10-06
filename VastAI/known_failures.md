@@ -68,6 +68,15 @@ search floor should track the image tag.
 **Fix.** Not repairable from our side. Destroy the instance and rent another. To
 prevent it, raise the CUDA floor in `vast_search.py` to match the image tag.
 
+**Recurrence, 2026-10-06.** `vast_search.py` now carries the floor (`IMAGE_CUDA =
+"12.9"`), but a driver script that builds its own `vastai search offers` query bypasses
+it. The epoch-probe drivers copied their query from `VastAI/state/attn_run.sh`, which has
+no `cuda_max_good` term. Of 85 rentals across the two runs, 35 failed to start and 14 of
+those were this error; one worker landed on an old-driver host five times running,
+because the cheapest offers are disproportionately those. Every hand-written offer query must include
+`cuda_max_good>=12.9` (the drivers `probe_run.sh`, `probecal_run.sh` and
+`probecal_extra.sh` now do).
+
 ---
 
 ## F3 — SSH key never injected into the container
