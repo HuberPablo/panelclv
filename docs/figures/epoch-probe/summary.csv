@@ -1,0 +1,9 @@
+,cdnow,electronics,gift,multichannel
+trials,20.0,20.0,20.0,20.0
+distinguishable (val loss),24.0,69.0,76.0,54.0
+distinguishable (rollout MAPE),150.0,150.0,150.0,150.0
+leaves epoch-1 loss (median),2.0,2.0,2.0,2.0
+half of its improvement (median),3.0,3.0,3.0,4.0
+own best epoch (median),67.5,137.5,121.0,135.0
+patience 7 stops at (median),19.0,16.0,13.0,15.0
+"loss lost by stopping, % (median)",7.34,3.35,5.41,4.46

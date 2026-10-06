@@ -203,17 +203,21 @@ def check_complete() -> int:
 # ---------------------------------------------------------------------------
 
 
-def replay_stopping(val: np.ndarray) -> tuple[int, int]:
-    """(stop epoch, kept epoch), 1-based, under `fit_model`'s rule with no floor."""
+def replay_stopping(val: np.ndarray, floor: int = 0) -> tuple[int, int]:
+    """(stop epoch, kept epoch), 1-based, under `fit_model`'s rule with `min_epochs=floor`."""
     best, best_epoch, waited = np.inf, 0, 0
     for e, v in enumerate(val, start=1):
         if v + MIN_DELTA < best:
             best, best_epoch, waited = v, e, 0
         else:
             waited += 1
-        if waited >= PATIENCE:
+        if e >= floor and waited >= PATIENCE:
             return e, best_epoch
     return len(val), best_epoch
+
+
+# The floor the probe proposes (§5.1), drawn against the current rule in the figures.
+PROPOSED_FLOOR = 100
 
 
 def first_stable(epochs: list[int], rhos: list[float], level: float = 0.8) -> float:
@@ -287,20 +291,41 @@ def report(out_dir: Path) -> None:
             "loss lost by stopping, % (median)": round(pt.gap.median(), 2),
         })
 
-        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+        # Where each stopping rule would end, replayed on the recorded curves.
+        kept_now = int(np.median([replay_stopping(h.val_loss.values)[1] for h in hist.values()]))
+        kept_new = int(np.median([replay_stopping(h.val_loss.values, PROPOSED_FLOOR)[1]
+                                  for h in hist.values()]))
+        own_best = int(pt.best.median())
+        B = pd.DataFrame({t: r.set_index("epoch").bias_percent.abs() for t, r in roll.items()})
+        C = pd.DataFrame({t: r.set_index("epoch").forecast_cv for t, r in roll.items()})
+
+        fig, ax = plt.subplots(1, 3, figsize=(16, 4.2))
         for t in V:
-            ax[0].plot(epochs, V[t], lw=0.8)
-            ax[1].plot(ck, M[t], lw=0.8, marker="o", ms=2)
+            ax[0].plot(epochs, V[t], lw=0.6, color="0.75")
+            ax[1].plot(ck, M[t], lw=0.6, color="0.75")
+        ax[0].plot(epochs, V.median(axis=1), lw=2, color="k", label="median over trials")
+        ax[1].plot(ck, M.median(axis=1), lw=2, color="k", marker="o", label="median MAPE")
+        ax[1].plot(ck, B.median(axis=1), lw=2, color="tab:purple", marker="s",
+                   label="median |bias| %")
+        ax[2].bar(ck, (C < 0.2).sum(axis=1), width=4, color="tab:red")
+        for a in ax:
+            a.axvline(kept_now, color="tab:orange", ls="--",
+                      label=f"patience 7 keeps epoch {kept_now}")
+            a.axvline(kept_new, color="tab:green", ls="--",
+                      label=f"floor {PROPOSED_FLOOR} keeps epoch {kept_new}")
+            a.axvline(own_best, color="tab:blue", ls=":", label=f"loss minimum, epoch {own_best}")
         # The first epochs sit orders of magnitude above the rest; scale to what follows
         # them so the late differences between trials are visible.
         tail = V.iloc[4:].values.ravel()
         ax[0].set_ylim(np.nanmin(tail) * 0.98, np.nanquantile(tail, 0.98) * 1.02)
         ax[1].set_yscale("log")
         ax[0].set(title=f"{panel}: validation loss", xlabel="epoch", ylabel="CE")
-        ax[1].set(title=f"{panel}: validation-rollout MAPE", xlabel="epoch",
-                  ylabel="MAPE (log)")
+        ax[1].set(title="validation-window forecast", xlabel="epoch", ylabel="% (log)")
+        ax[2].set(title="collapsed trials (forecast CV < 0.2)", xlabel="epoch",
+                  ylabel=f"of {len(hist)}")
+        ax[0].legend(fontsize=7); ax[1].legend(fontsize=7)
         fig.tight_layout()
-        fig.savefig(out_dir / f"{panel}.png", dpi=120)
+        fig.savefig(out_dir / f"{panel}.png", dpi=110)
         plt.close(fig)
 
     table = pd.DataFrame(rows).set_index("panel").T

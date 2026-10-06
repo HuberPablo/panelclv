@@ -330,3 +330,98 @@ final rollout poorly (ρ −0.2 to +0.6): forecasts reorder as training goes on.
 Limits: ValendinLSTM only; 20 trials, so a single correlation carries about ±0.4; the
 rollouts are of the trained weights without the ADR-0008 refit; the archive search
 space, sampled at random rather than by TPE.
+
+### 5.2 Choosing the settings from calibration data only
+
+**The aim.** Set every training and search setting using only data inside the
+calibration window — the validation loss and the validation-window forecast — then freeze
+them and touch the holdout once, for the final evaluation. If that works, the settings are
+justified without any risk of having been tuned on the data they are judged on.
+
+#### What the literature does
+
+| Practice | References | Assumption | Holds here? |
+| --- | --- | --- | --- |
+| Early stopping on a validation split, the stopping rule chosen from validation curves | Prechelt (1998), *Early Stopping — But When?*; Bengio (2012), *Practical recommendations for gradient-based training*; Goodfellow et al. (2016) §7.8 | the rule should let a run reach its validation minimum | **yes** (below) |
+| Validate on the forecasting task over the horizon, not on a one-step loss | Tashman (2000); M-competition practice | the validation score measures what is reported | **partly**: one-step CE does not track the forecast (§5.1, `docs/model-selection.md` §3) |
+| Multi-fidelity search: pruning, Hyperband, learning-curve extrapolation | Li et al. (2018), *Hyperband*; Falkner et al. (2018), *BOHB*; Domhan et al. (2015) | trials rank early as they rank at the end | **no**: the CE ranking settles only at epoch 24–76 and early CE predicts the final forecast on one panel of four (§5.1) |
+| Rolling-origin validation: several windows, not one | Tashman (2000); Bergmeir & Benítez (2012); Bergmeir, Hyndman & Koo (2018) | one validation window may not represent the next period | not tested yet |
+
+The references are the standard attributions; their exact sections should be checked
+before they are cited in the thesis.
+
+#### The procedure, applied
+
+1. **Pruning: off.** Its own assumption fails on the validation data.
+2. **Stopping rule from the validation loss alone.** Replaying `fit_model`'s rule on the
+   80 probe curves, patience 7 with no floor stops runs 3–7% above their own loss minimum;
+   a floor of 100 epochs with patience 7 brings every panel within 0.7%. The floor only
+   delays stopping and never forces late weights, so the epoch kept is still the one with
+   the lowest validation loss (65 on CDNOW, where the loss turns back up after that).
+3. **Check against the validation-window forecast**, still calibration data: does the rule
+   chosen on the loss land where the forecast is good?
+
+#### The curves
+
+Each figure: left, the validation loss of the 20 trials (grey) and their median (black);
+middle, the median validation-window MAPE and |bias| (trials in grey); right, how many of
+the 20 trials have collapsed (forecast CV < 0.2). Dashed lines mark the median epoch kept
+by the current rule (orange) and by the floor-100 rule (green); the dotted line is the
+median epoch of the loss minimum. Regenerate with
+`python scripts/run_epoch_probe.py --report --out docs/figures/epoch-probe`.
+
+![CDNOW](figures/epoch-probe/cdnow.png)
+
+![electronics](figures/epoch-probe/electronics.png)
+
+![gift](figures/epoch-probe/gift.png)
+
+![multichannel](figures/epoch-probe/multichannel.png)
+
+#### Did it work?
+
+Each rule's validation-window forecast at the epoch it keeps, medians over the 20 trials.
+The *oracle* row picks the single checkpoint with the best median validation forecast:
+the best any epoch rule could do on this window. It also uses calibration data only, but
+needs the rollouts, which the loss-based rule does not.
+
+| panel | rule | epoch kept | MAPE | \|bias\| % | Spearman | collapsed of 20 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| cdnow | patience 7 (current) | 12 | 65.1 | 65.1 | 0.09 | 4 |
+| | **floor 100 + patience 7** | 65 | **44.9** | **42.1** | **0.26** | **0** |
+| | oracle | 30 | 46.1 | 46.0 | 0.24 | 1 |
+| electronics | patience 7 (current) | 9 | 79.3 | 64.6 | 0.02 | 17 |
+| | **floor 100 + patience 7** | 88 | **43.7** | 28.3 | 0.05 | 14 |
+| | oracle | 100 | 45.5 | 26.1 | 0.07 | 14 |
+| gift | patience 7 (current) | 6 | 78.0 | 35.1 | 0.00 | 19 |
+| | **floor 100 + patience 7** | 87 | 46.6 | 24.5 | 0.02 | 16 |
+| | oracle | 150 | 38.8 | 14.6 | 0.09 | 9 |
+| multichannel | patience 7 (current) | 8 | 99.3 | 80.5 | −0.00 | 9 |
+| | **floor 100 + patience 7** | 87 | 63.6 | 29.8 | −0.00 | 9 |
+| | oracle | 150 | 56.4 | 28.0 | 0.03 | 6 |
+
+(The forecast is scored at the latest checkpoint at or before the epoch kept, since the
+rollout was recorded at 8 epochs only.)
+
+- **Yes on CDNOW and electronics.** The rule set from the loss alone matches the oracle:
+  it closes all of the gap between the current rule and the best epoch (MAPE 65 → 45 and
+  79 → 44). On CDNOW the loss itself turns up when the model starts to over-fit, so the
+  loss-based rule stops in the right place without seeing a forecast.
+- **Mostly on gift and multichannel.** It closes 80% and 83% of the MAPE gap (78 → 47
+  against an oracle of 39; 99 → 64 against 56). The rest is training past epoch 100: the
+  forecast is still improving at 150 while the floor-100 rule keeps epoch 87, because the
+  loss has nearly flattened.
+- **It does not fix customer ranking.** Spearman stays near 0 on electronics, gift and
+  multichannel under every rule, and 9–16 of 20 trials remain collapsed. Training longer
+  repairs the level of the forecast; ValendinLSTM without a customer-level input still
+  cannot tell customers apart there (`docs/insight-training-efficiency.md` §8: the label
+  is what lets it rank).
+
+**Conclusion.** For the stopping rule and the pruner, calibration data alone is enough:
+the loss says to stop no earlier than epoch 100, the loss-ranking test says not to prune
+before the curves settle, and the validation forecast confirms the result on all four
+panels. Two things remain before it can be claimed for the holdout:
+- **another validation window** (rolling origin): the same replay on an earlier window
+  inside calibration, to show the choice is not specific to one window;
+- **one holdout test** with the settings frozen: test 1.
+
