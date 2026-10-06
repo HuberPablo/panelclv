@@ -185,7 +185,7 @@ one.
 | family | what | status |
 | --- | --- | --- |
 | U′ | electronics · `archive` · no cluster label, rerun with the fixed score; archive search space restored | complete, §3.1 (`.scratch/score-fix/`) |
-| EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning | running on vast.ai |
+| EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning | complete, §5.1 (76 items on vast.ai, 4 locally; $0.84) |
 
 ## 5. Tests owed
 
@@ -252,3 +252,81 @@ archive) were set by convention or precedent. Both should be set where the curve
 
 The floor it gives replaces the 50 proposed for test 1, and the warm-up gives test 2's
 `min_resource`.
+
+#### Results (6 October 2026)
+
+`python scripts/run_epoch_probe.py --report`; plots in `.scratch/epoch-probe/`. 20 trials
+per panel, medians over trials unless stated.
+
+**The validation loss falls fast, then slowly, for a long time.**
+
+| | cdnow | electronics | gift | multichannel |
+| --- | ---: | ---: | ---: | ---: |
+| epoch where the loss first beats epoch 1's | 2 | 2 | 2 | 2 |
+| epoch with half of the run's total drop | 3 | 3 | 3 | 4 |
+| the run's own best epoch | 68 | 138 | 121 | 135 |
+| where patience 7 stops it | 19 | 16 | 13 | 15 |
+| loss given up by stopping there | 7.3% | 3.4% | 5.4% | 4.5% |
+| trials rank as they will at the end (CE, ρ ≥ 0.8 from then on) | 24 | 69 | 76 | 54 |
+
+There is no flat start in the loss: half of each run's drop happens by epoch 3–4. What
+is slow is the rest. The loss keeps improving until epoch 68–138, while patience 7 ends
+runs at epoch 13–19, before the trials can even be told apart (epoch 24–76).
+
+**The forecast keeps improving long after patience 7 stops.** Validation-rollout medians
+over the 20 trials, by epoch; *collapsed* counts trials with forecast CV < 0.2:
+
+| panel | metric | 10 | 20 | 30 | 50 | 75 | 100 | 150 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| cdnow | MAPE | 59.5 | 56.8 | **46.1** | 46.3 | 55.5 | 65.7 | 75.3 |
+| | bias % | +59.5 | +37.0 | +23.7 | **+20.9** | +43.3 | +53.6 | +43.1 |
+| | collapsed | 7 | 1 | 1 | 1 | 0 | 0 | 0 |
+| electronics | MAPE | 83.6 | 64.9 | 50.2 | 50.7 | 51.2 | **45.5** | 47.9 |
+| | bias % | +44.9 | +42.7 | +31.9 | +20.2 | +19.6 | +18.3 | **+15.5** |
+| | collapsed | 16 | 18 | 20 | 18 | 17 | 14 | **9** |
+| gift | MAPE | 92.0 | 76.1 | 47.2 | 49.8 | 46.8 | 43.3 | **38.8** |
+| | bias % | +61.2 | +53.0 | +34.2 | +27.1 | +25.6 | +20.4 | **+12.1** |
+| | collapsed | 19 | 20 | 20 | 16 | 13 | 11 | **9** |
+| multichannel | MAPE | 100.6 | 80.8 | 70.5 | 65.6 | 61.0 | 57.8 | **56.4** |
+| | bias % | +76.1 | +50.6 | +44.1 | +34.9 | +23.7 | +25.6 | **+18.1** |
+| | collapsed | 11 | 13 | 14 | 12 | 6 | 5 | 6 |
+
+- **On electronics, gift and multichannel the forecast improves to epoch 100–150.** From
+  epoch 20, where patience 7 stops, to epoch 150, median MAPE falls by 17–37 points, the
+  bias by 27–41 points, and the number of collapsed trials halves. The collapse of §8's
+  failure type A is in large part training that stopped too early.
+- **CDNOW is the exception.** Its forecast is best at epoch 30–50 and worsens after,
+  while its loss keeps improving to epoch 68. Its calibration window is the shortest (39
+  weeks against 104), and it over-fits first.
+
+**Early CE predicts the final forecast on one panel only.** Rank correlation across
+trials between the CE at epoch t and the final validation-rollout result, positive when
+low CE goes with a good forecast:
+
+| panel | CE at t → final MAPE | CE at t → final Spearman |
+| --- | --- | --- |
+| cdnow | about 0 at every t (+0.0 to +0.3) | **negative**, −0.26 to −0.56: lower CE, worse ranking |
+| electronics | **negative** at epochs 1–10 (−0.25 to −0.38), −0.2 to +0.3 after | −0.15 to +0.46, unstable |
+| gift | −0.1 to +0.3 | **+0.3 to +0.8**, mostly 0.5–0.7 |
+| multichannel | **+0.2 to +0.8**, mostly above 0.5 | +0.3 to +0.8, at least 0.68 from epoch 20 |
+
+Pruning compares trials on CE. On CDNOW and electronics, early CE is unrelated or opposed
+to the forecast a trial ends with, so pruning there discards trials for a reason that
+has nothing to do with forecasting. Even the rollout MAPE at an early epoch predicts the
+final rollout poorly (ρ −0.2 to +0.6): forecasts reorder as training goes on.
+
+**What this sets.**
+- **Pruner (test 2): turn it off, or start it no earlier than epoch 50–75.** The current
+  warm-up of 3 judges trials 20–70 epochs before their CE ranking settles, on a number
+  that does not predict the forecast on two of four panels. Test 2 becomes current rule
+  against no pruning; Hyperband only with `min_resource` ≥ 50.
+- **Floor (test 1): about 100 epochs on electronics, gift and multichannel.** That is
+  where the forecast stops improving and close to where the loss reaches its own best
+  (121–138), so with the floor the CE-selected epoch lands where the forecast is good.
+- **CDNOW needs less.** Its forecast is best at 30–50 and worse by 100. One floor for all
+  four panels cannot be right; test 1 should use 100 on the three two-year panels and
+  about 30 on CDNOW, or report CDNOW separately.
+
+Limits: ValendinLSTM only; 20 trials, so a single correlation carries about ±0.4; the
+rollouts are of the trained weights without the ADR-0008 refit; the archive search
+space, sampled at random rather than by TPE.

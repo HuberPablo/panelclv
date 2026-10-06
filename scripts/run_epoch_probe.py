@@ -291,8 +291,14 @@ def report(out_dir: Path) -> None:
         for t in V:
             ax[0].plot(epochs, V[t], lw=0.8)
             ax[1].plot(ck, M[t], lw=0.8, marker="o", ms=2)
+        # The first epochs sit orders of magnitude above the rest; scale to what follows
+        # them so the late differences between trials are visible.
+        tail = V.iloc[4:].values.ravel()
+        ax[0].set_ylim(np.nanmin(tail) * 0.98, np.nanquantile(tail, 0.98) * 1.02)
+        ax[1].set_yscale("log")
         ax[0].set(title=f"{panel}: validation loss", xlabel="epoch", ylabel="CE")
-        ax[1].set(title=f"{panel}: validation-rollout MAPE", xlabel="epoch", ylabel="MAPE")
+        ax[1].set(title=f"{panel}: validation-rollout MAPE", xlabel="epoch",
+                  ylabel="MAPE (log)")
         fig.tight_layout()
         fig.savefig(out_dir / f"{panel}.png", dpi=120)
         plt.close(fig)
