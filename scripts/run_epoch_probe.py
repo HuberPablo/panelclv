@@ -16,8 +16,13 @@ for the space rather than for one search's preferences.
 and week, both embedded (`run_factorial.build_data`), under the per-cell validation score
 of ADR-0010.
 
-**One work item** is one (panel, trial). It writes
-`Studies/epoch_probe__ValendinLSTM__<panel>__tNN/`: `history.csv` (one row per epoch),
+**Calibrations.** `--calibration` picks the windows: `2y` (the four panels, the default),
+`3y` (electronics, gift and multichannel with three calibration years) or `5y` (the
+paper's electronics cohort on its 260-week split), as `run_real_panel_benchmarks` defines
+them; several may be given, comma-separated, for one fleet.
+
+**One work item** is one (calibration, panel, trial). It writes
+`Studies/epoch_probe[_cal3y|_cal5y]__ValendinLSTM__<panel>__tNN/`: `history.csv` (one row per epoch),
 `rollouts.csv` (one row per checkpoint epoch) and, last, `results.csv` — the completion
 marker `VastAI/supervise/pull_results.sh` and `reap_finished.sh` check.
 
@@ -26,6 +31,7 @@ Usage:
     python scripts/run_epoch_probe.py --worker 3/20        # a rented box's slice
     python scripts/run_epoch_probe.py --check-complete
     python scripts/run_epoch_probe.py --report             # tables + plots
+    python scripts/run_epoch_probe.py --worker 3/20 --calibration 3y,5y
 """
 
 from __future__ import annotations
@@ -49,7 +55,8 @@ from panelclv.trials import split_calibration
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_factorial import build_data                                  # noqa: E402
-from run_real_panel_benchmarks import WINDOWS, spearman               # noqa: E402
+from run_real_panel_benchmarks import CALIBRATIONS, calibration_tag, spearman  # noqa: E402
+from run_real_panel_benchmarks import build_data as build_benchmark_data       # noqa: E402
 from run_selection_rescore import validation_view                     # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -57,7 +64,9 @@ STUDIES_BASE = REPO_ROOT / "Studies"
 
 EXPERIMENT = "epoch_probe"
 MODEL, FAMILY = "ValendinLSTM", "valendin_lstm"
-PANELS = sorted(WINDOWS)
+PANELS = sorted(CALIBRATIONS["2y"])
+# The calibrations this invocation covers; `--calibration` sets it.
+CALS = ["2y"]
 BASE_SEED = 42
 N_TRIALS = 20
 N_EPOCHS = 150
@@ -85,13 +94,29 @@ def trial_settings() -> list[dict]:
     return out
 
 
-def suite_dir(panel: str, trial: int) -> Path:
-    return STUDIES_BASE / f"{EXPERIMENT}__{MODEL}__{panel}__t{trial:02d}"
+def panels_of(cal: str) -> list[str]:
+    return sorted(CALIBRATIONS[cal])
 
 
-def work_list() -> list[tuple[str, int]]:
-    """Trial-major, so a strided worker draws from every panel."""
-    return [(p, t) for t in range(N_TRIALS) for p in PANELS]
+def suite_dir(panel: str, trial: int, cal: str = "2y") -> Path:
+    return STUDIES_BASE / f"{EXPERIMENT}{calibration_tag(cal)}__{MODEL}__{panel}__t{trial:02d}"
+
+
+def load_panel(panel: str, cal: str) -> dict:
+    """The panel as ValendinLSTM reads it: count and week, both embedded.
+
+    `2y` goes through `run_factorial`, the configuration of family U's cell the probe
+    started from; the others through `run_real_panel_benchmarks`, which declares the 3y and
+    5y windows. The two build the same columns.
+    """
+    if cal == "2y":
+        return build_data(panel, MODEL, "no_cluster")
+    return build_benchmark_data(panel, cal)
+
+
+def work_list() -> list[tuple[str, str, int]]:
+    """Trial-major, so a strided worker draws from every panel of every calibration."""
+    return [(c, p, t) for t in range(N_TRIALS) for c in CALS for p in panels_of(c)]
 
 
 def score_validation_rollout(model, view: dict, seed: int, device: str) -> dict:
@@ -106,12 +131,13 @@ def score_validation_rollout(model, view: dict, seed: int, device: str) -> dict:
 
 
 def run_item(panel: str, trial: int, device: str, data: dict | None = None,
-             n_epochs: int = N_EPOCHS, checkpoints: tuple[int, ...] = CHECKPOINTS) -> Path:
+             n_epochs: int = N_EPOCHS, checkpoints: tuple[int, ...] = CHECKPOINTS,
+             cal: str = "2y") -> Path:
     """Train one trial for `n_epochs` with no stopping, recording its curve."""
     settings = trial_settings()[trial]
-    out = suite_dir(panel, trial)
+    out = suite_dir(panel, trial, cal)
     out.mkdir(parents=True, exist_ok=True)
-    data = data if data is not None else build_data(panel, MODEL, "no_cluster")
+    data = data if data is not None else load_panel(panel, cal)
     split = split_calibration(data, settings["batch_size"])
     view = validation_view(data)
     model = build_model(FAMILY, settings, split.recipe).to(device)
@@ -139,7 +165,7 @@ def run_item(panel: str, trial: int, device: str, data: dict | None = None,
     pd.DataFrame(history).to_csv(out / "history.csv", index=False)
     pd.DataFrame(rollouts).to_csv(out / "rollouts.csv", index=False)
     # Written last: its presence means the item is complete.
-    pd.DataFrame([{"panel": panel, **settings, "n_epochs": n_epochs,
+    pd.DataFrame([{"calibration": cal, "panel": panel, **settings, "n_epochs": n_epochs,
                    "seconds": round(time.time() - started, 1)}]).to_csv(
         out / "results.csv", index=False)
     return out
@@ -149,16 +175,17 @@ def run_worker(index: int, total: int) -> int:
     mine = work_list()[index - 1::total]
     print(f"worker {index}/{total}: {len(mine)} items", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    cache: dict[str, dict] = {}
-    for n, (panel, trial) in enumerate(mine, start=1):
-        if (suite_dir(panel, trial) / "results.csv").exists():
-            print(f"[{n}/{len(mine)}] {panel} t{trial:02d}: done, skipping", flush=True)
+    cache: dict[tuple[str, str], dict] = {}
+    for n, (cal, panel, trial) in enumerate(mine, start=1):
+        tag = f"{cal} {panel} t{trial:02d}"
+        if (suite_dir(panel, trial, cal) / "results.csv").exists():
+            print(f"[{n}/{len(mine)}] {tag}: done, skipping", flush=True)
             continue
-        if panel not in cache:
-            cache.clear()
-            cache[panel] = build_data(panel, MODEL, "no_cluster")
-        print(f"[{n}/{len(mine)}] {panel} t{trial:02d}: training", flush=True)
-        run_item(panel, trial, device, data=cache[panel])
+        if (cal, panel) not in cache:
+            cache.clear()               # one panel at a time; the 5y panel is large
+            cache[(cal, panel)] = load_panel(panel, cal)
+        print(f"[{n}/{len(mine)}] {tag}: training", flush=True)
+        run_item(panel, trial, device, data=cache[(cal, panel)], cal=cal)
     return 0
 
 
@@ -169,15 +196,17 @@ def preflight() -> int:
     real, failures = STUDIES_BASE, []
     with tempfile.TemporaryDirectory() as tmp:
         STUDIES_BASE = Path(tmp)
-        for panel in PANELS:
-            try:
-                out = run_item(panel, 0, device, n_epochs=3, checkpoints=(1, 2, 3))
-                r = pd.read_csv(out / "rollouts.csv")
-                print(f"  {panel:13s} ok  val loss {r.val_loss.iloc[-1]:.4f}  "
-                      f"val-rollout MAPE {r.mape_aggregate.iloc[-1]:.1f}")
-            except Exception as exc:                    # noqa: BLE001 — report them all
-                print(f"  {panel:13s} FAIL {type(exc).__name__}: {exc}")
-                failures.append(panel)
+        for cal in CALS:
+            for panel in panels_of(cal):
+                try:
+                    out = run_item(panel, 0, device, n_epochs=3, checkpoints=(1, 2, 3),
+                                   cal=cal)
+                    r = pd.read_csv(out / "rollouts.csv")
+                    print(f"  {cal} {panel:13s} ok  val loss {r.val_loss.iloc[-1]:.4f}  "
+                          f"val-rollout MAPE {r.mape_aggregate.iloc[-1]:.1f}")
+                except Exception as exc:                # noqa: BLE001 — report them all
+                    print(f"  {cal} {panel:13s} FAIL {type(exc).__name__}: {exc}")
+                    failures.append(f"{cal}/{panel}")
     STUDIES_BASE = real
     if failures:
         print(f"\nfailed: {failures}")
@@ -187,10 +216,12 @@ def preflight() -> int:
 
 
 def check_complete() -> int:
-    missing = [(p, t) for p, t in work_list() if not (suite_dir(p, t) / "results.csv").exists()]
-    for p in PANELS:
-        have = sum((suite_dir(p, t) / "results.csv").exists() for t in range(N_TRIALS))
-        print(f"{p:13s} {have:2d}/{N_TRIALS}")
+    missing = [w for w in work_list()
+               if not (suite_dir(w[1], w[2], w[0]) / "results.csv").exists()]
+    for c in CALS:
+        for p in panels_of(c):
+            have = sum((suite_dir(p, t, c) / "results.csv").exists() for t in range(N_TRIALS))
+            print(f"{c} {p:13s} {have:2d}/{N_TRIALS}")
     if missing:
         print(f"{len(missing)} missing")
         return 1
@@ -269,17 +300,18 @@ def first_stable(epochs: list[int], rhos: list[float], level: float = 0.8) -> fl
     return np.nan
 
 
-def report(out_dir: Path) -> None:
+def report(out_dir: Path, cal: str = "2y") -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     out_dir.mkdir(parents=True, exist_ok=True)
     rows, predict = [], []
+    PANELS = panels_of(cal)
     for panel in PANELS:
         hist, roll = {}, {}
         for t in range(N_TRIALS):
-            d = suite_dir(panel, t)
+            d = suite_dir(panel, t, cal)
             if (d / "results.csv").exists():
                 hist[t] = pd.read_csv(d / "history.csv")
                 roll[t] = pd.read_csv(d / "rollouts.csv")
@@ -379,7 +411,7 @@ def report(out_dir: Path) -> None:
     runs = {}
     for panel in PANELS:
         for t in range(N_TRIALS):
-            d = suite_dir(panel, t)
+            d = suite_dir(panel, t, cal)
             if (d / "results.csv").exists():
                 runs[(panel, t)] = (pd.read_csv(d / "history.csv"),
                                     pd.read_csv(d / "rollouts.csv").set_index("epoch"))
@@ -438,9 +470,16 @@ def main() -> None:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--check-complete", action="store_true")
     mode.add_argument("--report", action="store_true")
+    parser.add_argument("--calibration", default="2y",
+                        help="comma-separated, from " + ", ".join(CALIBRATIONS)
+                             + "; --report takes one")
     parser.add_argument("--out", default=str(REPO_ROOT / ".scratch" / "epoch-probe"),
                         help="where --report writes its plots and summary")
     args = parser.parse_args()
+    CALS[:] = args.calibration.split(",")
+    unknown = [c for c in CALS if c not in CALIBRATIONS]
+    if unknown:
+        parser.error(f"unknown calibration(s) {unknown}")
     if args.worker:
         i, n = (int(x) for x in args.worker.split("/"))
         sys.exit(run_worker(i, n))
@@ -448,7 +487,10 @@ def main() -> None:
         sys.exit(preflight())
     if args.check_complete:
         sys.exit(check_complete())
-    report(Path(args.out))
+    if len(CALS) != 1:
+        parser.error("--report takes one calibration")
+    out = Path(args.out) if CALS[0] == "2y" else Path(args.out) / f"cal{CALS[0]}"
+    report(out, CALS[0])
 
 
 if __name__ == "__main__":
