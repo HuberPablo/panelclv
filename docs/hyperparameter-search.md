@@ -238,6 +238,16 @@ archive) were set by convention or precedent. Both should be set where the curve
   more than the stopping rule's 1e-4, and the epoch where it reaches half of its total
   improvement; the median over trials gives the floor. Alongside: the epoch at which
   patience 7 would have stopped each trial, and how far that is from its best.
+- **Does early CE predict the forecast?** The final objective is forecasting, not
+  teacher-forced CE, and §3.1 and `docs/model-selection.md` show the two can disagree. So
+  for each epoch t the report also gives the rank correlation, across trials, between the
+  CE at t (best so far, what the pruner and early stopping see) and the trial's final
+  validation-rollout MAPE, |bias| and Spearman, signed so positive means low CE goes with
+  a good forecast. The rollout MAPE at t is the comparison row. If CE tracks the final
+  rollout from some epoch on, pruning on CE is safe from there and the warm-up goes
+  there; if it never does, the warm-up and floor come from the rollout curve instead, or
+  pruning is dropped. With 20 trials a single correlation is noisy (about ±0.4), so
+  agreement across the four panels is what counts.
 - Plots of validation loss and rollout MAPE against epoch, one line per trial.
 
 The floor it gives replaces the 50 proposed for test 1, and the warm-up gives test 2's

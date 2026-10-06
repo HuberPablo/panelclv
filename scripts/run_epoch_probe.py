@@ -230,7 +230,7 @@ def report(out_dir: Path) -> None:
     import matplotlib.pyplot as plt
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
+    rows, predict = [], []
     for panel in PANELS:
         hist, roll = {}, {}
         for t in range(N_TRIALS):
@@ -249,6 +249,21 @@ def report(out_dir: Path) -> None:
         M = pd.DataFrame({t: r.set_index("epoch").mape_aggregate for t, r in roll.items()})
         ck = list(M.index)
         rho_mape = [M.loc[c].corr(M.loc[ck[-1]], method="spearman") for c in ck]
+
+        # Does the CE a pruner or early stopping sees at epoch t predict the forecast the
+        # trial ends with? Signed so positive means "low CE at t goes with a good final
+        # rollout"; the rollout MAPE at t is the comparison row.
+        last = {t: r.set_index("epoch").iloc[-1] for t, r in roll.items()}
+        fin = pd.DataFrame(last).T
+        for t_ep in [e for e in (1, 2, 3, 4, 5, 10, 20, 30, 50, 75, 100, 150) if e <= len(V)]:
+            ce_t = best_so_far.iloc[t_ep - 1]
+            row = {"panel": panel, "epoch": t_ep,
+                   "CE→MAPE": ce_t.corr(fin.mape_aggregate, method="spearman"),
+                   "CE→|bias|": ce_t.corr(fin.bias_percent.abs(), method="spearman"),
+                   "CE→Spearman": ce_t.corr(-fin.spearman, method="spearman")}
+            if t_ep in M.index:
+                row["rollout MAPE→MAPE"] = M.loc[t_ep].corr(fin.mape_aggregate, method="spearman")
+            predict.append(row)
 
         per_trial = []
         for t, h in hist.items():
@@ -285,6 +300,14 @@ def report(out_dir: Path) -> None:
     table = pd.DataFrame(rows).set_index("panel").T
     print(table.to_string())
     table.to_csv(out_dir / "summary.csv")
+
+    pred = pd.DataFrame(predict)
+    print("\nDoes CE at epoch t predict the final validation rollout (epoch 150)?")
+    print("Rank correlation across trials; positive = low CE at t, good final forecast.\n")
+    for panel, g in pred.groupby("panel"):
+        print(f"-- {panel}")
+        print(g.drop(columns="panel").set_index("epoch").round(2).to_string(), "\n")
+    pred.to_csv(out_dir / "ce_predicts_rollout.csv", index=False)
     print(f"\nplots and summary in {out_dir}")
 
 
