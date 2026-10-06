@@ -196,7 +196,7 @@ kept epoch the search picks, the number of collapsed runs, and GPU time per stud
 | # | Test | Changes | Question |
 | --- | --- | --- | --- |
 | 0 | **Epoch probe** (§5.1) | nothing; every trial trains 150 epochs and its curve is recorded | when do trials become distinguishable, and when does a single run leave its flat start? Sets the pruner's warm-up and `min_epochs` from data |
-| 1 | **Current vs new settings** | the fixed score plus a `min_epochs` floor set by test 0, ValendinLSTM, all four panels | do the two changes together improve the forecast? Baseline: family U `archive` · no cluster label (no rerun needed) |
+| 1 | **Current vs new settings** | the fixed score, Prechelt's PQ1 stopping rule (§5.2) and no pruning, ValendinLSTM, all four panels | do the changes together improve the holdout forecast? Baseline: family U `archive` · no cluster label (no rerun needed) |
 | 2 | **Pruner** | current `MedianPruner` vs `HyperbandPruner` (`min_resource` from test 0, η = 3) vs none | does pruning at epoch 4 discard trials that would have won, and does pruning pay at all? |
 | 2b | **Hyperband η** | η = 3 vs η = 2, only if test 2 favours Hyperband | does gentler pruning change the winners? |
 | 3 | **Improvement threshold** | absolute 1e-4 vs a relative one, on multichannel | does the 4× stricter rule cut multichannel's training short? |
@@ -250,8 +250,7 @@ archive) were set by convention or precedent. Both should be set where the curve
   agreement across the four panels is what counts.
 - Plots of validation loss and rollout MAPE against epoch, one line per trial.
 
-The floor it gives replaces the 50 proposed for test 1, and the warm-up gives test 2's
-`min_resource`.
+It also gives test 2's warm-up; the stopping rule for test 1 is chosen in §5.2.
 
 #### Results (6 October 2026)
 
@@ -320,8 +319,8 @@ final rollout poorly (ρ −0.2 to +0.6): forecasts reorder as training goes on.
   warm-up of 3 judges trials 20–70 epochs before their CE ranking settles, on a number
   that does not predict the forecast on two of four panels. Test 2 becomes current rule
   against no pruning; Hyperband only with `min_resource` ≥ 50.
-- **Floor and patience (test 1): set in §5.2** by a rule on the validation loss alone,
-  which picks floor 50 with patience 25.
+- **Stopping rule (test 1): set in §5.2,** where Prechelt's (1998) criteria are compared
+  and PQ1 is chosen.
 
 Limits: ValendinLSTM only; 20 trials, so a single correlation carries about ±0.4; the
 rollouts are of the trained weights without the ADR-0008 refit; the archive search
@@ -348,35 +347,31 @@ before they are cited in the thesis.
 
 #### The procedure, applied
 
-Each decision is a rule stated before its result is looked at, and uses calibration data
-only.
+Both decisions use calibration data only.
 
-1. **Pruner — rule: prune on CE only once the CE ranking of trials has settled and early
-   CE predicts the final validation forecast.** Uses the validation-loss curves and the
-   validation-window rollouts. The ranking settles at epoch 24–76, and early CE predicts
-   the final forecast on multichannel only (§5.1). **Decision: pruning off.**
-2. **Stopping rule — rule: the cheapest floor and patience under which, on every panel,
-   the median run ends within 1% of its own validation-loss minimum.** Uses the
-   validation-loss curves only: `fit_model`'s rule is replayed on the 80 recorded curves
-   for floors {0, 30, 50, 75, 100, 150} × patience {7, 15, 25, 40}, and cost is the mean
-   number of epochs trained. Patience 7 with no floor ends runs 3–7% above their minimum
-   and fails on every panel. Twelve settings pass; the cheapest is **floor 50, patience
-   25** (83 epochs per run on average). Floor 100 with patience 7, proposed earlier from
-   the forecast table, also passes (102 epochs).
-3. **Check — only afterwards — against the validation-window forecast.** Still
-   calibration data, but not used to choose.
-
-An earlier draft of this section proposed floor 100 after reading the validation-forecast
-table, then checked it against the same table. That check was not independent of the
-choice; the loss-only rule above is.
+1. **Pruner.** Multi-fidelity methods assume trials rank early as they will at the end.
+   On the probe curves the CE ranking settles only at epoch 24–76, and early CE predicts
+   the final validation forecast on multichannel only (§5.1). **Decision: pruning off.**
+2. **Stopping rule: the criteria of Prechelt (1998).** That paper defines three families
+   of early-stopping criteria and compares them; all read only the validation and training
+   loss. Each was replayed on the 80 recorded curves, keeping as `fit_model` does the
+   weights of the lowest validation loss so far, then scored on the validation-window
+   forecast at the epoch it keeps:
+   - **GLα, generalisation loss:** stop once the validation loss is more than α% above
+     its best so far.
+   - **PQα, progress quotient:** stop once that generalisation loss divided by the
+     training progress over the last 5 epochs exceeds α. It holds off while the training
+     loss is still falling.
+   - **UPs:** stop once the validation loss has risen at the end of s successive 5-epoch
+     strips.
 
 #### The curves
 
 Each figure: left, the validation loss of the 20 trials (grey) and their median (black);
 middle, the median validation-window MAPE and |bias| (trials in grey); right, how many of
 the 20 trials have collapsed (forecast CV < 0.2). Dashed lines mark the median epoch kept
-by the current rule (orange) and by the loss-only rule of floor 50, patience 25 (green); the dotted line is the
-median epoch of the loss minimum. Regenerate with
+by the current rule (orange) and by Prechelt's PQ1 (green); the dotted line is the median
+epoch of the loss minimum. Regenerate with
 `python scripts/run_epoch_probe.py --report --out docs/figures/epoch-probe`.
 
 ![CDNOW](figures/epoch-probe/cdnow.png)
@@ -389,47 +384,68 @@ median epoch of the loss minimum. Regenerate with
 
 #### Did it work?
 
-Validation-window MAPE at the epoch each rule keeps, medians over the 20 trials, with the
-median epoch kept and the number of collapsed trials. The *oracle* is the single
-checkpoint with the best median validation forecast: the best any fixed-epoch rule could
-do on this window, chosen by looking at the forecast, which the loss-only rule does not.
+Validation-window MAPE at the epoch each criterion keeps, medians over the 20 trials per
+panel, with the median epoch kept in brackets. *Epochs trained* is the mean over all 80
+runs, the cost. The *oracle* is the single checkpoint with the best median validation
+forecast: the best a fixed epoch for all trials could do on this window, chosen by looking
+at the forecast, which the criteria do not.
 
-| rule | cdnow | electronics | gift | multichannel |
-| --- | --- | --- | --- | --- |
-| current: patience 7, no floor | 65.1 (epoch 12; 4 collapsed) | 79.3 (9; 17) | 78.0 (6; 19) | 99.3 (8; 9) |
-| **loss-only rule: floor 50, patience 25** | **44.4** (51; 0) | **44.2** (21; 14) | **46.0** (73; 17) | **70.2** (51; 14) |
-| also passes: patience 40, no floor | 44.4 (56; 0) | 49.4 (19; 12) | 43.5 (89; 18) | 67.4 (58; 11) |
-| also passes: floor 100, patience 7 | 44.9 (65; 0) | 43.7 (88; 14) | 46.6 (87; 16) | 63.6 (87; 9) |
-| oracle | 46.1 (epoch 30) | 45.5 (100) | 38.8 (150) | 56.4 (150) |
+| criterion | cdnow | electronics | gift | multichannel | epochs trained |
+| --- | --- | --- | --- | --- | ---: |
+| current: patience 7 | 65.1 (12) | 79.3 (9) | 78.0 (6) | 99.3 (8) | 19 |
+| GL1 | 65.1 (3) | 113.7 (5) | 93.0 (3) | 143.2 (5) | 7 |
+| GL2 | 65.1 (5) | 113.7 (5) | 88.9 (3) | 143.2 (5) | 8 |
+| GL3 | 65.1 (5) | 113.7 (5) | 83.5 (3) | 143.2 (5) | 10 |
+| GL5 | 55.7 (5) | 113.7 (5) | 74.9 (7) | 101.4 (5) | 25 |
+| PQ0.5 | 43.1 (24) | 50.2 (12) | 49.8 (45) | 64.6 (64) | 56 |
+| **PQ1** | **40.8** (33) | **41.9** (35) | **41.7** (68) | **62.6** (96) | **80** |
+| PQ2 | 37.2 (34) | 43.7 (93) | 41.1 (84) | 61.2 (107) | 103 |
+| PQ3 | 42.7 (38) | 43.7 (93) | 41.1 (84) | 58.4 (123) | 111 |
+| UP2 | 42.5 (39) | 42.7 (19) | 41.7 (47) | 65.6 (55) | 58 |
+| UP3 | 42.7 (58) | 50.3 (27) | 41.7 (97) | 63.5 (98) | 102 |
+| UP4 | 44.4 (62) | 49.9 (114) | 41.0 (121) | 56.7 (111) | 130 |
+| oracle | 46.1 (30) | 45.5 (100) | 38.8 (150) | 56.4 (150) | — |
 
-The forecast is scored at the latest checkpoint at or before each trial's kept epoch (the
+How far above its own loss minimum each run ends, median: patience 7 3–7%, GL 6–16%,
+PQ0.5 1–3%, PQ1 0–0.9%, PQ2 and PQ3 0–0.1%, UP 0–1.5%.
+
+PQ1 in full, against the current rule and the oracle (MAPE / |bias| % / Spearman /
+collapsed trials of 20):
+
+| panel | current: patience 7 | PQ1 | oracle |
+| --- | --- | --- | --- |
+| cdnow | 65.1 / 65.1 / 0.09 / 4 | **40.8 / 30.8 / 0.22 / 1** | 46.1 / 46.0 / 0.24 / 1 |
+| electronics | 79.3 / 64.6 / 0.02 / 17 | **41.9 / 15.8 / 0.04 / 17** | 45.5 / 26.1 / 0.07 / 14 |
+| gift | 78.0 / 35.1 / 0.00 / 19 | 41.7 / 21.7 / 0.01 / 18 | 38.8 / 14.6 / 0.09 / 9 |
+| multichannel | 99.3 / 80.5 / −0.00 / 9 | 62.6 / 24.8 / 0.00 / 7 | 56.4 / 28.0 / 0.03 / 6 |
+
+The forecast is scored at the latest checkpoint at or before each run's kept epoch (the
 rollout was recorded at 8 epochs only), so a kept epoch between checkpoints is scored a
 little early.
 
-- **CDNOW and electronics: yes.** The rule chosen from the loss alone reaches the oracle
-  (44.4 against 46.1, 44.2 against 45.5), from 65 and 79 under the current rule. On CDNOW
-  the loss turns back up when the model starts to over-fit, so a loss-based rule stops in
-  the right place without seeing a forecast.
-- **Gift: mostly.** 46.0 against an oracle of 38.8, from 78: 82% of the gap closed.
-- **Multichannel: partly.** 70.2 against 56.4, from 99: 68% of the gap closed. The loss is
-  within 1% of its minimum by epoch 51, but the forecast keeps improving to epoch 150. Here
-  the loss stops being informative before the forecast does; a tighter loss criterion
-  (0.5%) would select floor 75–100, which reaches 63.6.
-- **The rule picks a family, not a point.** Every passing setting lands within a few MAPE
-  points of the others on CDNOW, electronics and gift; on multichannel, longer is better.
-  The 1% threshold is itself a choice, and the one place the result depends on it is
-  multichannel.
-- **It does not fix customer ranking.** Spearman stays near 0 on electronics, gift and
-  multichannel under every rule, and 9–18 of 20 trials remain collapsed. Training longer
+- **GL fails.** The validation loss is noisy (the spikes in the figures), so it rises 1–5%
+  above its best within the first 3–5 epochs and GL stops the run there, worse than the
+  current rule.
+- **PQ works best.** PQ1 and PQ2 lower validation MAPE on every panel, from 65–99 under
+  the current rule to 37–63. They match or beat the oracle on CDNOW and electronics, and
+  close 86–94% of the gap to it on gift and multichannel. They can beat the oracle because
+  they stop each trial at its own moment, where the oracle uses one epoch for all. PQ suits
+  these curves: a slowly falling loss with noise on top, which PQ does not stop on while
+  training still makes progress.
+- **UP comes close but is less consistent:** UP2 is good on CDNOW and electronics but
+  weaker on multichannel; UP4 is good on multichannel but trains 130 epochs.
+- **Chosen: PQ1,** which is within 4 MAPE points of PQ2 on every panel at 80 epochs
+  against 103. The choice among α uses the validation forecast, which is calibration data.
+- **Ranking is not fixed.** Spearman stays near 0 on electronics, gift and multichannel
+  under every criterion, and 7–18 of 20 trials remain collapsed there. Training longer
   repairs the level of the forecast; ValendinLSTM without a customer-level input still
   cannot tell customers apart there (`docs/insight-training-efficiency.md` §8: the label
   is what lets it rank).
 
-**Conclusion.** For the pruner and the stopping rule, calibration data alone gives a
-defensible answer: the CE-ranking test turns pruning off, and the loss-only rule picks
-floor 50 with patience 25. Scored afterwards on the validation forecast, that rule matches
-the best fixed epoch on CDNOW and electronics, closes most of the gap on gift and two
-thirds of it on multichannel. Two things remain before it can be claimed for the holdout:
+**Conclusion.** Calibration data alone settles both: the multi-fidelity assumption fails
+on the validation curves, so pruning is off; and of Prechelt's published stopping criteria,
+PQ performs best on the validation forecast, with PQ1 the cheapest of the best. Two things
+remain before it can be claimed for the holdout:
 - **another validation window** (rolling origin): the same replay on an earlier window
   inside calibration, to show the choice is not specific to one window;
 - **one holdout test** with the settings frozen: test 1.

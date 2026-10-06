@@ -203,24 +203,62 @@ def check_complete() -> int:
 # ---------------------------------------------------------------------------
 
 
-def replay_stopping(val: np.ndarray, floor: int = 0,
-                    patience: int = PATIENCE) -> tuple[int, int]:
-    """(stop epoch, kept epoch), 1-based, under `fit_model`'s rule with `min_epochs=floor`."""
+def replay_stopping(val: np.ndarray) -> tuple[int, int]:
+    """(stop epoch, kept epoch), 1-based, under `fit_model`'s rule: patience 7, no floor."""
     best, best_epoch, waited = np.inf, 0, 0
     for e, v in enumerate(val, start=1):
         if v + MIN_DELTA < best:
             best, best_epoch, waited = v, e, 0
         else:
             waited += 1
-        if e >= floor and waited >= patience:
+        if waited >= PATIENCE:
             return e, best_epoch
     return len(val), best_epoch
 
 
-# The stopping rule chosen from the validation loss alone (§5.2): the cheapest floor and
-# patience that end the median run within 1% of its own loss minimum on every panel.
-# Drawn against the current rule in the figures.
-PROPOSED_FLOOR, PROPOSED_PATIENCE = 50, 25
+# Prechelt (1998), "Early Stopping -- But When?": three families of stopping criteria,
+# each read off the validation and training loss alone. The weights kept are always those
+# of the lowest validation loss so far.
+#   GL_a  generalisation loss: stop once the validation loss is more than a% above its
+#         best so far.
+#   PQ_a  progress quotient: stop once that generalisation loss, divided by the training
+#         progress over the last strip of K epochs, exceeds a -- it waits while training
+#         is still improving.
+#   UP_s  stop once the validation loss has risen at the end of s successive strips.
+STRIP = 5                       # Prechelt's strip length K
+PRECHELT = [("GL", 1), ("GL", 2), ("GL", 3), ("GL", 5),
+            ("PQ", 0.5), ("PQ", 1), ("PQ", 2), ("PQ", 3),
+            ("UP", 2), ("UP", 3), ("UP", 4)]
+CHOSEN = ("PQ", 1)              # the criterion §5.2 recommends, marked in the figures
+
+
+def replay_prechelt(val: np.ndarray, train: np.ndarray, criterion: str,
+                    alpha: float) -> tuple[int, int]:
+    """(stop epoch, kept epoch), 1-based, under one of Prechelt's criteria."""
+    best, best_epoch, ups, last_strip = np.inf, 0, 0, None
+    for t in range(1, len(val) + 1):
+        if val[t - 1] < best:
+            best, best_epoch = val[t - 1], t
+        gl = 100 * (val[t - 1] / best - 1)
+        if criterion == "GL" and gl > alpha:
+            return t, best_epoch
+        if t % STRIP == 0:
+            strip = train[t - STRIP:t]
+            progress = 1000 * (strip.sum() / (STRIP * strip.min()) - 1)
+            if criterion == "PQ" and progress > 0 and gl / progress > alpha:
+                return t, best_epoch
+            if criterion == "UP":
+                ups = ups + 1 if last_strip is not None and val[t - 1] > last_strip else 0
+                last_strip = val[t - 1]
+                if ups >= alpha:
+                    return t, best_epoch
+    return len(val), best_epoch
+
+
+def score_at(rollouts: pd.DataFrame, epoch: int) -> pd.Series:
+    """The validation rollout at the latest recorded checkpoint at or before `epoch`."""
+    earlier = [c for c in rollouts.index if c <= epoch]
+    return rollouts.loc[earlier[-1]] if earlier else rollouts.iloc[0]
 
 
 def first_stable(epochs: list[int], rhos: list[float], level: float = 0.8) -> float:
@@ -296,9 +334,8 @@ def report(out_dir: Path) -> None:
 
         # Where each stopping rule would end, replayed on the recorded curves.
         kept_now = int(np.median([replay_stopping(h.val_loss.values)[1] for h in hist.values()]))
-        kept_new = int(np.median([replay_stopping(h.val_loss.values, PROPOSED_FLOOR,
-                                                  PROPOSED_PATIENCE)[1]
-                                  for h in hist.values()]))
+        kept_new = int(np.median([replay_prechelt(h.val_loss.values, h.train_loss.values,
+                                                  *CHOSEN)[1] for h in hist.values()]))
         own_best = int(pt.best.median())
         B = pd.DataFrame({t: r.set_index("epoch").bias_percent.abs() for t, r in roll.items()})
         C = pd.DataFrame({t: r.set_index("epoch").forecast_cv for t, r in roll.items()})
@@ -316,8 +353,7 @@ def report(out_dir: Path) -> None:
             a.axvline(kept_now, color="tab:orange", ls="--",
                       label=f"patience 7 keeps epoch {kept_now}")
             a.axvline(kept_new, color="tab:green", ls="--",
-                      label=f"floor {PROPOSED_FLOOR}, patience {PROPOSED_PATIENCE} "
-                            f"keeps epoch {kept_new}")
+                      label=f"Prechelt {CHOSEN[0]}{CHOSEN[1]} keeps epoch {kept_new}")
             a.axvline(own_best, color="tab:blue", ls=":", label=f"loss minimum, epoch {own_best}")
         # The first epochs sit orders of magnitude above the rest; scale to what follows
         # them so the late differences between trials are visible.
@@ -337,31 +373,52 @@ def report(out_dir: Path) -> None:
     print(table.to_string())
     table.to_csv(out_dir / "summary.csv")
 
-    # The stopping rule from the validation loss alone (§5.2): replay every floor x
-    # patience on the recorded curves; a setting passes if, on every panel, the median run
-    # ends within 1% of its own loss minimum; choose the cheapest by epochs trained.
-    curves = {(panel, t): pd.read_csv(suite_dir(panel, t) / "history.csv").val_loss.values
-              for panel in PANELS for t in range(N_TRIALS)
-              if (suite_dir(panel, t) / "results.csv").exists()}
-    grid = []
-    for floor in (0, 30, 50, 75, 100, 150):
-        for patience in (7, 15, 25, 40):
-            row, cost = {"floor": floor, "patience": patience}, []
-            for panel in PANELS:
-                runs = [(v, replay_stopping(v, floor, patience))
-                        for (p, _), v in curves.items() if p == panel]
-                row[panel] = float(np.median([(v[kept - 1] - v.min()) / v.min() * 100
-                                              for v, (_, kept) in runs]))
-                cost += [stop for _, (stop, _) in runs]
-            row["passes"] = all(row[p] <= 1.0 for p in PANELS)
-            row["epochs trained"] = float(np.mean(cost))
-            grid.append(row)
-    grid = pd.DataFrame(grid)
-    print("\nStopping rule from the validation loss alone: % above each run's own loss minimum")
-    print(grid.round(2).to_string(index=False))
-    chosen = grid[grid.passes].sort_values("epochs trained").iloc[0]
-    print(f"cheapest passing: floor {int(chosen.floor)}, patience {int(chosen.patience)}")
-    grid.to_csv(out_dir / "stopping_rule_grid.csv", index=False)
+    # Prechelt's criteria (§5.2), replayed on every recorded curve and scored afterwards
+    # on the validation-window rollout at the epoch each keeps. The current rule and the
+    # oracle (the single checkpoint with the best median validation MAPE) frame them.
+    runs = {}
+    for panel in PANELS:
+        for t in range(N_TRIALS):
+            d = suite_dir(panel, t)
+            if (d / "results.csv").exists():
+                runs[(panel, t)] = (pd.read_csv(d / "history.csv"),
+                                    pd.read_csv(d / "rollouts.csv").set_index("epoch"))
+    rules = [("current: patience 7", lambda h: replay_stopping(h.val_loss.values))]
+    rules += [(f"{c}{a}", lambda h, c=c, a=a: replay_prechelt(
+        h.val_loss.values, h.train_loss.values, c, a)) for c, a in PRECHELT]
+    table = []
+    for name, rule in rules:
+        row, cost = {"rule": name}, []
+        for panel in PANELS:
+            mine = [(h, r, rule(h)) for (p, _), (h, r) in runs.items() if p == panel]
+            sc = [score_at(r, kept) for _, r, (_, kept) in mine]
+            gap = [(h.val_loss.values[kept - 1] - h.val_loss.min()) / h.val_loss.min() * 100
+                   for h, _, (_, kept) in mine]
+            row[f"{panel} MAPE"] = float(np.median([x.mape_aggregate for x in sc]))
+            row[f"{panel} |bias|"] = float(np.median([abs(x.bias_percent) for x in sc]))
+            row[f"{panel} Spearman"] = float(np.median([x.spearman for x in sc]))
+            row[f"{panel} collapsed"] = int(sum(x.forecast_cv < 0.2 for x in sc))
+            row[f"{panel} epoch"] = float(np.median([kept for _, _, (_, kept) in mine]))
+            row[f"{panel} gap %"] = float(np.median(gap))
+            cost += [stop for _, _, (stop, _) in mine]
+        row["epochs trained"] = float(np.mean(cost))
+        table.append(row)
+    oracle = {"rule": "oracle: best fixed checkpoint"}
+    for panel in PANELS:
+        R = {t: r for (p, t), (_, r) in runs.items() if p == panel}
+        med = pd.DataFrame({t: r.mape_aggregate for t, r in R.items()}).median(axis=1)
+        e = med.idxmin()
+        oracle[f"{panel} MAPE"] = float(med.min())
+        oracle[f"{panel} |bias|"] = float(np.median([abs(r.loc[e].bias_percent) for r in R.values()]))
+        oracle[f"{panel} Spearman"] = float(np.median([r.loc[e].spearman for r in R.values()]))
+        oracle[f"{panel} collapsed"] = int(sum(r.loc[e].forecast_cv < 0.2 for r in R.values()))
+        oracle[f"{panel} epoch"] = float(e)
+    table.append(oracle)
+    table = pd.DataFrame(table)
+    print("\nStopping criteria (Prechelt 1998) on the validation-window forecast")
+    print(table[["rule", "epochs trained"] + [f"{p} MAPE" for p in PANELS]
+                + [f"{p} epoch" for p in PANELS]].round(1).to_string(index=False))
+    table.to_csv(out_dir / "stopping_criteria.csv", index=False)
 
     pred = pd.DataFrame(predict)
     print("\nDoes CE at epoch t predict the final validation rollout (epoch 150)?")
