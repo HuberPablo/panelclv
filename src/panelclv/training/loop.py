@@ -82,6 +82,35 @@ def _batch_weight(criterion: nn.Module, targets: torch.Tensor) -> float:
     return float(targets.numel())
 
 
+# Prechelt's training strip: the PQ criterion measures training progress, and checks
+# whether to stop, every PQ_STRIP epochs.
+PQ_STRIP = 5
+
+
+def progress_quotient(val_loss: float, best_val_loss: float,
+                      train_strip: list[float]) -> float:
+    """Prechelt's (1998) PQ: generalisation loss over training progress.
+
+    The generalisation loss is how far, in percent, the current validation loss sits above
+    the best seen so far. The training progress is how far, in per mille, the mean training
+    loss over the last strip of epochs sits above that strip's minimum: large while
+    training still moves, near 0 once it has stalled. Their ratio grows when validation
+    worsens AND training has stopped improving, which is when to stop; a noisy rise while
+    training still progresses keeps it small. A perfectly flat strip has stalled, so any
+    generalisation loss then gives an infinite quotient (stop); a strip whose minimum is
+    exactly 0 while its mean is not counts as unbounded progress (keep going).
+    """
+    generalisation_loss = 100.0 * (val_loss / best_val_loss - 1.0)
+    mean, low = sum(train_strip) / len(train_strip), min(train_strip)
+    if low > 0:
+        progress = 1000.0 * (mean / low - 1.0)
+    else:
+        progress = math.inf if mean > 0 else 0.0
+    if progress == 0:
+        return math.inf if generalisation_loss > 0 else 0.0
+    return generalisation_loss / progress
+
+
 def _select_device(device: str | torch.device | None) -> torch.device:
     if device is None:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -244,6 +273,7 @@ def fit_model(
     focal_gamma: float = 2.0,
     emd_weight: float = 1.0,
     val_score_start: int = 0,
+    stop_pq: float | None = None,
 ) -> FitResult:
     """Train a multinomial model with early stopping on validation loss.
 
@@ -286,6 +316,14 @@ def fit_model(
 
     If `trial` is provided, the validation loss is reported per epoch via
     `trial.report(...)` and `optuna.TrialPruned` is raised on pruning.
+
+    `stop_pq` replaces the patience rule with Prechelt's (1998) PQ criterion: every
+    `PQ_STRIP` epochs, stop once `progress_quotient` exceeds `stop_pq` (PQ1 is
+    `stop_pq=1.0`). An epoch then counts as an improvement whenever its validation loss is
+    below the best so far, as in Prechelt, rather than by the patience rule's 1e-4.
+    `min_epochs` and `select_from_epoch` apply as before; `patience` is ignored.
+    `docs/hyperparameter-search.md` §5.2 chose PQ1 on the validation window. None (default)
+    keeps the patience rule.
 
     `val_score_start` is the temporal-validation hook: the val_loader feeds the full
     calibration sequence (warm-up), but only steps >= `val_score_start` are scored, so
@@ -374,7 +412,8 @@ def fit_model(
         # Best-by-loss tracking (primary objective). An epoch before `select_from_epoch`
         # is neither a candidate nor a step towards patience.
         eligible = epoch + 1 >= select_from_epoch
-        improved = eligible and (val_metrics["loss"] + 1e-4) < best_val_loss
+        margin = 0.0 if stop_pq is not None else 1e-4
+        improved = eligible and (val_metrics["loss"] + margin) < best_val_loss
         if improved:
             best_val_loss = val_metrics["loss"]
             best_val_f1 = val_metrics.get("f1_weighted", best_val_f1)
@@ -393,7 +432,15 @@ def fit_model(
         # The floor gates the BREAK only, never the selection above: a run with
         # `min_epochs=50` still keeps whichever epoch had the lowest validation loss,
         # even if that was epoch 3. It buys looking time, not a different winner.
-        if epoch + 1 >= min_epochs and patience_counter >= patience:
+        if stop_pq is not None:
+            # PQ is checked at the end of each training strip, on the last strip's
+            # training losses, against the best validation loss among eligible epochs.
+            done = (epoch + 1) % PQ_STRIP == 0 and best_state is not None and \
+                progress_quotient(val_metrics["loss"], best_val_loss,
+                                  [h["train_loss"] for h in history[-PQ_STRIP:]]) > stop_pq
+        else:
+            done = patience_counter >= patience
+        if epoch + 1 >= min_epochs and done:
             if verbose:
                 print(f"Early stopping at epoch {epoch + 1}.")
             break

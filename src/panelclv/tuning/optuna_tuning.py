@@ -79,7 +79,7 @@ from panelclv.training.loop import fit_model
 # curve. The search-space half of the same question belongs to the registry entry,
 # which declares what each model searches.
 TRAINING_CONTROLS: frozenset[str] = frozenset({
-    "n_epochs", "patience", "min_epochs", "select_from_epoch",  # training control
+    "n_epochs", "patience", "min_epochs", "select_from_epoch", "stop_pq",  # training control
     "checkpoint_dir", "verbose",     # bookkeeping
     "loss_type", "class_weights", "focal_gamma", "emd_weight",  # loss configuration
     "grad_clip", "log_wandb", "seed",   # optimiser / logging / Optuna sampler seed
@@ -348,6 +348,7 @@ def objective(
         patience=suggest_param(trial, "patience", training.get("patience", 5)),
         min_epochs=suggest_param(trial, "min_epochs", training.get("min_epochs", 0)),
         select_from_epoch=training.get("select_from_epoch", 0),
+        stop_pq=training.get("stop_pq"),
         learning_rate=params["learning_rate"],
         weight_decay=params["weight_decay"],
         grad_clip=training.get("grad_clip", 1.0),

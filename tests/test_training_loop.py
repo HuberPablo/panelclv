@@ -223,3 +223,63 @@ def test_validation_loss_does_not_depend_on_the_batch_size(class_weights):
 
     assert losses[0] == pytest.approx(losses[2], rel=1e-6)
     assert losses[1] == pytest.approx(losses[2], rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Prechelt's PQ stopping rule
+# ---------------------------------------------------------------------------
+
+
+def test_progress_quotient_is_generalisation_loss_over_training_progress():
+    """2% above the best validation loss, training strip 0.2 per mille above its minimum."""
+    from panelclv.training.loop import progress_quotient
+
+    # GL = 100 * (1.02 / 1.0 - 1) = 2; P = 1000 * (mean 1.002 / min 1.0 - 1) = 2.
+    assert progress_quotient(1.02, 1.0, [1.0, 1.0, 1.0, 1.0, 1.01]) == pytest.approx(1.0)
+    # A flat strip has stalled: any rise above the best validation loss means stop.
+    assert progress_quotient(1.02, 1.0, [1.0] * 5) == float("inf")
+    assert progress_quotient(1.0, 1.0, [1.0] * 5) == 0.0
+    # Training loss at exactly 0 with a non-zero mean is still progress, not a crash.
+    assert progress_quotient(1.02, 1.0, [0.0, 0.1, 0.0, 0.0, 0.0]) == 0.0
+
+
+def _fit_pq(tmp_path, stop_pq: float):
+    torch.manual_seed(TORCH_SEED)
+    model = MultinomialLSTMModel(
+        embedder=ProjectedEmbedder(
+            seq_cols=["Transactions"],
+            embedded_cols={"Transactions": N_CLASSES},
+            target_col="Transactions",
+            embedding_dim=4,
+        ),
+        lstm_hidden_size=4,
+        dense_units=4,
+        dropout=0.0,
+    )
+    return fit_model(
+        model, _loader(target_class=0), _loader(target_class=1),
+        num_target_classes=N_CLASSES, n_epochs=30, patience=2, learning_rate=0.1,
+        device="cpu", checkpoint_dir=str(tmp_path), model_name="pq", verbose=False,
+        stop_pq=stop_pq,
+    )
+
+
+def test_pq_stops_at_a_strip_boundary_and_keeps_the_best_epoch(tmp_path):
+    """Validation only worsens here, so PQ1 stops at the end of a strip, keeping epoch 0.
+
+    Patience 2 alone would stop after 3 epochs; under `stop_pq` patience is ignored, so
+    the run lasts at least one full strip.
+    """
+    from panelclv.training.loop import PQ_STRIP
+
+    result = _fit_pq(tmp_path, stop_pq=1.0)
+    assert len(result.history) % PQ_STRIP == 0
+    assert PQ_STRIP <= len(result.history) < 30
+    assert result.best_epoch == 0
+
+
+def test_pq_with_an_infinite_threshold_trains_every_epoch(tmp_path):
+    """Patience is ignored under `stop_pq`: with nothing able to exceed the threshold,
+    the run lasts all 30 epochs although patience 2 would have stopped it after 3."""
+    result = _fit_pq(tmp_path, stop_pq=float("inf"))
+    assert len(result.history) == 30
