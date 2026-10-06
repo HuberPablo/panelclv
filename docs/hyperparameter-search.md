@@ -185,7 +185,8 @@ one.
 | family | what | status |
 | --- | --- | --- |
 | U′ | electronics · `archive` · no cluster label, rerun with the fixed score; archive search space restored | complete, §3.1 (`.scratch/score-fix/`) |
-| EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning | complete, §5.1 (76 items on vast.ai, 4 locally; $0.84) |
+| EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning, 2y windows | complete, §5.1 (76 items on vast.ai, 4 locally; $0.84) |
+| EP-3y/5y | the same probe on the 3y windows (electronics, gift, multichannel) and the 5y electronics split | complete, §5.2 (78 items on vast.ai, 2 locally) |
 
 ## 5. Tests owed
 
@@ -442,11 +443,99 @@ little early.
   cannot tell customers apart there (`docs/insight-training-efficiency.md` §8: the label
   is what lets it rank).
 
+#### Robustness: three-year windows and the 260-week electronics split
+
+The same probe was rerun on the longer calibrations `run_real_panel_benchmarks` declares
+(`python scripts/run_epoch_probe.py --calibration 3y,5y`; 80 items on vast.ai and the
+local GPU, 6 October 2026):
+- **3y:** electronics, gift and multichannel with 156 calibration weeks; the third year
+  is the validation window. For the same panels this validates on the year *after* the
+  2y probe's validation year, so it is also the second validation window that
+  rolling-origin practice asks for.
+- **5y:** the paper's electronics cohort (3,755 customers) on its 260-week split, the
+  last 52 weeks validating.
+
+The same 20 trials, 150 epochs, no early stopping and no pruning; the holdout is not read.
+Validation-window MAPE at the epoch each criterion keeps (median epoch in brackets):
+
+| criterion | 3y electronics | 3y gift | 3y multichannel | epochs trained |
+| --- | --- | --- | --- | ---: |
+| current: patience 7 | 71.0 (12) | 47.8 (10) | 74.6 (9) | 21 |
+| GL1 | 98.4 (4) | 49.9 (6) | 100.2 (4) | 12 |
+| GL2 | 98.4 (4) | 34.8 (42) | 91.0 (4) | 26 |
+| GL3 | 98.4 (8) | 32.9 (52) | 81.6 (4) | 44 |
+| GL5 | 98.4 (8) | 28.3 (102) | 74.6 (6) | 63 |
+| PQ0.5 | 49.7 (70) | 28.6 (100) | 56.8 (72) | 91 |
+| **PQ1** | **45.0** (105) | **28.3** (105) | **55.0** (88) | **116** |
+| PQ2 | 45.0 (118) | 28.6 (142) | 54.5 (146) | 141 |
+| PQ3 | 45.0 (124) | 28.6 (144) | 54.5 (146) | 148 |
+| UP2 | 53.3 (27) | 32.7 (32) | 62.6 (62) | 64 |
+| UP3 | 49.8 (38) | 32.8 (96) | 55.9 (126) | 103 |
+| UP4 | 46.4 (105) | 29.5 (143) | 55.9 (140) | 133 |
+| oracle | 43.6 (150) | 29.0 (150) | 53.4 (150) | — |
+
+| criterion | 5y electronics | epochs trained |
+| --- | --- | ---: |
+| current: patience 7 | 43.5 (32) | 41 |
+| GL1 | 55.4 (9) | 15 |
+| GL2 | 42.8 (23) | 28 |
+| GL3 | 33.5 (24) | 62 |
+| GL5 | 29.0 (116) | 102 |
+| PQ0.5 | 29.8 (37) | 48 |
+| **PQ1** | **24.6** (67) | **75** |
+| PQ2 | 23.1 (93) | 115 |
+| PQ3 | 23.1 (104) | 137 |
+| UP2 | 23.1 (81) | 96 |
+| UP3 | 23.0 (113) | 134 |
+| UP4 | 23.0 (132) | 144 |
+| oracle | 23.5 (100) | — |
+
+PQ1 in full (MAPE / |bias| % / Spearman / collapsed trials of 20):
+
+| panel | current: patience 7 | PQ1 | oracle |
+| --- | --- | --- | --- |
+| 3y electronics | 71.0 / 60.9 / 0.02 / 15 | **45.0 / 14.5 / 0.11 / 11** | 43.6 / 10.8 / 0.18 / 8 |
+| 3y gift | 47.8 / 18.8 / 0.01 / 19 | **28.3 / 10.2 / 0.06 / 13** | 29.0 / 10.3 / 0.35 / 7 |
+| 3y multichannel | 74.6 / 53.2 / −0.01 / 4 | **55.0 / 26.2 / −0.01 / 2** | 53.4 / 21.9 / 0.02 / 0 |
+| 5y electronics | 43.5 / 30.9 / 0.20 / 7 | **24.6 / 15.0 / 0.30 / 3** | 23.5 / 12.3 / 0.34 / 0 |
+
+- **PQ is the best family again, on every new panel.** PQ1 closes 95% of the gap between
+  the current rule and the oracle on 3y electronics, 93% on 3y multichannel and 95% on
+  5y electronics, and beats the oracle on 3y gift. PQ2 is within 1.5 MAPE points of PQ1
+  on every new panel, at 22–53% more epochs.
+- **GL fails again** on electronics and multichannel, for the same reason: the noisy
+  early loss trips it within 4–8 epochs. It does well only on 3y gift.
+- **UP is close on 5y** (UP2–UP4 at 23.0–23.1) but weak on 3y electronics and gift with
+  small s, so it is again less consistent than PQ.
+- **Patience 7 costs the most on the long windows' forecast, not their loss.** On 5y it
+  already runs to epoch 39 and ends only 1.9% above the loss minimum, yet its forecast is
+  43.5 against 24.6 under PQ1: the last 2% of the loss carries half of the forecast error.
+- **CE becomes a better guide with longer calibration.** Early CE predicts the final
+  customer ranking with ρ mostly 0.7–0.9 on 3y electronics (dipping to 0.2–0.3 at epochs
+  20–30), 0.5–0.8 on 3y multichannel, 0.6–0.8 on 5y and 0.3–0.7 on 3y gift, against
+  negative or unstable values on 2y CDNOW and electronics. It still
+  does not predict the level everywhere (CE → final MAPE is negative on 3y gift), and the
+  CE ranking of trials settles only at epoch 44–65 (3y) and 47 (5y). Pruning before about
+  epoch 50 stays unjustified.
+- **On the 5y panel the collapse goes away with training.** With 3,755 customers, no
+  trial is collapsed at any checkpoint from epoch 75 on (3 of 20 are where PQ1 stops
+  earlier), and PQ1 reaches Spearman 0.30: the panel size, not only training
+  length, decides whether ValendinLSTM learns to tell customers apart.
+
+![3y electronics](figures/epoch-probe/cal3y/electronics.png)
+
+![3y gift](figures/epoch-probe/cal3y/gift.png)
+
+![3y multichannel](figures/epoch-probe/cal3y/multichannel.png)
+
+![5y electronics](figures/epoch-probe/cal5y/electronics.png)
+
 **Conclusion.** Calibration data alone settles both: the multi-fidelity assumption fails
 on the validation curves, so pruning is off; and of Prechelt's published stopping criteria,
-PQ performs best on the validation forecast, with PQ1 the cheapest of the best. Two things
-remain before it can be claimed for the holdout:
-- **another validation window** (rolling origin): the same replay on an earlier window
-  inside calibration, to show the choice is not specific to one window;
-- **one holdout test** with the settings frozen: test 1.
+PQ performs best on the validation forecast, with PQ1 the cheapest of the best. That holds
+on all eight panel-calibrations tested (2y × 4, 3y × 3, 5y × 1), including a second,
+later validation window for electronics, gift and multichannel. PQ1 closes at least 85% of
+the gap between the current rule and the best fixed epoch on every one, and beats the best
+fixed epoch on three. What remains is **one
+holdout test** with the settings frozen: test 1.
 

@@ -1,0 +1,9 @@
+,electronics
+trials,20.0
+distinguishable (val loss),47.0
+distinguishable (rollout MAPE),150.0
+leaves epoch-1 loss (median),2.0
+half of its improvement (median),2.0
+own best epoch (median),131.5
+patience 7 stops at (median),39.0
+"loss lost by stopping, % (median)",1.95

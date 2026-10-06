@@ -1,0 +1,9 @@
+,electronics,gift,multichannel
+trials,20.0,20.0,20.0
+distinguishable (val loss),62.0,44.0,65.0
+distinguishable (rollout MAPE),150.0,150.0,150.0
+leaves epoch-1 loss (median),2.0,2.0,2.0
+half of its improvement (median),3.0,2.5,3.5
+own best epoch (median),123.5,144.5,146.0
+patience 7 stops at (median),19.5,17.5,16.0
+"loss lost by stopping, % (median)",4.37,8.36,3.23
