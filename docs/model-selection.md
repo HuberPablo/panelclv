@@ -2,7 +2,8 @@
 
 How a neural model is chosen in this package, what was measured to check whether that
 choice is a good one, and what could replace it. Training length, which interacts with
-selection, is in `docs/insight-training-efficiency.md`.
+selection, is in `docs/insight-training-efficiency.md`; how the Optuna search itself is set
+up, and how it compares with standard practice, is in `docs/hyperparameter-search.md`.
 
 Conventions in this doc:
 - Every interval is a 95% percentile bootstrap from `evaluation.effects.effect`
