@@ -45,9 +45,9 @@ One **study** is one search, its refit and its forecast. In order:
 
 **The archived searches used a different space.** Before 23 September 2026, weight decay
 was searched over 1e-6–1e-2 (log) and batch over {64, 128, 256}; commits d7e902d and
-57b8c18 pinned weight decay to 0 and added batch 32. Every family run before then (A to V)
-ran on the old
-space, so a rerun meant to reproduce one must restore it (family U′ does, §4).
+57b8c18 pinned weight decay to 0 and added batch 32. Families T, T′, U and V
+ran on the old space (and earlier families on older ones), so a rerun meant to reproduce
+one must restore it (family U′ does, §4).
 
 ## 2. Against standard practice
 
