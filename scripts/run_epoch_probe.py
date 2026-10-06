@@ -203,7 +203,8 @@ def check_complete() -> int:
 # ---------------------------------------------------------------------------
 
 
-def replay_stopping(val: np.ndarray, floor: int = 0) -> tuple[int, int]:
+def replay_stopping(val: np.ndarray, floor: int = 0,
+                    patience: int = PATIENCE) -> tuple[int, int]:
     """(stop epoch, kept epoch), 1-based, under `fit_model`'s rule with `min_epochs=floor`."""
     best, best_epoch, waited = np.inf, 0, 0
     for e, v in enumerate(val, start=1):
@@ -211,13 +212,15 @@ def replay_stopping(val: np.ndarray, floor: int = 0) -> tuple[int, int]:
             best, best_epoch, waited = v, e, 0
         else:
             waited += 1
-        if e >= floor and waited >= PATIENCE:
+        if e >= floor and waited >= patience:
             return e, best_epoch
     return len(val), best_epoch
 
 
-# The floor the probe proposes (§5.1), drawn against the current rule in the figures.
-PROPOSED_FLOOR = 100
+# The stopping rule chosen from the validation loss alone (§5.2): the cheapest floor and
+# patience that end the median run within 1% of its own loss minimum on every panel.
+# Drawn against the current rule in the figures.
+PROPOSED_FLOOR, PROPOSED_PATIENCE = 50, 25
 
 
 def first_stable(epochs: list[int], rhos: list[float], level: float = 0.8) -> float:
@@ -293,7 +296,8 @@ def report(out_dir: Path) -> None:
 
         # Where each stopping rule would end, replayed on the recorded curves.
         kept_now = int(np.median([replay_stopping(h.val_loss.values)[1] for h in hist.values()]))
-        kept_new = int(np.median([replay_stopping(h.val_loss.values, PROPOSED_FLOOR)[1]
+        kept_new = int(np.median([replay_stopping(h.val_loss.values, PROPOSED_FLOOR,
+                                                  PROPOSED_PATIENCE)[1]
                                   for h in hist.values()]))
         own_best = int(pt.best.median())
         B = pd.DataFrame({t: r.set_index("epoch").bias_percent.abs() for t, r in roll.items()})
@@ -312,7 +316,8 @@ def report(out_dir: Path) -> None:
             a.axvline(kept_now, color="tab:orange", ls="--",
                       label=f"patience 7 keeps epoch {kept_now}")
             a.axvline(kept_new, color="tab:green", ls="--",
-                      label=f"floor {PROPOSED_FLOOR} keeps epoch {kept_new}")
+                      label=f"floor {PROPOSED_FLOOR}, patience {PROPOSED_PATIENCE} "
+                            f"keeps epoch {kept_new}")
             a.axvline(own_best, color="tab:blue", ls=":", label=f"loss minimum, epoch {own_best}")
         # The first epochs sit orders of magnitude above the rest; scale to what follows
         # them so the late differences between trials are visible.
@@ -331,6 +336,32 @@ def report(out_dir: Path) -> None:
     table = pd.DataFrame(rows).set_index("panel").T
     print(table.to_string())
     table.to_csv(out_dir / "summary.csv")
+
+    # The stopping rule from the validation loss alone (§5.2): replay every floor x
+    # patience on the recorded curves; a setting passes if, on every panel, the median run
+    # ends within 1% of its own loss minimum; choose the cheapest by epochs trained.
+    curves = {(panel, t): pd.read_csv(suite_dir(panel, t) / "history.csv").val_loss.values
+              for panel in PANELS for t in range(N_TRIALS)
+              if (suite_dir(panel, t) / "results.csv").exists()}
+    grid = []
+    for floor in (0, 30, 50, 75, 100, 150):
+        for patience in (7, 15, 25, 40):
+            row, cost = {"floor": floor, "patience": patience}, []
+            for panel in PANELS:
+                runs = [(v, replay_stopping(v, floor, patience))
+                        for (p, _), v in curves.items() if p == panel]
+                row[panel] = float(np.median([(v[kept - 1] - v.min()) / v.min() * 100
+                                              for v, (_, kept) in runs]))
+                cost += [stop for _, (stop, _) in runs]
+            row["passes"] = all(row[p] <= 1.0 for p in PANELS)
+            row["epochs trained"] = float(np.mean(cost))
+            grid.append(row)
+    grid = pd.DataFrame(grid)
+    print("\nStopping rule from the validation loss alone: % above each run's own loss minimum")
+    print(grid.round(2).to_string(index=False))
+    chosen = grid[grid.passes].sort_values("epochs trained").iloc[0]
+    print(f"cheapest passing: floor {int(chosen.floor)}, patience {int(chosen.patience)}")
+    grid.to_csv(out_dir / "stopping_rule_grid.csv", index=False)
 
     pred = pd.DataFrame(predict)
     print("\nDoes CE at epoch t predict the final validation rollout (epoch 150)?")
