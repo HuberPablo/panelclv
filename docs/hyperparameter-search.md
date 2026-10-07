@@ -13,6 +13,152 @@ Conventions: every interval is a 95% percentile bootstrap from `evaluation.effec
 (`docs/statistical-protocol.md`), and bold marks one that excludes 0. Family letters are
 those of `docs/studies-run.md` §4.
 
+## 0. Overview: every training configuration run
+
+Every training configuration that has been run, which model ran it, on which panels, and
+how many times, so it is clear which ones to keep.
+
+**The refit is in every forecast.** The refit's settings date from 15 June 2026. ADR-0008
+(commit `b2609d4`, 13 August) made it the only route to a forecast, and no study has
+overridden them: all 16,850 stored study configs carry empty `refit_kwargs`. Every holdout
+result below therefore comes from the same refit. The exceptions are the epoch probe (B3),
+which forecasts only the validation window, and the four-study pilot (A3).
+
+**Terms.**
+- **Refit:** 5 epochs over the full calibration window at learning rate 1e-3, batch 512,
+  no weight decay, with a fresh AdamW. It ignores the tuned settings (§3.5).
+- **Old score:** the validation loss as a mean of per-batch means. It favoured batch 256
+  on electronics and multichannel (§3.1), and every search before 4 October 2026 used it.
+- **Fixed score:** the per-cell mean (ADR-0010).
+- **Search:** TPE, 100 trials, over learning rate 1e-4–3e-3, weight decay 1e-6–1e-2 and
+  batch {64, 128, 256}. ValendinLSTM searches nothing else; the LSTM also searches its
+  widths and dropout.
+- **Pruner:** `MedianPruner`, from the 4th epoch, after 5 finished trials. It is on in
+  every searched configuration.
+- **Runs:** studies × trials × Monte Carlo paths. One study is one complete search, refit
+  and forecast.
+- **Panels:** the 2y windows (cdnow, electronics, gift, multichannel), the 3y windows
+  (electronics, gift, multichannel) and electronic_5y (the paper's cohort).
+
+### A. Configurations scored on the holdout
+
+**A1. Default:** patience 7, absolute threshold 1e-4, at most 100 epochs, search, pruner,
+refit, old score.
+
+| family (date) | model | inputs / arm | panels | runs |
+| --- | --- | --- | --- | --- |
+| N (13 Sep) | ValendinLSTM | count + week, the benchmark | 4 × 2y | 20 × 100 × 500 |
+| W (26–28 Sep) | ValendinLSTM | count + week | 5y | 20 × 100 × 500 |
+| O (13–14 Sep) | LSTM | 4 AR encodings | 4 × 2y | 100 × 100 × 500 per encoding |
+| P (14–15 Sep) | LSTM | 4 AR encodings | 3 × 3y | 100 × 100 × 500 per encoding |
+| T `archive` (20 Sep) | ValendinLSTM, LSTM | benchmark inputs | electronics | 20 × 100 × 200 |
+| T′ `archive` (21 Sep) | ValendinLSTM, LSTM | same | cdnow | 20 × 100 × 200 |
+| U `archive` (21 Sep) | ValendinLSTM, LSTM | no label / cluster label (`kmeans_8`) | 4 × 2y | 20 × 100 × 200 per cell |
+| V (21 Sep) | ValendinLSTM, LSTM | same | electronics, cdnow | 40 and 5 per model × 100 × 100; every trial scored, not only the winner |
+
+ValendinLSTM has never run on the 3y windows under A1: family Q's ValendinLSTM half is
+0 of 20.
+
+**A2. Default with the fixed score:** A1 with the per-cell score. The archive search space
+is restored (the registry has since pinned weight decay to 0 and added batch 32).
+
+| family | model | inputs | panels | runs |
+| --- | --- | --- | --- | --- |
+| U′ (4 Oct) | ValendinLSTM, LSTM | no label | electronics | 20 × 100 × 200 |
+| SR `patience7` (7 Oct) | ValendinLSTM | count + week | all 8 panel-calibrations | 20 × 100 × 500 |
+
+SR allows 200 epochs instead of 100; patience 7 reaches neither limit.
+
+**A3. Default without refit:** the forecast comes from the trial's own checkpoint.
+
+| run | model | panels | runs |
+| --- | --- | --- | --- |
+| pilot (24 Sep, not a family; §6.4) | LSTM; ValendinLSTM | electronics (3 studies); cdnow (1 study) | 121 trials in all, each forecast with and without the refit |
+
+Too small to support a claim.
+
+**A4. Notebook recipe, pinned (`paper`):** learning rate 1e-3, no weight decay, batch 32,
+patience 5, at most 150 epochs. One trial, so no search; refit as usual.
+
+| family | model | panels | runs |
+| --- | --- | --- | --- |
+| T | ValendinLSTM, LSTM | electronics | 20 × 1 × 200 |
+| T′ | ValendinLSTM, LSTM | cdnow | 20 × 1 × 200 |
+
+**A5. Notebook recipe with a 90-epoch floor** (`paper90`; `floored` in family U).
+
+| family | model | inputs | panels | runs |
+| --- | --- | --- | --- | --- |
+| T `paper90` | ValendinLSTM, LSTM | benchmark | electronics | 20 × 1 × 200 |
+| U `floored` | ValendinLSTM, LSTM | no label / cluster label | 4 × 2y | 20 × 1 × 200 per cell |
+
+**A6. Default with a 50-epoch floor (`floor50`):** at most 300 epochs, with the pruner's
+warm-up raised to the floor. Old score.
+
+| family | model | panels | runs |
+| --- | --- | --- | --- |
+| T | ValendinLSTM, LSTM | electronics | 20 × 100 × 200 |
+| T′ | ValendinLSTM, LSTM | cdnow | 20 × 100 × 200 |
+
+**A7. Late weights only (`select_from_epoch`):** the settings of family W's least-biased
+study, pinned (learning rate 2.2e-3, batch 32, no weight decay), patience 7, refit.
+
+| family | model | rule | panels | runs |
+| --- | --- | --- | --- | --- |
+| X (26–27 Sep) | ValendinLSTM; LSTM + `ar_bounded_52`; LSTM + cluster label | weights from any epoch / epoch 20 on / epoch 30 on | 5y | 20 × 1 × 500 per cell |
+| Y (27–28 Sep) | LSTMAttention, Transformer | searched, plus X's grid | 5y | 20 × 100 or 1 × 500 |
+
+**A8. PQ1 with pruner:** Prechelt's PQ1 rule replaces patience 7 (§5.2). Search, pruner,
+refit, fixed score.
+
+| family | model | panels | runs |
+| --- | --- | --- | --- |
+| SR `pq1` (7 Oct) | ValendinLSTM | all 8 panel-calibrations | 20 × 100 × 500 |
+
+**Never run.**
+
+| # | configuration | where owed |
+| --- | --- | --- |
+| A9 | PQ1 without the pruner, with refit | §5, test 1b |
+| A10 | PQ1 without refit (forecast from the checkpoint) | §5, test 4 |
+| A11 | refit at the tuned learning rate, keeping the optimiser state | §5, test 4 |
+| A12 | the average of several refits | §5, test 4 |
+| A13 | any configuration on today's registry search space (weight decay 0, batch 32 added) | — |
+
+### B. Diagnostics (no holdout forecast)
+
+| # | what | model | panels | runs |
+| --- | --- | --- | --- | --- |
+| B1 | early stopping off for 200 epochs, patience 7 replayed on the curve (`docs/insight-training-efficiency.md` §3.2) | ValendinLSTM, one fixed setting | electronics, multichannel, cdnow | 3 runs each |
+| B2 | the notebook's split against ours, 120 epochs (same doc, §3.3–3.4) | notebook recipe | electronics | 1 + 3 runs |
+| B3 | epoch probe: 150 epochs, no stopping, no pruning, no refit, forecast on the validation window at 8 checkpoints (§5.1–5.2) | ValendinLSTM, random settings | all 8 panel-calibrations | 20 trials each |
+| B4 | refit noise: one checkpoint refit twice (family R; `docs/model-selection.md` §2) | ValendinLSTM | 4 × 2y | 698 refits |
+
+### What to keep
+
+- **Only one comparison is clean:** A2 against A8 (family SR). Both arms use the fixed
+  score, the same code and model, and all 8 panel-calibrations. Everything in A1 and
+  A4–A7 predates the score fix.
+- **The floors and pinned recipes (A4–A7) were candidate fixes, now replaced by PQ1.** They
+  remain evidence that patience 7 undertrains on electronics and multichannel, not
+  settings to adopt.
+- **The refit was never varied.** Apart from the four-study pilot (A3), every result rests
+  on one untested refit.
+- **Coverage is uneven.** ValendinLSTM has 20 runs per configuration and is the only model
+  tested under PQ1. The LSTM's largest runs (O and P, 100 studies each) are all A1. The
+  Transformer's training length is untested outside 5y.
+- **No run uses today's registry search space.** U′ and SR restored the archive space so
+  they compare with the old runs.
+
+**Proposed decision.**
+- **Baseline:** A2 (SR `patience7`).
+- **Candidate default:** A8 (SR `pq1`).
+- **Supporting evidence:** A1; T and U with the old-score caveat; B3.
+- **Archived as superseded:** A4–A7.
+- **To run next, ValendinLSTM, 20 per arm:** A9, and the refit variants A10–A12. The refit
+  variants reuse the winners' checkpoints kept by SR's two arms, so they need no new
+  searches.
+
 ## 1. How a study runs
 
 One **study** is one search, its refit and its forecast. In order:
