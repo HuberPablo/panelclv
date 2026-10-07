@@ -167,7 +167,10 @@ LSTM's collapse on electronics.
 `refit_best_trial` runs at its defaults, and no experiment script passes `refit_kwargs`:
 5 epochs at learning rate 1e-3 and batch 512, with a fresh AdamW. A fresh Adam's first
 steps move each weight by about the learning rate, so a winner tuned at 1.6e-4 is
-fine-tuned at six times its rate, on weights the validation set never scored.
+fine-tuned at six times its rate, on weights the validation set never scored. The paper's
+own final step fine-tunes "at a large batch and a reduced learning rate"
+(`docs/insight-training-efficiency.md` §3.1); 1e-3 is Adam's default, not a reduced rate,
+so a refit at the tuned rate or below would be closer to Valendin et al. than the current one.
 
 This matches a lead in `docs/insight-training-efficiency.md` §8.2: with the cluster label,
 runs that drew a low learning rate over-forecast more, and the two worst electronics
@@ -200,12 +203,23 @@ kept epoch the search picks, the number of collapsed runs, and GPU time per stud
 | # | Test | Changes | Question |
 | --- | --- | --- | --- |
 | 0 | **Epoch probe** (§5.1) | nothing; every trial trains 150 epochs and its curve is recorded | when do trials become distinguishable, and when does a single run leave its flat start? Sets the pruner's warm-up and `min_epochs` from data |
-| 1 | **Current vs new settings** | Prechelt's PQ1 stopping rule (§5.2) against patience 7, under the fixed score, ValendinLSTM, all eight panel-calibrations | does PQ1 improve the holdout forecast? **Done with the pruner on in both arms (§5.3)**; PQ1 with pruning off is still owed |
+| 1 | **Current vs new settings** | Prechelt's PQ1 stopping rule (§5.2) against patience 7, under the fixed score, ValendinLSTM, all eight panel-calibrations | does PQ1 improve the holdout forecast? **Done with the pruner on in both arms (§5.3)** |
+| 1b | **PQ1 with pruning off** | one new arm, reusing both arms of §5.3: against PQ1 with pruning it isolates the pruner, against patience 7 it gives the full recommended change | does removing slow-starting trials from the pool cost the forecast? The one recommendation of §5.2 with no holdout evidence. Several times §5.3's cost, since every trial trains to its PQ1 stop |
+| 1c | **The CDNOW baseline shift** (§5.4) | nothing new: find what changed between family N (13 Sep) and §5.3's patience-7 arm | why is CDNOW worse under today's code at an unchanged batch choice? **Blocks** comparing §5.3's levels with the archived benchmark |
+| 1d | **Paired probe checks** | no new runs: per trial, validation MAPE at epoch 20 against epoch 150 (§5.1); PQ1 against patience 7 on the 3y and 5y curves only (§5.2) | do the probe's claims hold with intervals? Paired over the probe's 20 trials. The 2y comparison is excluded: PQ1 was chosen on those curves |
 | 2 | **Pruner** | current `MedianPruner` vs `HyperbandPruner` (`min_resource` from test 0, η = 3) vs none | does pruning at epoch 4 discard trials that would have won, and does pruning pay at all? |
 | 2b | **Hyperband η** | η = 3 vs η = 2, only if test 2 favours Hyperband | does gentler pruning change the winners? |
 | 3 | **Improvement threshold** | absolute 1e-4 vs a relative one, on multichannel | does the 4× stricter rule cut multichannel's training short? |
-| 4 | **Refit learning rate** | checkpoint vs refit forecasts, related to each winner's tuned learning rate | does refitting at 1e-3 damage winners tuned at a low rate? |
-| 5 | **Run-to-run spread** (§6) | one fixed configuration per panel retrained 20 times, each forecast from the checkpoint, the current refit, a refit at the tuned learning rate with the optimiser state kept, and the average of several refits | how much of the spread is training, refit and Monte Carlo, and which remedy narrows it? |
+| 4 | **The refit, four ways** (§3.5, §6) | the same checkpoints forecast with no refit, the current refit, a refit at the tuned learning rate with the optimiser state kept, and several refits; paired over checkpoints | does the refit help, does its learning rate matter, and how much of the run-to-run spread is the refit? An average of k refits is compared with an average of k no-refit forecasts, or on bias and Spearman only: averaging lowers MAPE by itself (Jensen, `docs/model-selection.md` §3.8) |
+
+**Considered and dropped.**
+- *A 90-epoch floor alone on CDNOW* (`docs/insight-training-efficiency.md` §5.3). PQ1
+  replaces floors, so explaining why the floored recipe blows up CDNOW changes no decision.
+- *More replications for the effects of §5.3 that narrowly miss.* Choosing which effects to
+  extend after seeing them is post hoc, and their observed size is likely inflated, so the
+  replications needed would be underestimated. A confirmatory run fixes its n in advance.
+- *Rerunning the score fix on multichannel for ValendinLSTM.* §5.3's patience-7 arm is that
+  rerun (§5.4). Only the LSTM's remains, and the LSTM is not the benchmark.
 
 ### 5.1 Test 0: the epoch probe
 
@@ -565,6 +579,12 @@ the gap between the current rule and the best fixed epoch on every one, and beat
 fixed epoch on three. What remains is **one
 holdout test** with the settings frozen: test 1.
 
+**What this comparison is.** A table of medians without intervals. PQ1 was chosen from the
+2y curves, so on 2y it is in-sample and is no test of PQ1. The 3y and 5y probes ran after
+the choice and are a genuine check, still on the validation window, and on trials with
+random hyperparameters rather than searched winners. Test 1d puts paired intervals on that
+check.
+
 ### 5.3 Holdout test of PQ1
 
 §5.2 chose PQ1 on the validation window. This tests it on the holdout, inside full
@@ -612,19 +632,72 @@ The arms' levels (patience 7 → PQ1): MAPE 52.4 → 41.1, 57.9 → 49.9, 29.0 �
   10 points (interval just reaching 0). Longer training lowers the forecast level; where
   patience 7 over-forecast this helps, where it already under-forecast it hurts.
 - **The holdout gain is far smaller than the validation gain.** On the validation window
-  PQ1 lowered MAPE by 19–37 points (§5.2); on the holdout it moves it by +2.5 to −11. Two reasons are
-  visible here. The pruner, on in both arms, keeps cutting long trials, so PQ1's winners
-  stop at a median epoch of 23–66, against 33–105 for the probe's unpruned runs. And the
-  validation window is not the holdout: the over-forecast that longer training removes on
-  the validation window is partly absent from the holdout (`docs/model-selection.md`
-  §3.3).
+  PQ1 lowered MAPE by 19–37 points (§5.2); on the holdout it moves it by +2.5 to −11.
+  - *The validation window is not the holdout.* The over-forecast that longer training
+    removes on the validation window is partly absent from the holdout
+    (`docs/model-selection.md` §3.3).
+  - *The trials differ.* The probe's trials draw random hyperparameters and are scored
+    before the refit. §5.3's winners are chosen by CE, which is wrong-signed for level on
+    electronics (`docs/model-selection.md` §3.3), and are then refit.
+  - *The pruner does not shorten the winners' training.* A pruned trial cannot win, so
+    each winner's kept epoch is its own PQ1 stop, close to that of the other completed
+    trials (table below). What the pruner does is remove 50–83% of trials, in both arms,
+    from the pool CE chooses among, mostly slow starters. Whether that costs the forecast
+    is test 1b; it is a hypothesis, not a finding.
+
+| panel | trials pruned, patience 7 / PQ1 | median kept epoch under PQ1, completed trials / winners |
+| --- | ---: | ---: |
+| 2y cdnow | 81% / 81% | 19.5 / 23 |
+| 2y electronics | 50% / 52% | 6 / 54 |
+| 2y gift | 73% / 76% | 37 / 35.5 |
+| 2y multichannel | 57% / 72% | 53 / 65.5 |
+| 3y electronics | 68% / 81% | 66 / 65 |
+| 3y gift | 83% / 82% | 44 / 46 |
+| 3y multichannel | 49% / 74% | 61.5 / 63 |
+| 5y electronics | 77% / 77% | 33.5 / 28.5 |
+
+*Pruned share: mean over the 20 studies. Kept epochs: per-study median of the completed
+trials, and the winner's, then the median over the 20 studies.*
+
+- **Read a lone borderline interval with care.** This section reports 40 intervals
+  (8 panels × 5 metrics); about 2 would exclude 0 by chance alone. The protocol applies no
+  correction, so the effects that recur across panels (the ranking gains) carry the
+  verdict, and a single borderline one, such as 2y gift's bias −10.4 [−20.7, −0.5], does
+  not.
 
 **Verdict.** PQ1 is a defensible replacement for patience 7: it never makes the ranking
 worse, makes it clearly better on the three panels where training was shortest, and
 lowers the total error there. It is not a uniform improvement in the level of the
 forecast, and on one panel it overshoots into under-forecasting. The test of the full
-setting §5.2 recommends — PQ1 **with pruning off** — has not been run; with the pruner on,
-this measures PQ1 as a drop-in change to the archived search.
+setting §5.2 recommends — PQ1 **with pruning off** — has not been run (test 1b); with the
+pruner on, this measures PQ1 as a drop-in change to the archived search.
+
+### 5.4 Is the patience-7 arm comparable with the archive?
+
+§5.3's patience-7 arm runs family N's protocol (the archived ValendinLSTM benchmark,
+`docs/benchmarks.md`) under today's code. The two configs differ only in the epoch budget
+(200 against 100, which patience 7 never reaches; `docs/insight-training-efficiency.md`
+§2) and in the search space being stated explicitly rather than read from the registry,
+where it was the same at the time. The intended difference is the per-cell score
+(ADR-0010). Δ is today minus family N, independent, n = 20 / 20, 2y windows:
+
+| panel | winners at batch 256, N → today | Δ MAPE | Δ bias % | Δ Spearman |
+| --- | --- | --- | --- | --- |
+| multichannel | 20 → 2 | **−35.8 [−54.1, −19.0]** | **−35.2 [−60.5, −10.8]** | +0.021 [−0.006, +0.049] |
+| electronics | 20 → 1 | **−12.9 [−19.1, −6.4]** | **−27.0 [−41.7, −12.4]** | **+0.074 [+0.027, +0.123]** |
+| gift | 0 → 0 | −0.7 [−4.2, +2.8] | +7.0 [−3.9, +18.1] | −0.001 [−0.012, +0.009] |
+| cdnow | 0 → 0 | **+16.2 [+2.3, +33.1]** | **+29.0 [+5.1, +55.4]** | +0.008 [−0.013, +0.026] |
+
+- **On electronics and multichannel the winners move off batch 256 and the forecast
+  improves markedly**, in line with family U′ (§3.1).
+- **CDNOW gets worse with no change in batch choice.** The score fix cannot explain that.
+  Either something else changed between 13 September and today (code or data), or it is a
+  chance result near the edge of its interval. Until it is explained (test 1c), the
+  electronics and multichannel gains cannot be credited to the score fix alone, and the
+  levels of §5.3 are not comparable with the archived benchmark rows. The Δ of §5.3 is
+  unaffected: both its arms ran the same code.
+
+*Recomputed from the stored predictions and best-trial files of both families.*
 
 ## 6. Why one configuration forecasts differently from run to run
 
@@ -749,11 +822,12 @@ intervals. Too few for the protocol: read this as direction.*
 - **It does not show that skipping the refit narrows the spread.** The sd above is across
   different trials, not across repeated runs of one configuration.
 
-**What is still owed (§5, test 5).** Refit-only noise is known (§6.1) and the pilot covers
+**What is still owed (§5, test 4).** Refit-only noise is known (§6.1) and the pilot covers
 four studies. Nobody has retrained one fixed configuration many times and forecast it with
 and without the refit, on every panel. That would split the spread into training, refit
 and Monte Carlo, and test the cheapest remedies: no refit, a refit at the tuned learning
-rate with the optimiser state kept, and averaging several refits (S7).
+rate with the optimiser state kept (closer to the paper's reduced-rate fine-tune, §3.5),
+and averaging several refits (S7). Test 4 scores them on the same checkpoints, paired.
 
 ### 6.5 Sources
 

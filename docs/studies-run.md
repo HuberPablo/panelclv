@@ -483,10 +483,11 @@ Ordered by what a result depends on.
    shard `a` exists in families B, G or H.
 10. **E2**: recompute `kmeans_8` before the validation window, and re-run electronics
     `archive / kmeans_8` (`docs/feature-engineering.md` §5).
-11. **E4 / E5**: a stopping rule that suits the flat temporal curve, and a floor scaled to
-    calibration length (`docs/insight-training-efficiency.md` §7).
-12. **The CDNOW tripling under the floored paper recipe** is unexplained after E1. It needs
-    a 90-epoch-floor arm on CDNOW (`docs/insight-training-efficiency.md` §5.3).
+11. **E4 / E5**: E4 is done as Prechelt's PQ1 stopping rule (family SR,
+    `docs/hyperparameter-search.md` §5.2–5.3); E5 is dropped, since PQ1 replaces floors.
+12. **The CDNOW tripling under the floored paper recipe** is unexplained after E1. No
+    longer planned: the floored recipe is not a candidate any more
+    (`docs/insight-training-efficiency.md` §5.3).
 
 ---
 

@@ -37,6 +37,16 @@ supported difference. How much a forecast moves when the same model is simply re
 | 13 | Collapse is undertraining on electronics and multichannel; on cdnow and gift it comes with the floored no-label recipe, after many updates | all four | descriptive | 8.2 |
 | 14 | Validation loss does not separate the worst runs from the best within a cell | all four | descriptive | 8.2 |
 
+**Every comparison against `archive` in claims 5–10 carries the biased score.** Families
+T, T′ and U predate ADR-0010: their `archive` arms were searched under a validation score
+that favoured batch 256 on electronics and multichannel (`docs/hyperparameter-search.md`
+§3.1). The pinned arms (`paper`, `paper90`, `floored`, batch 32) escape that bias as well
+as changing the training length, so part of their gain against `archive` is the score fix,
+and their Δ overstates the effect of training length alone. `floor50` was searched under
+the same biased score and still improves on electronics (§5.1), so the effect of a floor
+there stands. The cleaner holdout evidence for longer training is now
+`docs/hyperparameter-search.md` §5.3, where both arms use the fixed score.
+
 ## 1. How training stops
 
 The training loop (`fit_model`, `training/loop.py`) works like this:
@@ -448,6 +458,10 @@ For scale: ValendinLSTM `archive` scores MAPE 69.1 and Spearman 0.027; `paper90`
   come from a median epoch of 56 (ValendinLSTM) and 71.5 (LSTM) at batch 32, about
   1,500–1,900 updates. `floor50`'s come from epoch 67 and 26 at batch 256, about 330 and 110
   updates. The two arms also differ in learning rate and weight decay (§1.1).
+- **Part of `paper90`'s gain is the score fix.** `archive` picked batch 256 under the
+  biased score (§3.5, `docs/hyperparameter-search.md` §3.1); `paper90` pins batch 32 and
+  so escapes it. `floor50` was searched under the same biased score as `archive`, so its
+  gain is the floor's alone, and it is about as large.
 - **A floor works with our search left in place.** The searched `floor50` and the pinned
   `paper90` show no clear MAPE difference on either model. On Spearman, the searched LSTM
   ranks worse (−0.100, −0.138 to −0.063).
@@ -506,7 +520,9 @@ budget all at once. E1 changes one at a time (MAPE, n = 20 / 20):
   57.7 in family U. Their LSTMs read different inputs: `Transactions` alone in E1, plus
   `week_sin`/`week_cos` in family U (§4.2).
 - **E1 has no 90-epoch arm.** The remaining suspect is a 90-epoch floor on a 39-week
-  window, untested. §8.2 (Finding 6) narrows how it could act.
+  window, untested. §8.2 (Finding 6) narrows how it could act. **No longer planned:**
+  Prechelt's PQ1 replaces floors (`docs/hyperparameter-search.md` §5.2–5.3), so explaining
+  why the floored recipe blows up CDNOW changes no decision.
 
 ### 5.4 Electronic_5y: tighter, not better on average
 
@@ -552,18 +568,16 @@ The flags, label and attention cells of the same experiment are in
 | Epoch floor (`min_epochs`) | Tested (§5). Helps on electronics and multichannel, not on CDNOW, and hurts on gift. **Never an unconditional default.** |
 | The notebook's recipe | Tested (§5.1). Only works with a floor added. |
 | Batch 32 in the search space | Not the fix: under patience 7 it would still stop early. |
-| A relative improvement threshold (a fraction of the current best loss) | Untested (E4). Targets §3.3 directly: 10⁻⁴ is 0.11% of electronics' loss but 0.4% of multichannel's. |
-| Patience counted in optimiser steps, not epochs | Untested (E4). An epoch is 4 steps at batch 256 and 26 at batch 32. |
-| Stopping on a smoothed curve | Untested (E4). |
-| A fixed step budget with cosine decay, no early stopping | Untested (E4). Removes the problem instead of patching it. |
-| A floor scaled to the calibration length | Untested (E5). The prime suspect for CDNOW (§5.3). |
+| A stopping rule suited to the flat curve (E4) | **Done** as Prechelt's (1998) criteria, chosen on calibration data only: PQ1 is best on the validation window of all eight panel-calibrations, and on the holdout improves ranking where patience 7 trained shortest (`docs/hyperparameter-search.md` §5.2–5.3). PQ1 counts any decrease as an improvement, so it also removes the absolute 10⁻⁴ threshold of §3.3. |
+| Patience counted in optimiser steps, a smoothed curve, a fixed step budget with cosine decay | Not pursued: superseded by PQ1. |
+| A floor scaled to the calibration length (E5) | **Dropped**: PQ1 replaces floors (§5.3). |
 | Early stopping on a validation rollout | Untested, and the most expensive; see `docs/model-selection.md` S1 for its CDNOW risk. |
 | Going back to the customer-wise split | **Rejected.** It measures generalisation across customers, not across time. |
 | MAPE, bias or Spearman in the training loss | **Rejected.** They are not proper scoring rules (`docs/loss-functions.md`). |
 
-**Recommendation.** Run E4 on electronics first, 20 replications against family T's
-`archive`, then check CDNOW and gift before adopting anything. Whether family N's
-published rows are regenerated under the winner is a decision for an ADR.
+**Recommendation.** E4 ran as `docs/hyperparameter-search.md` §5.2–5.3, and PQ1 is the
+candidate default. What remains before adopting it is listed there (§5, tests 1b–1d and 4).
+Whether family N's published rows are regenerated under it is a decision for an ADR.
 
 ## 8. The worst and best runs
 
@@ -1418,8 +1432,10 @@ by +100 to +350%. The same recipe reading only `Transactions` (family T′, with
 inputs; which part matters is unknown.
 
 **Implications.**
-- The batch-dependent validation score is fixed (ADR-0010). Rerun the searched cells on
-  multichannel, where its bias was largest, before quoting their numbers.
+- The batch-dependent validation score is fixed (ADR-0010). For ValendinLSTM, the
+  patience-7 arm of `docs/hyperparameter-search.md` §5.3 is that rerun on every panel
+  (§5.4 there); it shows a CDNOW shift the fix cannot explain, so the comparison with the
+  archive is not yet clean. The LSTM's searched cells on multichannel are still unrerun.
 - The LSTM's collapse on electronics survives the fix: test a minimum number of epochs or
   a different pruner on top of it.
 - With the cluster column, test a lower bound on the learning rate.
