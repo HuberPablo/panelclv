@@ -173,6 +173,8 @@ This matches a lead in `docs/insight-training-efficiency.md` §8.2: with the clu
 runs that drew a low learning rate over-forecast more, and the two worst electronics
 ValendinLSTM runs used 1.6e-4 and 5.8e-4. Not measured. The test: forecast each winner from
 its checkpoint and from its refit, and relate the difference to its tuned learning rate.
+A four-study pilot of checkpoint against refit, and what the refit adds to the spread
+between runs, are in §6.
 
 ### 3.6 The sampler converges (fine)
 
@@ -203,6 +205,7 @@ kept epoch the search picks, the number of collapsed runs, and GPU time per stud
 | 2b | **Hyperband η** | η = 3 vs η = 2, only if test 2 favours Hyperband | does gentler pruning change the winners? |
 | 3 | **Improvement threshold** | absolute 1e-4 vs a relative one, on multichannel | does the 4× stricter rule cut multichannel's training short? |
 | 4 | **Refit learning rate** | checkpoint vs refit forecasts, related to each winner's tuned learning rate | does refitting at 1e-3 damage winners tuned at a low rate? |
+| 5 | **Run-to-run spread** (§6) | one fixed configuration per panel retrained 20 times, each forecast from the checkpoint, the current refit, a refit at the tuned learning rate with the optimiser state kept, and the average of several refits | how much of the spread is training, refit and Monte Carlo, and which remedy narrows it? |
 
 ### 5.1 Test 0: the epoch probe
 
@@ -622,3 +625,143 @@ lowers the total error there. It is not a uniform improvement in the level of th
 forecast, and on one panel it overshoots into under-forecasting. The test of the full
 setting §5.2 recommends — PQ1 **with pruning off** — has not been run; with the pruner on,
 this measures PQ1 as a drop-in change to the archived search.
+
+## 6. Why one configuration forecasts differently from run to run
+
+The same settings, trained again, give a different holdout forecast. This section collects
+where that spread comes from in the code, how large it is, whether the literature treats
+it as normal, and what has been measured about the refit. Nothing here changed code; the
+figures are recomputed from archived results (`.scratch/training-budget/results/`).
+
+### 6.1 How large it is
+
+`docs/insight-training-efficiency.md` §8.2 Finding 1: on MAPE and |bias|, half or more
+of the variance between runs lies between runs of the *same* cell, and on gift almost all
+of it. Pinning every setting does not remove it. The table sets the bias spread of pinned
+ValendinLSTM arms (20 runs each, one trial, nothing searched) beside the spread of the refit
+alone. The refit's sd is derived from the mean |difference| between two refits of one
+checkpoint (`docs/model-selection.md` §2), as sd = mean |Δ| · √π / 2.
+
+| panel, arm | bias sd across runs | refit-only bias sd | share of the variance |
+| --- | ---: | ---: | ---: |
+| electronics `paper` (keeps the same epoch in every run) | 11.1 | 5.3 | ~22% |
+| electronics `paper90` | 27.0 | 5.3 | ~4% |
+| CDNOW `paper` | 34.8 | 11.2 | ~10% |
+| gift `floored` | 13.9 | 13.3 | ~90% |
+
+*Descriptive. The refit noise was measured on family N's winners, not on these arms, so
+the shares are magnitudes.*
+
+- Even with nothing searched and the kept epoch fixed (electronics `paper`), bias moves
+  with an sd of 11 points.
+- On gift, the refit alone accounts for almost all of it.
+
+### 6.2 Where it comes from in the code
+
+1. **The selection loss cannot see the level.** Early stopping and Optuna read validation
+   CE. On electronics 1.4% of validation cells carry a purchase. A model that puts 10% too
+   much probability on a purchase forecasts a total about 10% too high, and that costs
+   6.7e-5 nats of CE: 0.08% of a CE of 0.084. A 30% error costs 0.6%. The winning CE
+   already varies by 0.08–3.1% across the replications of a cell (`docs/model-selection.md`
+   §2), so weights whose level differs by up to roughly 30% are tied for the selection.
+   This is underspecification (D'Amour et al., 2022): many weight settings score alike on
+   validation and behave differently on the quantity that matters, here the level.
+2. **The refit perturbs the selected weights** (`trials/refit.py:33-43`,
+   `training/loop.py:547-575`; §3.5).
+   - Its learning rate is 1e-3 whatever the tuned one, at batch 512 and no weight decay.
+   - It starts a fresh AdamW, whose first steps move every weight by about the learning
+     rate regardless of gradient size.
+   - The steps are few: 5 epochs is 10 steps on electronics (829 customers), 15 on
+     multichannel (1,402), 25 on gift (2,062) and CDNOW (2,357). On electronics the last
+     step is the 317-customer remainder batch.
+   - Their order is unseeded (`trials/loaders.py:151`), and the final weights are kept
+     with no check.
+   - Two refits of one checkpoint differ in bias by up to 31–51 points, depending on the
+     panel.
+3. **The kept epoch is the minimum of a flat, noisy curve** (`training/loop.py:415-421`).
+   Small noise decides the epoch: within one pinned arm it ranges over 1–82 (electronics
+   `paper90`) and 39–95 (multichannel `floored`). Weights from such different epochs score
+   almost the same CE (point 1) and forecast differently.
+4. **The rollout feeds its own samples back** (`benchmarks/valendin_lstm.py:195`,
+   `models/monte_carlo_forecasting.py`). Each sampled count is the next week's input,
+   for 52 weeks. Training always sees the true history (teacher forcing), so the model
+   never learns to correct its own errors, and a small difference in the conditional
+   compounds over the window: exposure bias (Bengio et al., 2015).
+
+**Minor sources.**
+- The Monte Carlo average is seeded per replication (`monte_carlo_forecasting.py:379`).
+  Its noise falls as 1/√500 and is small beside the four above (estimated, not measured).
+- GPU arithmetic is not bit-reproducible, and the vast.ai boxes differ in hardware. This
+  hardly matters on its own terms: a one-bit change to one initial weight already yields
+  nearly the full run-to-run spread (Summers & Dinneen, 2021). Seeding training would make
+  runs repeatable, not stable.
+- ValendinLSTM has no dropout.
+
+### 6.3 Is this normal?
+
+The spread itself is normal. Its size is not typical.
+- **The literature documents it.** The seed alone moves LSTM sequence taggers by about one
+  F1 point, which led Reimers & Gurevych (2017) to recommend reporting score
+  distributions. Bouthillier et al. (2021) find that data sampling, weight initialisation
+  and hyperparameter choice each move benchmark results markedly. This package already
+  reports distributions (`docs/statistical-protocol.md`).
+- **Fine-tuning is the most fragile step.** BERT fine-tuned hundreds of times, changing
+  only the seed, gives substantially different results, with many runs diverging on small
+  datasets (Dodge et al., 2020). The refit is such a step: a short warm-start fine-tune
+  with a fresh optimiser on 829–2,357 customers.
+- **Standard forecasting benchmarks report much smaller spreads.** Multi-seed sd is often
+  below 0.005 in normalised MSE (e.g. TimeCNN, 2024). Those series are large and
+  dense, scored on point errors. Here the panels are small, purchases are rare, the total
+  hangs on a 1–2% probability and the forecast is a 52-step feedback loop. Each of these
+  widens the spread.
+- **The standard remedy is to ensemble.** N-BEATS reports the median of 180 models whose
+  diversity includes different random initialisations (Oreshkin et al., 2020); Summers &
+  Dinneen (2021) propose ensembling too. In this package the ensemble of 20 replications
+  lowered CDNOW MAPE by 3–12 points (`docs/model-selection.md` §3.8, S6). Valendin et al.
+  report one model, which is one draw from this distribution.
+
+### 6.4 What was measured about the refit
+
+**A pilot: checkpoint against refit (24 September, not reported until now).**
+`.scratch/model-selection/no_refit.py` rolled every surviving trial of four studies out on
+the holdout twice: from the trial's checkpoint with no refit, and from its production
+refit. Three were LSTM studies on electronics (99 trials). One was a ValendinLSTM study on
+CDNOW (22 trials). It asked whether the refit breaks the link between selection and the
+forecast, not how much a single configuration spreads.
+
+| | electronics LSTM, no refit | electronics LSTM, refit | CDNOW ValendinLSTM, no refit | CDNOW ValendinLSTM, refit |
+| --- | ---: | ---: | ---: | ---: |
+| mean bias % | −6.0 | +19.8 | +16.8 | +5.9 |
+| mean MAPE | 51.7 | 57.2 | 50.8 | 48.8 |
+| sd of bias across a study's trials | 20.9 | 15.5 | 51.4 | 49.0 |
+| rank correlation of validation bias with holdout bias, across trials | +0.999 | −0.04 (−0.62, +0.27) | +0.09 | +0.30 |
+| rank correlation of no-refit bias with refit bias, across trials | — | −0.04 (−0.62, +0.27) | — | +0.71 |
+
+*Intervals over 3 studies, from the pilot's own bootstrap; CDNOW is one study, without
+intervals. Too few for the protocol: read this as direction.*
+
+- **On electronics the refit erased the validation signal.** Without the refit, a trial's
+  bias on the validation window ranked its holdout bias perfectly. After the refit the
+  ranking was gone, and the refit's ranking of trials was unrelated to the checkpoints'.
+  The refit also moved the level from −6% to +20%.
+- **On CDNOW the refit largely preserved the order** (+0.71) and changed the scores
+  little.
+- **It does not show that skipping the refit narrows the spread.** The sd above is across
+  different trials, not across repeated runs of one configuration.
+
+**What is still owed (§5, test 5).** Refit-only noise is known (§6.1) and the pilot covers
+four studies. Nobody has retrained one fixed configuration many times and forecast it with
+and without the refit, on every panel. That would split the spread into training, refit
+and Monte Carlo, and test the cheapest remedies: no refit, a refit at the tuned learning
+rate with the optimiser state kept, and averaging several refits (S7).
+
+### 6.5 Sources
+
+- Bengio, S., Vinyals, O., Jaitly, N., & Shazeer, N. (2015). Scheduled sampling for sequence prediction with recurrent neural networks. *NeurIPS*. Discussed in [Schmidt (2019), Generalization in Generation: A closer look at Exposure Bias](https://arxiv.org/pdf/1910.00292).
+- Bouthillier, X., et al. (2021). [Accounting for Variance in Machine Learning Benchmarks](https://arxiv.org/pdf/2103.03098). *MLSys*.
+- D'Amour, A., Heller, K., et al. (2022). [Underspecification Presents Challenges for Credibility in Modern Machine Learning](https://arxiv.org/pdf/2011.03395). *JMLR* 23.
+- Dodge, J., et al. (2020). [Fine-Tuning Pretrained Language Models: Weight Initializations, Data Orders, and Early Stopping](https://arxiv.org/abs/2002.06305). arXiv:2002.06305.
+- [TimeCNN: Refining Cross-Variable Interaction on Time Point for Time Series Forecasting](https://arxiv.org/pdf/2410.04853) (2024). arXiv:2410.04853. An example of multi-seed sd on dense forecasting benchmarks.
+- Oreshkin, B. N., Carpov, D., Chapados, N., & Bengio, Y. (2020). [N-BEATS: Neural basis expansion analysis for interpretable time series forecasting](https://arxiv.org/pdf/1905.10437). *ICLR*.
+- Reimers, N., & Gurevych, I. (2017). [Reporting Score Distributions Makes a Difference: Performance Study of LSTM-networks for Sequence Tagging](https://arxiv.org/pdf/1707.09861). *EMNLP*.
+- Summers, C., & Dinneen, M. J. (2021). [Nondeterminism and Instability in Neural Network Optimization](https://proceedings.mlr.press/v139/summers21a.html). *ICML*, PMLR 139.
