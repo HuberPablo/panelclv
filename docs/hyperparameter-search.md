@@ -6,8 +6,8 @@ with standard practice, what was measured, and what is still to test. Model sele
 length is in `docs/insight-training-efficiency.md`.
 
 It is not a grid search. Optuna's TPE sampler draws each trial's settings from what
-earlier trials scored, so it concentrates on whatever the score favours. That makes the
-score itself the first thing to get right (§3.1).
+earlier trials scored on the validation loss, so it concentrates on whatever that loss
+favours. That makes the validation loss itself the first thing to get right (§3.1).
 
 Conventions: every interval is a 95% percentile bootstrap from `evaluation.effects.effect`
 (`docs/statistical-protocol.md`), and bold marks one that excludes 0. Family letters are
@@ -27,9 +27,15 @@ which forecasts only the validation window, and the four-study pilot (A3).
 **Terms.**
 - **Refit:** 5 epochs over the full calibration window at learning rate 1e-3, batch 512,
   no weight decay, with a fresh AdamW. It ignores the tuned settings (§3.5).
-- **Old score:** the validation loss as a mean of per-batch means. It favoured batch 256
-  on electronics and multichannel (§3.1), and every search before 4 October 2026 used it.
-- **Fixed score:** the per-cell mean (ADR-0010).
+- **Validation loss:** the mean cross-entropy over the validation window. Early stopping
+  reads it to pick the epoch, and the search reads it to pick the trial. One *cell* is one
+  customer in one period, so the loss has one term per cell.
+- **Biased validation loss:** how the loss was computed before 4 October 2026. It averaged
+  each batch's mean, so the short last batch counted as much as a full one, and the value
+  shifted with the batch size. It favoured batch 256 on electronics and multichannel
+  (§3.1). Every search before that date used it.
+- **Corrected validation loss:** the plain mean over every cell, the same at any batch
+  size (ADR-0010).
 - **Search:** TPE, 100 trials, over learning rate 1e-4–3e-3, weight decay 1e-6–1e-2 and
   batch {64, 128, 256}. ValendinLSTM searches nothing else; the LSTM also searches its
   widths and dropout.
@@ -43,7 +49,7 @@ which forecasts only the validation window, and the four-study pilot (A3).
 ### A. Configurations scored on the holdout
 
 **A1. Default:** patience 7, absolute threshold 1e-4, at most 100 epochs, search, pruner,
-refit, old score.
+refit, biased validation loss.
 
 | family (date) | model | inputs / arm | panels | runs |
 | --- | --- | --- | --- | --- |
@@ -56,11 +62,11 @@ refit, old score.
 | U `archive` (21 Sep) | ValendinLSTM, LSTM | no label / cluster label (`kmeans_8`) | 4 × 2y | 20 × 100 × 200 per cell |
 | V (21 Sep) | ValendinLSTM, LSTM | same | electronics, cdnow | 40 and 5 per model × 100 × 100; every trial scored, not only the winner |
 
-ValendinLSTM has never run on the 3y windows under A1: family Q's ValendinLSTM half is
-0 of 20.
 
-**A2. Default with the fixed score:** A1 with the per-cell score. The archive search space
-is restored (the registry has since pinned weight decay to 0 and added batch 32).
+**A2. Default, corrected validation loss:** the same settings as A1, but the search and
+early stopping read the corrected validation loss instead of the biased one. The search
+space is the archive's, as in A1 (the registry has since pinned weight decay to 0 and
+added batch 32).
 
 | family | model | inputs | panels | runs |
 | --- | --- | --- | --- | --- |
@@ -93,7 +99,7 @@ patience 5, at most 150 epochs. One trial, so no search; refit as usual.
 | U `floored` | ValendinLSTM, LSTM | no label / cluster label | 4 × 2y | 20 × 1 × 200 per cell |
 
 **A6. Default with a 50-epoch floor (`floor50`):** at most 300 epochs, with the pruner's
-warm-up raised to the floor. Old score.
+warm-up raised to the floor. Biased validation loss.
 
 | family | model | panels | runs |
 | --- | --- | --- | --- |
@@ -109,7 +115,7 @@ study, pinned (learning rate 2.2e-3, batch 32, no weight decay), patience 7, ref
 | Y (27–28 Sep) | LSTMAttention, Transformer | searched, plus X's grid | 5y | 20 × 100 or 1 × 500 |
 
 **A8. PQ1 with pruner:** Prechelt's PQ1 rule replaces patience 7 (§5.2). Search, pruner,
-refit, fixed score.
+refit, corrected validation loss.
 
 | family | model | panels | runs |
 | --- | --- | --- | --- |
@@ -136,9 +142,9 @@ refit, fixed score.
 
 ### What to keep
 
-- **Only one comparison is clean:** A2 against A8 (family SR). Both arms use the fixed
-  score, the same code and model, and all 8 panel-calibrations. Everything in A1 and
-  A4–A7 predates the score fix.
+- **Only one comparison is clean:** A2 against A8 (family SR). Both arms use the corrected
+  validation loss, the same code and model, and all 8 panel-calibrations. Everything in
+  A1 and A4–A7 used the biased one.
 - **The floors and pinned recipes (A4–A7) were candidate fixes, now replaced by PQ1.** They
   remain evidence that patience 7 undertrains on electronics and multichannel, not
   settings to adopt.
@@ -153,7 +159,8 @@ refit, fixed score.
 **Proposed decision.**
 - **Baseline:** A2 (SR `patience7`).
 - **Candidate default:** A8 (SR `pq1`).
-- **Supporting evidence:** A1; T and U with the old-score caveat; B3.
+- **Supporting evidence:** A1; T and U, bearing in mind they used the biased validation
+  loss; B3.
 - **Archived as superseded:** A4–A7.
 - **To run next, ValendinLSTM, 20 per arm:** A9, and the refit variants A10–A12. The refit
   variants reuse the winners' checkpoints kept by SR's two arms, so they need no new
@@ -199,7 +206,7 @@ one must restore it (family U′ does, §4).
 
 | # | Piece | What this package does | Standard practice | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Epoch loss | **was** a mean of per-batch means; now the per-cell mean | the per-sample mean (Keras metrics, Lightning's epoch logging) | **fixed**, ADR-0010 (§3.1) |
+| 1 | Epoch loss | **was** a mean of per-batch means; now the mean over all customer-periods | the per-sample mean (Keras metrics, Lightning's epoch logging) | **fixed**, ADR-0010 (§3.1) |
 | 2 | Pruner | `MedianPruner`, warm-up 3 epochs, 5 startup trials | Optuna's defaults are warm-up 0, 5 startup trials; Optuna's own benchmark pairs **Hyperband** with TPE and the median rule with random search | open (§3.2) |
 | 3 | Pruning unit | epochs | epochs: standard | noted (§3.2) |
 | 4 | Improvement threshold | absolute 1e-4 | a threshold relative to the loss, or patience sized to the curve | open (§3.3) |
@@ -209,15 +216,15 @@ one must restore it (family U′ does, §4).
 
 ## 3. What was found
 
-### 3.1 The validation score depended on the batch size (fixed)
+### 3.1 The validation loss depended on the batch size (fixed)
 
 Until commit af2b14b, `validate_one_epoch` returned the mean of its per-batch means. The
 validation loader runs at the trial's batch size, in fixed customer order, so the short
 last batch counted as much as a full one. At batch 256 on electronics, the 61 highest-id
-customers carried 25% of the score instead of 7%.
+customers carried 25% of the validation loss instead of 7%.
 
 Family U's stored winners, scored at every batch size with their weights fixed, against
-the true per-cell mean:
+the true mean over all customer-periods:
 
 | panel | the short batch's loss vs average | batch 64 | batch 256 |
 | --- | ---: | ---: | ---: |
@@ -234,7 +241,7 @@ the true per-cell mean:
   less than average; on CDNOW and gift, more.
 
 **The fix** weights each batch by the cells it scored (`_batch_weight`, `loop.py:67`), so
-the score is the exact per-cell mean at any batch size. Shuffling the validation set was
+the validation loss is the exact mean over all cells at any batch size. Shuffling the validation set was
 rejected: at batch 256 it leaves a 95% range of ±3–9% around the true mean.
 
 **The rerun** (family U′, electronics · `archive` · no cluster label, 20 replications per
@@ -249,7 +256,7 @@ model, `docs/model-selection.md` §3.9):
 
 The fix removed the preference for batch 256. ValendinLSTM then trains longer and 5 of 20
 runs no longer collapse. The LSTM moves to batch 64 but still stops after about 4 epochs
-and collapses: the score was one cause of stopping too early, not the only one.
+and collapses: the biased validation loss was one cause of stopping too early, not the only one.
 
 ### 3.2 The pruner judges trials before their curves separate (open)
 
@@ -263,7 +270,7 @@ stopped 56–73% of trials per panel in the archive (48–50% in the U′ rerun)
   early, not those that end best.
 - **It compares trials at equal epochs.** That is the standard unit, but at the same
   epoch a batch-32 trial has made 8× more updates than a batch-256 trial.
-- **It compared trials on the biased score of §3.1** in every archived search.
+- **It compared trials on the biased validation loss of §3.1** in every archived search.
 - **Which epoch trials were pruned at is not recoverable.** The per-epoch values lived in
   Optuna's in-memory storage and were never written out.
 
@@ -328,28 +335,28 @@ between runs, are in §6.
 ### 3.6 The sampler converges (fine)
 
 The median winner is trial 46–56 of 100, so TPE is still finding better trials late. In the
-archive it converged on the biased score of §3.1; with the fix it converges on the true
-one.
+archive it converged on the biased validation loss of §3.1; with the fix it converges on
+the corrected one.
 
 ## 4. Runs
 
 | family | what | status |
 | --- | --- | --- |
-| U′ | electronics · `archive` · no cluster label, rerun with the fixed score; archive search space restored | complete, §3.1 (`.scratch/score-fix/`) |
+| U′ | electronics · `archive` · no cluster label, rerun with the corrected validation loss; archive search space restored | complete, §3.1 (`.scratch/score-fix/`) |
 | EP | the epoch probe of §5.1: ValendinLSTM, 20 trials per panel, 150 epochs, no early stopping, no pruning, 2y windows | complete, §5.1 (76 items on vast.ai, 4 locally; $0.84) |
 | EP-3y/5y | the same probe on the 3y windows (electronics, gift, multichannel) and the 5y electronics split | complete, §5.2 (78 items on vast.ai, 2 locally) |
 | SR | holdout test of PQ1: ValendinLSTM searches under patience 7 and under PQ1, all 8 panel-calibrations, 20 replications each | complete, §5.3 (320 studies on vast.ai, 7 Oct; $8.74) |
 
 ## 5. Tests owed
 
-Every test changes one thing against a fixed-score baseline and is compared on MAPE, bias
+Every test changes one thing against a baseline that uses the corrected validation loss and is compared on MAPE, bias
 and Spearman with independent bootstrap intervals, plus which batch, learning rate and
 kept epoch the search picks, the number of collapsed runs, and GPU time per study.
 
 | # | Test | Changes | Question |
 | --- | --- | --- | --- |
 | 0 | **Epoch probe** (§5.1) | nothing; every trial trains 150 epochs and its curve is recorded | when do trials become distinguishable, and when does a single run leave its flat start? Sets the pruner's warm-up and `min_epochs` from data |
-| 1 | **Current vs new settings** | Prechelt's PQ1 stopping rule (§5.2) against patience 7, under the fixed score, ValendinLSTM, all eight panel-calibrations | does PQ1 improve the holdout forecast? **Done with the pruner on in both arms (§5.3)** |
+| 1 | **Current vs new settings** | Prechelt's PQ1 stopping rule (§5.2) against patience 7, with the corrected validation loss, ValendinLSTM, all eight panel-calibrations | does PQ1 improve the holdout forecast? **Done with the pruner on in both arms (§5.3)** |
 | 1b | **PQ1 with pruning off** | one new arm, reusing both arms of §5.3: against PQ1 with pruning it isolates the pruner, against patience 7 it gives the full recommended change | does removing slow-starting trials from the pool cost the forecast? The one recommendation of §5.2 with no holdout evidence. Several times §5.3's cost, since every trial trains to its PQ1 stop |
 | 1c | **The CDNOW baseline shift** (§5.4) | nothing new: find what changed between family N (13 Sep) and §5.3's patience-7 arm | why is CDNOW worse under today's code at an unchanged batch choice? **Blocks** comparing §5.3's levels with the archived benchmark |
 | 1d | **Paired probe checks** | no new runs: per trial, validation MAPE at epoch 20 against epoch 150 (§5.1); PQ1 against patience 7 on the 3y and 5y curves only (§5.2) | do the probe's claims hold with intervals? Paired over the probe's 20 trials. The 2y comparison is excluded: PQ1 was chosen on those curves |
@@ -364,7 +371,7 @@ kept epoch the search picks, the number of collapsed runs, and GPU time per stud
 - *More replications for the effects of §5.3 that narrowly miss.* Choosing which effects to
   extend after seeing them is post hoc, and their observed size is likely inflated, so the
   replications needed would be underestimated. A confirmatory run fixes its n in advance.
-- *Rerunning the score fix on multichannel for ValendinLSTM.* §5.3's patience-7 arm is that
+- *Rerunning with the corrected validation loss on multichannel for ValendinLSTM.* §5.3's patience-7 arm is that
   rerun (§5.4). Only the LSTM's remains, and the LSTM is not the benchmark.
 
 ### 5.1 Test 0: the epoch probe
@@ -384,8 +391,8 @@ archive) were set by convention or precedent. Both should be set where the curve
   {64, 128, 256}). Random rather than TPE, so the trials represent the space rather than
   one search's preferences. The same 20 draws on every panel, seeded from one config
   value.
-- Each trial trains **150 epochs with no early stopping and no pruning**, under the fixed
-  score (ADR-0010). The validation loss is recorded at every epoch.
+- Each trial trains **150 epochs with no early stopping and no pruning**, with the corrected
+  validation loss (ADR-0010). The validation loss is recorded at every epoch.
 - At epochs 5, 10, 20, 30, 50, 75, 100 and 150 the weights are **rolled out over the
   validation window** (warm-up on the periods before it, 100 paths) and scored with
   `compute_forecast_metrics` plus Spearman, the family V procedure. The holdout is never
@@ -738,7 +745,7 @@ searches.
 
 **Design.** `scripts/run_stopping_rule.py`. ValendinLSTM (count and week, both embedded),
 100 TPE trials, 20 replications, 500 paths, the ADR-0008 refit: family N's protocol. Two
-arms under today's code, including the per-cell score (ADR-0010), identical but for the
+arms under today's code, including the corrected validation loss (ADR-0010), identical but for the
 stopping rule: `patience7` and `pq1` (`fit_model(stop_pq=1.0)`). Both allow 200 epochs;
 the search space is the archive's (weight decay searched, batch {64, 128, 256}); **the
 default pruner is on in both arms**. All eight panel-calibrations of §5.2. Δ is PQ1 minus
@@ -824,8 +831,8 @@ pruner on, this measures PQ1 as a drop-in change to the archived search.
 `docs/benchmarks.md`) under today's code. The two configs differ only in the epoch budget
 (200 against 100, which patience 7 never reaches; `docs/insight-training-efficiency.md`
 §2) and in the search space being stated explicitly rather than read from the registry,
-where it was the same at the time. The intended difference is the per-cell score
-(ADR-0010). Δ is today minus family N, independent, n = 20 / 20, 2y windows:
+where it was the same at the time. The intended difference is the corrected
+validation loss (ADR-0010). Δ is today minus family N, independent, n = 20 / 20, 2y windows:
 
 | panel | winners at batch 256, N → today | Δ MAPE | Δ bias % | Δ Spearman |
 | --- | --- | --- | --- | --- |
@@ -836,10 +843,11 @@ where it was the same at the time. The intended difference is the per-cell score
 
 - **On electronics and multichannel the winners move off batch 256 and the forecast
   improves markedly**, in line with family U′ (§3.1).
-- **CDNOW gets worse with no change in batch choice.** The score fix cannot explain that.
+- **CDNOW gets worse with no change in batch choice.** The corrected validation loss
+  cannot explain that.
   Either something else changed between 13 September and today (code or data), or it is a
   chance result near the edge of its interval. Until it is explained (test 1c), the
-  electronics and multichannel gains cannot be credited to the score fix alone, and the
+  electronics and multichannel gains cannot be credited to the corrected validation loss alone, and the
   levels of §5.3 are not comparable with the archived benchmark rows. The Δ of §5.3 is
   unaffected: both its arms ran the same code.
 
