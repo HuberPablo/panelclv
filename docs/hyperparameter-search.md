@@ -503,6 +503,11 @@ space, sampled at random rather than by TPE.
 
 ### 5.2 Choosing the settings from calibration data only
 
+> **Every result in this section is on the validation window, not the holdout.** The
+> validation window is the last part of the calibration period (the last year of a 2y,
+> 3y or 5y calibration). The holdout is never read here. The holdout test of what this
+> section chooses is §5.3, and its gains are much smaller.
+
 **The aim.** Set every training and search setting using only data inside the
 calibration window — the validation loss and the validation-window forecast — then freeze
 them and touch the holdout once, for the final evaluation. If that works, the settings are
@@ -557,9 +562,9 @@ epoch of the loss minimum. Regenerate with
 
 ![multichannel](figures/epoch-probe/multichannel.png)
 
-#### Did it work?
+#### Did it work? (validation window)
 
-Validation-window MAPE at the epoch each criterion keeps, medians over the 20 trials per
+Validation-window MAPE (not holdout) at the epoch each criterion keeps, medians over the 20 trials per
 panel, with the median epoch kept in brackets. *Epochs trained* is the mean over all 80
 runs, the cost. The *oracle* is the single checkpoint with the best median validation
 forecast: the best a fixed epoch for all trials could do on this window, chosen by looking
@@ -584,8 +589,8 @@ at the forecast, which the criteria do not.
 How far above its own loss minimum each run ends, median: patience 7 3–7%, GL 6–16%,
 PQ0.5 1–3%, PQ1 0–0.9%, PQ2 and PQ3 0–0.1%, UP 0–1.5%.
 
-PQ1 in full, against the current rule and the oracle (MAPE / |bias| % / Spearman /
-collapsed trials of 20):
+PQ1 in full on the validation window, against the current rule and the oracle (MAPE /
+|bias| % / Spearman / collapsed trials of 20):
 
 | panel | current: patience 7 | PQ1 | oracle |
 | --- | --- | --- | --- |
@@ -630,7 +635,8 @@ local GPU, 6 October 2026):
   last 52 weeks validating.
 
 The same 20 trials, 150 epochs, no early stopping and no pruning; the holdout is not read.
-Validation-window MAPE at the epoch each criterion keeps (median epoch in brackets):
+Validation-window MAPE (not holdout) at the epoch each criterion keeps (median epoch in
+brackets):
 
 | criterion | 3y electronics | 3y gift | 3y multichannel | epochs trained |
 | --- | --- | --- | --- | ---: |
@@ -664,7 +670,8 @@ Validation-window MAPE at the epoch each criterion keeps (median epoch in bracke
 | UP4 | 23.0 (132) | 144 |
 | oracle | 23.5 (100) | — |
 
-PQ1 in full (MAPE / |bias| % / Spearman / collapsed trials of 20):
+PQ1 in full on the validation window (MAPE / |bias| % / Spearman / collapsed trials of
+20):
 
 | panel | current: patience 7 | PQ1 | oracle |
 | --- | --- | --- | --- |
