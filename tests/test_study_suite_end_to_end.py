@@ -302,3 +302,62 @@ def test_explicit_refit_kwargs_still_win():
     merged = {**_refit_loss_args(spec, _FakeStudy({})), **{"loss_type": "cross_entropy"}}
 
     assert merged["loss_type"] == "cross_entropy"
+
+
+def test_without_a_refit_the_forecast_comes_from_the_winning_checkpoint(tmp_path):
+    """`refit=False` rolls out the winning checkpoint's own weights (ADR-0011).
+
+    The rollout model `load_best_trial` returns must carry exactly the weights the
+    study saved for its winner: a stray training step, or a model built from the wrong
+    trial, would make the no-refit arm one more refit under another name.
+    """
+    import torch
+
+    from panelclv.tuning import run_optuna_study
+    from panelclv.trials import load_best_trial, make_data_builder
+
+    data = panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    training = {"n_epochs": N_EPOCHS, "patience": 2, "verbose": False, "seed": 1,
+                "checkpoint_dir": str(tmp_path / "checkpoints")}
+    study = run_optuna_study(model_type="lstm", data_builder=make_data_builder(data),
+                             training=training, n_trials=N_TRIALS, device="cpu",
+                             summary_dir=tmp_path, append_timestamp=False)
+
+    rollout_model, _ = load_best_trial(study, data, "lstm")
+    saved = torch.load(study.best_trial.user_attrs["checkpoint_path"], map_location="cpu")
+    loaded = rollout_model.state_dict()
+    shared = [k for k in saved if k in loaded]
+    assert shared, "the rollout model shares no parameter names with the checkpoint"
+    for key in shared:
+        assert torch.equal(saved[key].cpu(), loaded[key].cpu()), key
+
+
+def test_a_suite_without_a_refit_records_it_and_forecasts_the_holdout(tmp_path):
+    """The flag reaches `results.csv` and the suite record, and the forecast is whole."""
+    data = panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    root = run_study_suite(StudySuiteConfig(
+        studies_base_path=str(tmp_path), suite_name="no_refit", n_studies_per_model=1,
+        n_simulations=N_SIMULATIONS, device="cpu", data=data, refit=False,
+        models=[ModelSpec(name="LSTM", model_type="lstm", n_trials=N_TRIALS,
+                          training={"n_epochs": N_EPOCHS, "patience": 2, "verbose": False})],
+    ))
+
+    results = pd.read_csv(root / "results.csv")
+    assert results["refit"].tolist() == [False]
+    assert results["mape_aggregate"].notna().all()
+    assert json.loads((root / "config.json").read_text())["refit"] is False
+    assert not (root / "LSTM" / "Optuna_Studies" / "study_01" / "refit_checkpoints").exists()
+    forecast = pd.read_csv(root / "LSTM" / "Predictions" / "Prediction_1.csv")
+    assert forecast.shape == (len(data["ids"]), int(data["T_HOLD"]) + 1)
+
+
+def test_refit_kwargs_without_a_refit_are_refused(tmp_path):
+    """Settings for a step that will not run are a mistake, not a no-op."""
+    data = panel_dataset.prepare_dataset(_golden_panel(), _golden_config(), verbose=False)
+    config = StudySuiteConfig(
+        studies_base_path=str(tmp_path), suite_name="s", data=data, refit=False,
+        refit_kwargs={"n_epochs": 3},
+        models=[ModelSpec(name="LSTM", model_type="lstm")],
+    )
+    with pytest.raises(ValueError, match="refit=False"):
+        config.validate()

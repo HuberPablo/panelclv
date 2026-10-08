@@ -6,7 +6,7 @@ config and calls the existing pieces:
     prepare_dataset (already done by the user, shared as config.data)
         -> make_data_builder                 (panelclv.trials)
         -> run_optuna_study                  (panelclv.tuning)
-        -> refit_best_trial                  (panelclv.trials)
+        -> refit_best_trial, or load_best_trial when refit=False  (panelclv.trials)
         -> the rollout its registry entry declares       (panelclv.registry)
         -> save_predictions_to_csv           (panelclv.predictions)
         -> compute_forecast_metrics          (panelclv.models)
@@ -35,7 +35,7 @@ from panelclv.data_preparation.target_channel import holdout_actuals
 from panelclv.models import compute_forecast_metrics
 from panelclv.predictions import DEFAULT_ID_COL, save_predictions_to_csv
 from panelclv.registry import rollout_for
-from panelclv.trials import make_data_builder, refit_best_trial
+from panelclv.trials import load_best_trial, make_data_builder, refit_best_trial
 from panelclv.tuning import run_optuna_study
 
 from .config import StudySuiteConfig, ModelSpec
@@ -143,9 +143,10 @@ def _run_neural_model(
             keep_only_best_checkpoint=config.keep_only_best_checkpoint,
         )
 
-        # Every forecast comes from a refit on the full calibration window (ADR-0008).
-        # Explicit device/checkpoint_dir first, then the study's own loss, then user
-        # refit_kwargs (may override any of it).
+        # The forecast comes from a refit on the full calibration window (ADR-0008)
+        # unless the suite asks for the winning checkpoint as it stands (ADR-0011).
+        # For the refit: explicit device/checkpoint_dir first, then the study's own
+        # loss, then user refit_kwargs (may override any of it).
         #
         # The loss has to be forwarded. The refit is where the forecast comes from, so a
         # study tuned under one objective whose refit optimises another is not the model
@@ -153,15 +154,18 @@ def _run_neural_model(
         # every non-default `loss_type` was silently discarded at exactly the step that
         # produces the numbers. It cost nothing while `cross_entropy` was the only loss
         # anyone ran; it invalidates a loss ablation outright.
-        refit_args = {
-            "device": config.device,
-            "checkpoint_dir": str(sdir / "refit_checkpoints"),
-            **_refit_loss_args(spec, study),
-            **config.refit_kwargs,
-        }
-        rollout_model, data_best = refit_best_trial(
-            study, config.data, spec.model_type, **refit_args
-        )
+        if config.refit:
+            refit_args = {
+                "device": config.device,
+                "checkpoint_dir": str(sdir / "refit_checkpoints"),
+                **_refit_loss_args(spec, study),
+                **config.refit_kwargs,
+            }
+            rollout_model, data_best = refit_best_trial(
+                study, config.data, spec.model_type, **refit_args
+            )
+        else:
+            rollout_model, data_best = load_best_trial(study, config.data, spec.model_type)
 
         forecast = forecaster(
             rollout_model,
@@ -185,6 +189,7 @@ def _run_neural_model(
                 "study": i,
                 "seed": seed,
                 "objective": float(study.best_value),
+                "refit": config.refit,
                 **metrics,
                 **{f"param_{k}": v for k, v in study.best_params.items()},
             }
@@ -272,6 +277,7 @@ def _suite_record(config: StudySuiteConfig) -> dict[str, Any]:
         "base_seed": config.base_seed,
         "device": config.device,
         "refit_kwargs": config.refit_kwargs,
+        "refit": config.refit,
         "overwrite": config.overwrite,
         "keep_only_best_checkpoint": config.keep_only_best_checkpoint,
         # Full PanelConfig (all fields, post-normalization) — the dataset recipe.
@@ -313,6 +319,7 @@ def _model_record(spec: ModelSpec, config: StudySuiteConfig) -> dict[str, Any]:
         record["search_space"] = spec.search_space
         record["training"] = spec.training
         record["refit_kwargs"] = config.refit_kwargs
+        record["refit"] = config.refit
         record["seeds"] = [
             config.base_seed + i for i in range(1, config.n_studies_per_model + 1)
         ]

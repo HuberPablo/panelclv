@@ -1,11 +1,16 @@
-"""Turning a finished study into the model that forecasts the holdout (ADR-0008).
+"""Turning a finished study into the model that forecasts the holdout (ADR-0008, ADR-0011).
 
 A study leaves behind a winning trial: an architecture, a feature subset and a
-checkpoint. Getting from there to a forecast is a refit — the winning weights are
-warm-started and fine-tuned for a few large-batch epochs over the **full** calibration
-window, validation tail included, per Valendin et al. That is the only route to a
-forecast in this package, and it ends by asking the refit model for its rollout model
-(ADR-0007) rather than rebuilding one beside it from the study's stored parameters.
+checkpoint. There are two routes from there to a forecast:
+
+- ``refit_best_trial`` — the winning weights are warm-started and fine-tuned for a few
+  large-batch epochs over the **full** calibration window, validation tail included, as
+  the Valendin et al. paper describes. The default.
+- ``load_best_trial`` — the winning checkpoint as it stands, with no further training,
+  as Valendin et al.'s published results are produced (ADR-0011).
+
+Both end by asking the model for its rollout model (ADR-0007) rather than rebuilding
+one beside it from the study's stored parameters.
 """
 
 from __future__ import annotations
@@ -52,8 +57,8 @@ def refit_best_trial(
 ) -> tuple[torch.nn.Module, dict[str, Any]]:
     """Warm-start retrain the study's best model on the FULL calibration window.
 
-    The paper's final step, and this package's only route to a forecast (ADR-0008):
-    take the architecture / stopping epoch the Optuna study selected on the temporal
+    The paper's final step, and this package's default route to a forecast (ADR-0008;
+    ``load_best_trial`` is the other, ADR-0011): take the architecture / stopping epoch the Optuna study selected on the temporal
     validation window, then fine-tune the winning weights for a few epochs (big batch)
     on the full calibration window — validation tail included — so the model also
     learns the most recent dynamics. Returns ``(rollout_model, data_best)`` where
@@ -74,7 +79,6 @@ def refit_best_trial(
     family = model_type.strip().lower()
 
     best = study.best_trial
-    params = best.params
     warm_start_ckpt = best.user_attrs["checkpoint_path"]
     if n_epochs is None:
         # The paper's final step is "several" epochs of big-batch fine-tuning, so default
@@ -82,19 +86,7 @@ def refit_best_trial(
         # epoch count, which can be large and would over-train the warm-started weights.
         n_epochs = DEFAULT_REFIT_EPOCHS
 
-    # Slice to the winning feature set; build the TRAINING model at the FULL calibration
-    # length (samples span all T-1 transitions here, not the truncated training prefix).
-    data_best = select_features_for_trial(data_full, best)
-    train_recipe = {
-        "seq_cols":      data_best["seq_cols"],
-        "embedded_cols": data_best["embedded_cols"],
-        "target_col":    data_best["target_col"],
-        "seq_len":       data_best["samples"].shape[1],
-    }
-    # Built through the registry, so a model type reaches refit only if it is wired
-    # everywhere else too — and an unregistered one raises here rather than silently
-    # refitting another architecture.
-    model: torch.nn.Module = build_model(family, params, train_recipe)
+    model, data_best = _full_calibration_model(best, data_full, family)
 
     refit_full_calibration(
         model,
@@ -119,3 +111,53 @@ def refit_best_trial(
     # (ADR-0007) hands over that same backbone — no file round-trip, and no second
     # construction whose arguments could disagree with the trained one's.
     return model.to_rollout(), data_best
+
+
+def load_best_trial(
+    study: "optuna.Study",
+    data_full: dict[str, Any],
+    model_type: str,
+) -> tuple[torch.nn.Module, dict[str, Any]]:
+    """The study's best checkpoint as it stands — the forecast with no refit (ADR-0011).
+
+    Valendin et al.'s published results come from the selected model without the
+    fine-tuning step their paper describes, so this is the route that compares with
+    them. Returns ``(rollout_model, data_best)`` exactly as ``refit_best_trial`` does,
+    so a caller swaps one for the other and changes nothing else.
+
+    The checkpoint holds the weights of the trial's kept epoch (``fit_model`` saves the
+    best-by-validation epoch). They are loaded into a model built at the full
+    calibration length, the same model the refit warm-starts, so the rollout warms up
+    on the whole calibration window — validation tail included — before the holdout.
+    """
+    best = study.best_trial
+    model, data_best = _full_calibration_model(best, data_full, model_type.strip().lower())
+    state = torch.load(best.user_attrs["checkpoint_path"], map_location="cpu")
+    # A cached attention mask is saved alongside the weights by some models; it is
+    # rebuilt from the sequence length, so it is dropped rather than loaded.
+    state.pop("_cached_mask", None)
+    model.load_state_dict(state)
+    return model.to_rollout(), data_best
+
+
+def _full_calibration_model(
+    best: "optuna.trial.FrozenTrial", data_full: dict[str, Any], family: str,
+) -> tuple[torch.nn.Module, dict[str, Any]]:
+    """The best trial's TRAINING model at full-calibration length, and its data slice.
+
+    Slices ``data_full`` to the trial's feature set and builds the model at the FULL
+    calibration length (samples span all T-1 transitions here, not the truncated
+    training prefix the trial trained on). The weights are left untrained: both routes
+    to a forecast fill them from the trial's checkpoint.
+    """
+    data_best = select_features_for_trial(data_full, best)
+    train_recipe = {
+        "seq_cols":      data_best["seq_cols"],
+        "embedded_cols": data_best["embedded_cols"],
+        "target_col":    data_best["target_col"],
+        "seq_len":       data_best["samples"].shape[1],
+    }
+    # Built through the registry, so a model type reaches a forecast only if it is wired
+    # everywhere else too — and an unregistered one raises here rather than silently
+    # building another architecture.
+    return build_model(family, best.params, train_recipe), data_best

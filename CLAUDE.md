@@ -64,7 +64,8 @@ them and there is no umbrella re-export — import from the subpackage that owns
   back from. A leaf: it imports nothing from the package, which is what lets the
   model layer write a forecast without naming anything above it (ADR-0002).
 - `trials` — assembling and refitting one trial: the temporal calibration split
-  (ADR-0001) and the full-calibration refit every forecast comes from (ADR-0008).
+  (ADR-0001), and the two routes from a winner to a forecast: the full-calibration refit
+  (ADR-0008, the default) or the winning checkpoint as it stands (ADR-0011).
 - `studies` — running many studies across many models and archiving the results.
 
 Each subpackage's `__init__.py` documents its own contents. Read those rather than

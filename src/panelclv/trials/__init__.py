@@ -12,8 +12,9 @@ It holds two things a reader should not expect to find elsewhere:
   and scores from a later index). That is modeling logic, not glue, and it lives here
   because ``data_preparation`` is deliberately numpy-only and this is where numpy
   becomes tensors.
-- ``refit`` — the warm-start fine-tune over the full calibration window that produces
-  every forecast in this package (ADR-0008).
+- ``refit`` — the two routes from a study's winner to a forecast: the warm-start
+  fine-tune over the full calibration window (ADR-0008, the default), or the winning
+  checkpoint as it stands (ADR-0011).
 
 It sits at the top of the dependency stack and imports from ``panelclv.tuning``,
 ``panelclv.training`` and ``panelclv.registry`` — never ``panelclv.models``, which it
@@ -26,7 +27,7 @@ from .loaders import (
     refit_loader,
     make_data_builder,
 )
-from .refit import refit_best_trial
+from .refit import load_best_trial, refit_best_trial
 
 __all__ = [
     "CalibrationSplit",
@@ -34,4 +35,5 @@ __all__ = [
     "refit_loader",
     "make_data_builder",
     "refit_best_trial",
+    "load_best_trial",
 ]

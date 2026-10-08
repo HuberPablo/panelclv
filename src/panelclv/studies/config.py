@@ -124,6 +124,11 @@ class StudySuiteConfig:
     device, refit_kwargs, overwrite
         Passed through to the trainer / forecaster; ``overwrite`` allows reusing an
         existing suite folder.
+    refit
+        Where each study's forecast comes from. ``True`` (default): the winning trial
+        refit on the full calibration window (ADR-0008, the paper's final step).
+        ``False``: the winning checkpoint as it stands (ADR-0011, how Valendin et al.'s
+        published results are produced). ``refit_kwargs`` must then be empty.
     keep_only_best_checkpoint
         Disk policy for the per-study Optuna search. ``False`` (default) keeps every
         trial's ``.pth``; these accumulate fast (``n_trials`` per study × every
@@ -143,6 +148,7 @@ class StudySuiteConfig:
     base_seed: int = 42
     device: str | None = None
     refit_kwargs: dict[str, Any] = field(default_factory=dict)
+    refit: bool = True
     overwrite: bool = False
     keep_only_best_checkpoint: bool = False
 
@@ -175,6 +181,11 @@ class StudySuiteConfig:
         if self.n_studies_per_model < 1:
             raise ValueError(
                 f"n_studies_per_model must be >= 1, got {self.n_studies_per_model}"
+            )
+        if not self.refit and self.refit_kwargs:
+            raise ValueError(
+                "refit_kwargs configure a refit, but refit=False forecasts from the "
+                f"winning checkpoint; drop them: {sorted(self.refit_kwargs)}"
             )
         if not isinstance(self.data, dict):
             raise TypeError("data must be the dict returned by prepare_dataset")

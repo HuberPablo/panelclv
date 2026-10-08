@@ -1,5 +1,9 @@
 # A forecast is made by a model refit on the full calibration window
 
+**Amended by ADR-0011 (8 October 2026):** the refit is now optional and stays the default;
+`StudySuiteConfig(refit=False)` forecasts from the winning checkpoint. The "only route"
+below describes the package from 13 August to 8 October 2026.
+
 Optuna selects an architecture and a stopping epoch on the temporal validation window
 (ADR-0001). Two things could then produce the holdout forecast: the winning trial's
 checkpoint as it stands, or a warm-start fine-tune of that checkpoint over the whole

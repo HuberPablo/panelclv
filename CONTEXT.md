@@ -155,8 +155,9 @@ earns a name and "experiment" does not.
 **Refit**:
 Warm-start fine-tuning of a study's winning trial over the full calibration window — the
 validation window included — for a few large-batch epochs, so the weights also learn the
-most recent periods instead of only conditioning on them at forecast time. Every forecast
-comes from a refit (ADR-0008).
+most recent periods instead of only conditioning on them at forecast time. A forecast
+comes from a refit by default (ADR-0008); `refit=False` forecasts from the winning
+checkpoint instead (ADR-0011).
 _Avoid_: retrain, fine-tune, final training
 
 **Study suite**:
