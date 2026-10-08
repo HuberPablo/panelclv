@@ -245,7 +245,10 @@ the validation loss is the exact mean over all cells at any batch size. Shufflin
 rejected: at batch 256 it leaves a 95% range of ±3–9% around the true mean.
 
 **The rerun** (family U′, electronics · `archive` · no cluster label, 20 replications per
-model, `docs/model-selection.md` §3.9):
+model, `docs/model-selection.md` §3.9). The dataset is the old electronics panel,
+`Datasets/Dataset_clean/electronics_customer_week_panel.csv`: 829 households, counting
+line items, not the paper's cohort. Training runs 1999–2000 with 2000 as validation, and
+every metric below is scored on the 2001 holdout (2001-01-01 to 2001-12-31):
 
 | | LSTM | ValendinLSTM |
 | --- | --- | --- |

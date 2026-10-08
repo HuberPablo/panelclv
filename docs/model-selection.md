@@ -284,7 +284,10 @@ per-cell mean. Shuffling validation was rejected: at batch 256 it leaves a 95% r
 **The rerun.** Family U′ reruns electronics · `archive` · no cluster label with the fix as
 the only change: the archive's search space restored (weight decay searched, batch over
 {64, 128, 256}), the same seeds, 100 trials, patience 7, pruner, refit and 200 paths;
-20 replications per model (`.scratch/score-fix/`). Δ is rerun minus archive, resampled
+20 replications per model (`.scratch/score-fix/`). The dataset is the old electronics panel
+(`Datasets/Dataset_clean/electronics_customer_week_panel.csv`, 829 households, line items,
+not the paper's cohort), trained on 1999–2000 with 2000 as validation; the metrics are
+scored on the 2001 holdout. Δ is rerun minus archive, resampled
 independently: training is unseeded and the two searches diverge after their first trial,
 so a shared seed does not make replications pairs.
 
