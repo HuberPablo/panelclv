@@ -206,7 +206,7 @@ one must restore it (family U′ does, §4).
 
 | # | Piece | What this package does | Standard practice | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Epoch loss | the mean over all customer-periods | the per-sample mean (Keras metrics, Lightning's epoch logging) | **fixed** in af2b14b (4 Oct): until then it averaged the per-batch means, ADR-0010 (§3.1) |
+| 1 | Epoch loss | the per-sample mean (a sample is one customer-period) | the per-sample mean (Keras metrics, Lightning's epoch logging) | **fixed** in af2b14b (4 Oct): until then it averaged the per-batch means, ADR-0010 (§3.1) |
 | 2 | Pruner | `MedianPruner`, warm-up 3 epochs, 5 startup trials | Optuna's defaults are warm-up 0, 5 startup trials; Optuna's own benchmark pairs **Hyperband** with TPE and the median rule with random search | open (§3.2) |
 | 3 | Pruning unit | epochs | epochs: standard | noted (§3.2) |
 | 4 | Improvement threshold | absolute 1e-4 | a threshold relative to the loss, or patience sized to the curve | open (§3.3) |
