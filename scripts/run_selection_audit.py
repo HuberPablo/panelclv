@@ -96,9 +96,12 @@ BASE_SEED = 42
 # Completed non-winning trials scored per study, drawn at random. Random rather than the
 # best by validation loss: choosing them on the criterion under test would restrict its
 # range and deflate its correlation with the holdout (`run_selection_rescore.py`).
-TRIALS_PER_STUDY = 20
+# 15 and 4 rather than 20 and 5 fit the run in its budget (8 October, $35 of credit):
+# each scored model costs two 500-path rollouts, ~90 s on a 2y panel and ~300 s on 5y.
+# Power comes from the 20 replications, which are kept; these only sharpen each study.
+TRIALS_PER_STUDY = 15
 # From-scratch retrains of the winner's settings per study.
-N_RETRAINS = 5
+N_RETRAINS = 4
 TRAINING = dict(ARMS["patience7"])
 
 # Deepest activity flag per panel: 52 weeks, except where the calibration is too short
