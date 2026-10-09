@@ -89,6 +89,7 @@ CALIBRATIONS = benchmarks.CALIBRATIONS
 
 EXPERIMENT = "selection_audit"
 OUT_NAME = "selection_audit.csv"
+TODO_NAME = "selection_audit_todo.txt"   # optional, see run_worker
 N_REPLICATIONS = 20
 N_TRIALS = 100
 N_SIMULATIONS = 500
@@ -269,7 +270,17 @@ def run_item(cal: str, panel: str, model: str, rep: int, data: dict, device: str
 
 
 def run_worker(index: int, total: int) -> int:
-    mine = work_list()[index - 1::total]
+    work = work_list()
+    # A rerun that fills gaps ships a frozen list of the missing suites in its seed, and
+    # the workers stride over that list rather than the whole one: the gaps a stopped
+    # fleet leaves are clustered, so striding the whole list would leave some boxes idle
+    # and hand others a dozen studies. Frozen, so every box (replacements included)
+    # agrees on who runs what.
+    todo = STUDIES_BASE / TODO_NAME
+    if todo.exists():
+        wanted = set(todo.read_text().split())
+        work = [w for w in work if suite_name(*w) in wanted]
+    mine = work[index - 1::total]
     print(f"worker {index}/{total}: {len(mine)} studies", flush=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     STUDIES_BASE.mkdir(parents=True, exist_ok=True)
