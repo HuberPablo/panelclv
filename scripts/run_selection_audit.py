@@ -275,8 +275,10 @@ def run_worker(index: int, total: int) -> int:
     # the workers stride over that list rather than the whole one: the gaps a stopped
     # fleet leaves are clustered, so striding the whole list would leave some boxes idle
     # and hand others a dozen studies. Frozen, so every box (replacements included)
-    # agrees on who runs what.
-    todo = STUDIES_BASE / TODO_NAME
+    # agrees on who runs what. It sits at the repo root, not under Studies/: the
+    # orchestrator pulls every box's Studies/ tree back, and a list kept there was
+    # overwritten by whichever box was pulled last.
+    todo = REPO_ROOT / TODO_NAME
     if todo.exists():
         wanted = set(todo.read_text().split())
         work = [w for w in work if suite_name(*w) in wanted]

@@ -23,6 +23,8 @@ plots/
 Predictions/
 FOR_ANALYSIS/
 Studies/
+# A gap-filling rerun's frozen work list (scripts/run_selection_audit.py run_worker)
+selection_audit_todo.txt
 
 Datasets/Kaggle/online_retail_II.csv
 Datasets/Kaggle/
