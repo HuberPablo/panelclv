@@ -65,3 +65,21 @@ takes ~45 s on the 2y/3y panels, ~150 s on 5y; each scored model needs two. At 2
 and 5 retrains the run was ~510 box-hours (~$31-37 with overhead); cut to 15 and 4,
 ~400 box-hours (~$22-27). Budget watchdog set to $28. Two fleets as for SR: 2y+3y
 (280 items) and 5y (40 items).
+
+**9 Oct, run complete: 320/320 studies, $43.30 in all.**
+
+- Night 1 (8–9 Oct) stopped at the $28 watchdog with 209/320. The estimate above was
+  wrong by ~1.6×: vast boxes cost ~$0.15/h, not the ~$0.06/h assumed, and the measured
+  cost came out at ~$0.137 per study (~$44 for 320).
+- Day 2 (9 Oct) filled the 111 gaps for $14.66: workers stride over a frozen list of the
+  missing suites (`run_worker`), so each box gets an equal share.
+- **5y LSTM + AR_52 runs out of memory on 12 GB GPUs** (`torch.OutOfMemoryError`, a 9.8 GiB
+  LSTM allocation, for the larger sampled architectures). This is why that cell stalled
+  at 9/20 on night 1. Eight such studies were rerun on 24 GB RTX 3090s, where a 5y study
+  takes ~40 min. Use `gpu_ram >= 24` for 5y LSTM + AR_52.
+- The frozen list first lived under `Studies/`, and `pull_results` copied every box's
+  `Studies/` tree back over it, so replacement boxes were seeded with a stale list and
+  either idled or redid finished studies (4 boxes destroyed, their results pulled first).
+  The list now lives at the repo root (`4cd2b90`).
+- Leftover checkpoints that were pulled mid-run were deleted locally; only
+  `selection_audit.csv`, `results.csv` and the suite configs remain (566 MB).
