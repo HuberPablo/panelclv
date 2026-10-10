@@ -74,10 +74,13 @@ is always the last calibration year (ADR-0001).
 |---|---|---|---|---|
 | `2y` | year 1 | year 2 | year 3 | 156 weeks |
 | `3y` | years 1–2 | year 3 | year 4 | 208 weeks |
+| `4y` | years 1–3 | year 4 | year 5 | 260 weeks |
 | `5y` | years 1–4 | year 5 | year 6 | 312 weeks |
 
 `5y` exists for electronics only. It is the split Valendin et al. use for that dataset
-(260 calibration weeks, one-year holdout).
+(260 calibration weeks, one-year holdout). `4y` is defined but no dataset lists it yet,
+so no `4y` panel is on disk; "Descriptive statistics" below says which datasets can
+hold it.
 
 The panel ends at the end of the holdout. A calibration the data cannot cover raises
 an error instead of being trimmed, which is why VoD has no `3y` panel.
@@ -116,6 +119,124 @@ from that simulated history (`docs/feature-engineering.md`). Behaviour covariate
 | apparel | customer-day with spend > 0 | 1996-08-11 .. 1996-12-31 | 14,358 | 2y, 3y | 15,679 / 13,803 | 48.5% / 43.3% |
 | vod | customer-day with a rental | 2011-01-01 .. 2011-03-31 | 4,843 | 2y | 33,626 / – | 56.5% / – |
 | game | receiver-day | 2008-01-01 .. 2008-03-31 | 6,173 | 2y, 3y | 850 / 258 | 4.5% / 1.7% |
+
+## Descriptive statistics
+
+The columns of Valendin et al.'s Table 3, for every calibration the raw data can cover,
+plus four columns this project's models need. They come from
+`scripts/describe_full_panels.py`, which reuses the builder's readers, cohorts and
+windows, so they describe exactly the panels a study reads:
+
+```
+PYTHONPATH=src python scripts/describe_full_panels.py
+```
+
+Its docstring defines every column exactly. In short:
+
+- **Cal. mean, Non-repeaters.** Purchase days per customer over the whole calibration
+  (training + validation), and the share with exactly one: the acquisition purchase.
+- **Hold. mean, Inactive.** Holdout purchase days per customer, and the share with none.
+- **Seasonality.** Valendin's eq. 4: the mean absolute deviation of weekly aggregate
+  repeat purchases from their median, over that median. Below 0.5 is low, 0.5–1 mild,
+  above 1 strong.
+- **rWM.** Wheat & Morrison timing regularity, as BTYDplus `estimateRegularity` computes
+  it. About 1 is random timing, above 1 regular, below 1 irregular.
+- **Clumpy.** The share of the cohort that is clumpy by Zhang, Bradlow & Small's
+  entropy measure, against a 95% critical value simulated per purchase count.
+- **Hold. zero cells.** The share of holdout customer-weeks with no purchase.
+- **Max/week.** The largest weekly count, which sets the size of the softmax head.
+- **Hold. ÷ last cal. year.** Holdout purchases over those of the last calibration year.
+  Below 1 means the base is shrinking.
+
+All of these are computed on purchase days, the transaction unit of every panel.
+rWM and the clumpiness critical values are random draws from a seeded generator, so a
+rerun reproduces them exactly.
+
+| Dataset | Cal. | Cohort | Cal. weeks | Cal. mean | Non-repeaters | Hold. mean | Inactive | Seasonality | rWM | Clumpy | Hold. zero cells | Max/week | Hold. ÷ last cal. year |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| electronics | `2y` | 3,755 | 104 | 2.51 | 44% | 0.70 | 66% | 0.25 | 0.53 | 12% | 98.8% | 5 | 0.89 |
+| electronics | `3y` | 3,755 | 156 | 3.21 | 33% | 0.69 | 67% | 0.31 | 0.51 | 17% | 98.8% | 5 | 1.00 |
+| electronics | `4y` | 3,755 | 208 | 3.91 | 26% | 0.64 | 71% | 0.32 | 0.50 | 22% | 98.9% | 5 | 0.93 |
+| electronics | `5y` | 3,755 | 260 | 4.55 | 23% | 0.57 | 73% | 0.33 | 0.49 | 26% | 99.0% | 5 | 0.90 |
+| gift | `2y` | 918 | 104 | 1.52 | 70% | 0.45 | 78% | 0.64 | 0.82 | 6% | 99.2% | 3 | 1.75 |
+| gift | `3y` | 918 | 156 | 1.98 | 60% | 0.43 | 78% | 0.59 | 0.84 | 9% | 99.2% | 3 | 0.94 |
+| gift | `4y` | 918 | 208 | 2.40 | 53% | 0.40 | 81% | 0.51 | 0.82 | 13% | 99.3% | 3 | 0.93 |
+| gift | `5y` | 918 | 260 | 2.80 | 49% | 0.34 | 83% | 0.50 | 0.97 | 14% | 99.3% | 3 | 0.88 |
+| multichannel | `2y` | 1,379 | 104 | 1.42 | 74% | 0.16 | 89% | 0.48 | 0.82 | 6% | 99.7% | 2 | 0.86 |
+| multichannel | `3y` | 1,379 | 156 | 1.58 | 69% | 0.12 | 91% | 0.61 | 0.81 | 8% | 99.8% | 2 | 0.73 |
+| multichannel | `4y` | 1,379 | 208 | 1.69 | 66% | 0.11 | 92% | 0.58 | 0.79 | 9% | 99.8% | 2 | 0.97 |
+| multichannel | `5y` | 1,379 | 260 | 1.81 | 64% | 0.10 | 94% | 0.56 | 0.88 | 11% | 99.8% | 2 | 0.86 |
+| multichannel | Valendin 52 / 338 w | 1,379 | 52 | 1.23 | 83% | 0.79 | 69% | 0.39 | 0.80 | 3% | 99.8% | 2 | 0.10 |
+| books | `2y` | 1,218 | 104 | 4.83 | 10% | 1.86 | 30% | 0.36 | 1.23 | 7% | 96.5% | 2 | 0.93 |
+| books | `3y` | 1,218 | 156 | 6.69 | 6% | 1.77 | 35% | 0.36 | 1.17 | 10% | 96.6% | 2 | 0.95 |
+| books | `4y` | 1,218 | 208 | 8.46 | 4% | 1.29 | 44% | 0.37 | 1.09 | 11% | 97.5% | 2 | 0.73 |
+| books | `5y` | 1,218 | 260 | 9.75 | 4% | 1.24 | 49% | 0.43 | 1.06 | 15% | 97.6% | 2 | 0.96 |
+| apparel | `2y` | 14,358 | 104 | 3.17 | 31% | 1.09 | 52% | 0.55 | 0.86 | 9% | 98.0% | 4 | 1.00 |
+| apparel | `3y` | 14,358 | 156 | 4.27 | 24% | 0.96 | 57% | 0.69 | 0.84 | 13% | 98.2% | 4 | 0.88 |
+| apparel | `4y` | 14,358 | 208 | 5.23 | 21% | 1.02 | 55% | 0.69 | 0.87 | 15% | 98.1% | 4 | 1.07 |
+| apparel | `5y` | 14,358 | 260 | 6.25 | 19% | 0.92 | 59% | 0.67 | 0.88 | 18% | 98.3% | 4 | 0.90 |
+| vod | `2y` | 4,843 | 104 | 18.83 | 12% | 6.94 | 44% | 0.17 | 0.86 | 42% | 90.1% | 8 | 0.84 |
+| game | `2y` | 6,173 | 104 | 4.89 | 46% | 0.14 | 96% | 1.84 | 0.60 | 44% | 99.8% | 8 | 0.30 |
+| game | `3y` | 6,173 | 156 | 5.03 | 46% | 0.04 | 98% | 2.64 | 0.57 | 48% | 99.9% | 8 | 0.31 |
+
+The holdout totals behind *Hold. mean* match the summary table above for every `2y` and
+`3y` panel, and the `5y` electronics total (2,153) matches the electronics section.
+
+**Which calibrations the data can hold.** A row is listed only when the raw data cover
+its whole holdout. Electronics, gift, multichannel, books and apparel run to at least
+`5y`, so `4y` fits them all. VoD ends in January 2014 and holds only `2y`. Game ends in
+October 2012 and holds `2y` and `3y`. CDNOW is not in `Datasets_full`. Its 39 + 39 weeks
+cannot hold even `2y`. The `4y` and `5y` rows (except electronics `5y`) describe panels
+that have not been built.
+
+### Reproducing Valendin et al.'s Table 3
+
+Two of Valendin et al.'s eight datasets are here, and each has a row on the paper's
+split.
+
+| Electronics (260 / 52 w) | Cohort | Clumpy | rWM | Seasonality | Cal. mean | Non-repeaters | Hold. mean | Inactive |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Valendin et al., Table 3 | 3,782 | 24% | 0.5 | 0.3 | 4.5 | 23% | 0.6 | 72% |
+| `5y` panel | 3,755 | 26% | 0.49 | 0.33 | 4.55 | 23% | 0.57 | 73% |
+
+| Multichannel (52 / 338 w) | Cohort | Clumpy | rWM | Seasonality | Cal. mean | Non-repeaters | Hold. mean | Inactive |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Valendin et al., Table 3 | 1,379 | 10% | 0.9 | 0.4 | 1.2 | 83% | 0.8 | 69% |
+| Valendin's split, this cohort | 1,379 | 3% | 0.80 | 0.39 | 1.23 | 83% | 0.79 | 69% |
+
+- **Electronics reproduces in every column.** That includes the two counting columns.
+  Counting line items instead of purchase days would give about 2.24 times the
+  transactions, so the paper's electronics counts are effectively at trip level too.
+  The paper never states its transaction unit; this match is the evidence.
+- **Multichannel reproduces the cohort and all five activity columns. Its clumpiness and
+  rWM do not.** Computing both over the whole observation span instead of the
+  calibration does not close the gap either: that gives 14% clumpy and rWM 0.85. The
+  paper does not give its clumpiness implementation. Only 55 multichannel
+  customers make three purchases in 2005, so rWM rests on few customers there.
+
+### Reading the table
+
+- **Activity separates the datasets most.** Grouped by holdout transactions per customer
+  and inactivity:
+  - *Frequent*: VoD, books and apparel. About one or more holdout purchase days per
+    customer, and 30–59% inactive.
+  - *Infrequent retail*: electronics and gift. 0.3–0.7 per customer, and 66–83% inactive.
+  - *Very sparse*: multichannel and game. 0.16 or fewer per customer, and 89–98% inactive.
+- **Game is not stationary.** Its holdout year holds 30% of the last calibration year's
+  purchases. Its "strong" seasonality (1.8–2.6) is that decline: the measure cannot tell
+  a trend from a season. By Valendin's cut-offs, nothing else is strongly seasonal.
+- **Only books is regular** (rWM above 1). Electronics and game are irregular, about
+  0.5–0.6. VoD and game are the clumpy panels, at 42–48%.
+- **Gift `2y` grows into its holdout** (ratio 1.75). Its second year holds only 238
+  purchase days, against 416 in the holdout year.
+- **Clumpiness rises with the window**, because it is measured over the whole
+  calibration: electronics goes from 12% at `2y` to 26% at `5y`. Compare it within one
+  calibration, not across calibrations.
+- **None of this predicts collapse.** Collapse is a result, and it has so far been
+  measured only on the old electronics and multichannel panels
+  (`docs/insights-real-panels.md`). That doc found no panel characteristic that predicts
+  it. Whether the very sparse group collapses is a question for the studies on these
+  panels.
 
 ## Electronics — ISMS Durables Dataset 1
 

@@ -8,7 +8,7 @@ source, the rules below, the codes and the resulting counts.
 For each dataset and each calibration it can hold, this writes two files to
 `Datasets/Dataset_full_clean/`:
 
-- `<name>_<cal>_customer_week_panel.csv` (`cal` is `2y`, `3y` or `5y`), with columns
+- `<name>_<cal>_customer_week_panel.csv` (`cal` is `2y`, `3y`, `4y` or `5y`), with columns
   `Id, year, week, Transactions, <static covariates>`;
 - `<name>_<cal>_customer_week_panel.config.json`, a `PanelConfig.to_dict()` holding
   the window dates, the static role and the embedding declarations. A study loads it
@@ -69,8 +69,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW = REPO_ROOT / "Datasets" / "Datasets_full"
 OUT = REPO_ROOT / "Datasets" / "Dataset_full_clean"
 
-# Calibration name -> number of calibration years (the last one is validation).
-CAL_YEARS = {"2y": 2, "3y": 3, "5y": 5}
+# Calibration name -> number of calibration years (the last one is validation). A
+# calibration is only built for the datasets that list it in their `calibrations`; `4y`
+# is listed by none yet and is read by `describe_full_panels.py`.
+CAL_YEARS = {"2y": 2, "3y": 3, "4y": 4, "5y": 5}
 
 
 @dataclass(frozen=True)
