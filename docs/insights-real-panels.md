@@ -335,15 +335,16 @@ carry no AR channel. CDNOW is on the pre-ADR-0009 window, so it has no Spearman.
 | `cluster_16` | 0.257 ± 0.043 | **+0.219 [+0.189, +0.244]** | 21.0 |
 | Pareto/NBD (benchmark, 20 seeded refits) | 0.314 ± 0.010 | +0.275 [+0.249, +0.297] | 63.1 |
 
-Against Pareto/NBD's 20 fits (40 / 20), every labelled arm still ranks below it:
-`cluster_4` **−0.049**, `cluster_8` **−0.043**, `cluster_16` **−0.056**,
+Against Pareto/NBD's 20 fits (40 / 20), every arm with a cluster label still ranks below
+it: `cluster_4` **−0.049**, `cluster_8` **−0.043**, `cluster_16` **−0.056**,
 `ar_plus_cluster_8` **−0.035**.
 
 - **No K beats `no_cluster` on either level metric on either panel.** The only supported
   level effects are on CDNOW, and they are worse.
-- **On electronics the label lifts ranking sevenfold at every K, at no cost in level.**
-- **K has no common shape across panels.** Electronics has a shallow optimum at 8;
-  CDNOW's median |bias| improves monotonically in K. The label also widens the spread
+- **On electronics the cluster label lifts ranking sevenfold at every K, at no cost in
+  level.**
+- **K has no common shape across panels.** Electronics has a shallow optimum at 8; CDNOW's
+  median |bias| improves monotonically in K. The cluster label also widens the spread
   across replications (bias sd 14.1 → 19.0–24.8 on electronics).
 - **It rescues the unbounded counters on electronics only:** `ar_plus_cluster_8` against
   `ar_unbounded` gives |bias| **−114.0** (−179.0, −49.5). On CDNOW the difference is not
@@ -401,7 +402,7 @@ multichannel 0.13–0.15, against 1.14–2.16 with the cluster label.
   `kmeans_8` is k-means over Pareto/NBD's own sufficient statistics, so the cell that
   draws level has been handed the benchmark's summary.
 
-### 5.3 What the label is worth: one verdict
+### 5.3 What the cluster label is worth: one verdict
 
 | Evidence | Verdict |
 | --- | --- |
@@ -411,11 +412,11 @@ multichannel 0.13–0.15, against 1.14–2.16 with the cluster label.
 | electronic_5y, three models (§7) | **Lowers ranking** under every rule (−0.030 to −0.051) |
 | Synthetic grid, level (claim 5) | Hurts in most cells where a usable AR encoding is present |
 
-**The label is a remedy for collapse, not a general input.** It helps exactly where the
-count-only model gives every customer the same forecast. Elsewhere it is neutral or
-harmful, because it is frozen and cannot update when a simulated customer goes quiet.
-Experiment E2 is still owed: recompute the label before the validation window and re-run
-electronics `archive / kmeans_8` (`docs/feature-engineering.md` §5).
+**The cluster label is a remedy for collapse, not a general input.** It helps exactly
+where the count-only model gives every customer the same forecast. Elsewhere it is neutral
+or harmful, because it is frozen and cannot update when a simulated customer goes quiet.
+Experiment E2 is still owed: recompute the cluster label before the validation window and
+re-run electronics `archive / kmeans_8` (`docs/feature-engineering.md` §5).
 
 ## 6. Three-year calibration
 
@@ -597,18 +598,18 @@ Every cell's bias is above Pareto/NBD's by +25.3 to +68.2.
 | Transformer | `from20` | `kmeans_8` | **−0.047 [−0.051, −0.043]** | **−18.2 [−24.5, −11.9]** | **−27.3 [−34.8, −19.6]** | +0.016 [−0.012, +0.043] | **+0.34 [+0.29, +0.39]** |
 | Transformer | `from30` | `kmeans_8` | **−0.045 [−0.048, −0.042]** | **−19.6 [−27.0, −12.5]** | **−28.3 [−37.1, −19.8]** | +0.012 [−0.012, +0.035] | **+0.38 [+0.34, +0.43]** |
 
-- **Without the label, every LSTM cell beats Pareto/NBD on MAPE** (−6.2 to −10.2) **and
-  ranking** (+0.004 to +0.010, small). It misses the total by less in 7 of 10 cells, but in
-  the opposite direction.
+- **Without the cluster label, every LSTM cell beats Pareto/NBD on MAPE** (−6.2 to −10.2)
+  **and ranking** (+0.004 to +0.010, small). It misses the total by less in 7 of 10 cells,
+  but in the opposite direction.
 - **The flags matter only for the Transformer.** They cut its MAPE by −12.1, −20.2 and
   −22.3 under the three rules. For both LSTMs nothing is supported, and the intervals
   reach from about −10 to +4.
-- **The label lowers ranking for every model under every rule** (−0.030 to −0.051, three to
-  five times the borrowed refit noise), while raising forecast CV by +0.30 to +0.45. It
-  separates customers along its eight groups rather than along what they go on to buy.
-  For the Transformer it lowers MAPE about as much as the flags do.
+- **The cluster label lowers ranking for every model under every rule** (−0.030 to −0.051,
+  three to five times the borrowed refit noise), while raising forecast CV by +0.30 to
+  +0.45. It separates customers along its eight groups rather than along what they go on
+  to buy. For the Transformer it lowers MAPE about as much as the flags do.
 - **Attention does not help the LSTM.** There is no clear difference in MAPE, |bias| or
-  Spearman without the label.
+  Spearman without the cluster label.
 - **The Transformer is the weakest model here.** Without features its MAPE is 22.0–26.6
   above the LSTM's. With the flags the gap narrows to +3.3 to +13.9, still supported.
 - **No model reaches the published LSTM's +2.7% bias.**
@@ -622,7 +623,7 @@ Every cell's bias is above Pareto/NBD's by +25.3 to +68.2.
 | --- | --- | --- |
 | Transformer vs LSTM, count only, electronics | Transformer ranks higher (**+0.077**), collapses less | 3 |
 | Transformer vs LSTM, unbounded counters | Transformer far closer to the truth in all 4 cells | 4.4 |
-| LSTMAttention vs LSTM, electronic_5y | No clear difference without the label | 7 |
+| LSTMAttention vs LSTM, electronic_5y | No clear difference without the cluster label | 7 |
 | Transformer vs LSTM, electronic_5y | Transformer worse on MAPE (+22 to +27 without features) | 7 |
 | P-sLSTM vs LSTM, electronics | No clear forecast difference at n = 8, at ~14× the cost | `docs/p-slstm.md` |
 
