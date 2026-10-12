@@ -166,9 +166,9 @@ refit, corrected validation loss.
 **Proposed decision.**
 - **Baseline:** A2 (SR `patience7`).
 - **Candidate default:** A8 (SR `pq1`).
-- **Forecast route:** the checkpoint, not the refit, for ValendinLSTM (§6.4: never worse on MAPE or |bias|,
-  better on electronics and 3y multichannel). Open for LSTM + AR_52, which loses customer
-  ranking without the refit on the 2y panels.
+- **Forecast route:** the checkpoint, not the refit, for ValendinLSTM (§6.4: never worse
+  on MAPE or |bias|, better on electronics and 3y multichannel). Open for LSTM + AR_52,
+  which loses customer ranking without the refit on the 2y panels.
 - **Supporting evidence:** A1; T and U, bearing in mind they used the biased validation
   loss; B3; the selection audit.
 - **Archived as superseded:** A4–A7.
