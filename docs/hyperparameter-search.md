@@ -986,6 +986,56 @@ intervals. Too few for the protocol: read this as direction.*
 - **It does not show that skipping the refit narrows the spread.** The sd above is across
   different trials, not across repeated runs of one configuration.
 
+**The selection audit: checkpoint against refit on every panel (8–9 October).**
+`scripts/run_selection_audit.py` ran one 100-trial search per study under SR's `patience7`
+settings with the corrected validation loss: 20 studies for each model on each of the 8
+panel-calibrations, 320 in all (`.scratch/model-selection/issues/01-selection-audit-run.md`).
+Each winner was forecast on the holdout twice, from its checkpoint as it stands (ADR-0011)
+and from the production refit (ADR-0008), on the same Monte Carlo seed and 500 paths. The tables
+compare the two routes for the winners, the forecast a study reports. Levels are means over
+the 20 winners, refit → no refit. Δ is no refit minus refit, paired over the 20 studies,
+with its 95% percentile-bootstrap interval (`evaluation.effects`); bold where it
+excludes 0.
+
+*Holdout MAPE (%) of the total.*
+
+| panel | ValendinLSTM: refit → no refit | Δ MAPE | LSTM + AR_52: refit → no refit | Δ MAPE |
+| --- | ---: | ---: | ---: | ---: |
+| 2y cdnow | 35.3 → 36.0 | +0.7 [−1.7, +3.1] | 42.9 → 43.0 | +0.1 [−6.2, +7.2] |
+| 2y electronics | 56.9 → 47.0 | **−9.9 [−14.6, −5.3]** | 46.4 → 49.1 | +2.8 [−0.4, +6.3] |
+| 2y gift | 27.9 → 27.0 | −0.9 [−3.6, +1.4] | 41.6 → 38.9 | −2.7 [−5.4, +0.0] |
+| 2y multichannel | 65.0 → 56.9 | −8.1 [−17.9, +0.0] | 52.3 → 58.8 | **+6.5 [+3.0, +10.4]** |
+| 3y electronics | 44.7 → 38.7 | **−6.0 [−10.9, −2.2]** | 40.6 → 35.6 | **−4.9 [−8.5, −2.0]** |
+| 3y gift | 28.5 → 27.2 | −1.3 [−5.8, +1.7] | 27.0 → 26.9 | −0.1 [−1.9, +1.6] |
+| 3y multichannel | 69.6 → 59.9 | **−9.7 [−20.2, −0.8]** | 68.7 → 63.8 | −4.9 [−11.6, +1.5] |
+| 5y electronics | 18.3 → 20.4 | +2.1 [−0.9, +5.3] | 20.2 → 21.2 | **+1.1 [+0.1, +2.1]** |
+
+*Holdout bias (%): signed levels, Δ on |bias|.*
+
+| panel | ValendinLSTM: refit → no refit | Δ \|bias\| | LSTM + AR_52: refit → no refit | Δ \|bias\| |
+| --- | ---: | ---: | ---: | ---: |
+| 2y cdnow | −25.7 → −26.6 | −1.3 [−5.8, +3.0] | −0.7 → +14.0 | +2.5 [−7.5, +13.7] |
+| 2y electronics | +18.9 → −8.1 | **−15.7 [−23.2, −8.6]** | −16.8 → +5.0 | −3.2 [−9.8, +3.3] |
+| 2y gift | −10.6 → −11.8 | −3.7 [−9.8, +2.5] | −31.0 → −10.3 | **−19.2 [−24.6, −13.9]** |
+| 2y multichannel | +34.1 → +25.2 | −10.1 [−24.3, +2.7] | +11.7 → +34.9 | **+13.5 [+7.1, +19.8]** |
+| 3y electronics | −1.4 → −11.7 | **−11.5 [−19.3, −4.5]** | −7.0 → −11.0 | **−11.1 [−19.1, −3.9]** |
+| 3y gift | −1.6 → −4.2 | −2.4 [−9.9, +3.7] | −2.0 → +1.2 | −3.1 [−6.9, +0.5] |
+| 3y multichannel | +44.1 → +33.5 | −11.2 [−26.9, +3.1] | +45.6 → +40.4 | −5.5 [−16.4, +5.3] |
+| 5y electronics | +10.8 → +12.6 | +1.5 [−3.8, +7.1] | +4.3 → +8.4 | +1.0 [−1.6, +3.7] |
+
+*Spearman of forecast against actual holdout totals across customers.*
+
+| panel | ValendinLSTM: refit → no refit | Δ Spearman | LSTM + AR_52: refit → no refit | Δ Spearman |
+| --- | ---: | ---: | ---: | ---: |
+| 2y cdnow | 0.407 → 0.405 | −0.002 [−0.011, +0.008] | 0.187 → 0.060 | **−0.127 [−0.169, −0.091]** |
+| 2y electronics | 0.096 → 0.078 | −0.018 [−0.039, +0.009] | 0.283 → 0.155 | **−0.128 [−0.181, −0.081]** |
+| 2y gift | 0.361 → 0.327 | **−0.034 [−0.058, −0.011]** | 0.308 → 0.121 | **−0.187 [−0.261, −0.120]** |
+| 2y multichannel | 0.045 → 0.037 | −0.007 [−0.015, +0.000] | 0.101 → 0.042 | **−0.059 [−0.073, −0.046]** |
+| 3y electronics | 0.223 → 0.261 | **+0.038 [+0.012, +0.072]** | 0.312 → 0.313 | +0.002 [−0.003, +0.007] |
+| 3y gift | 0.435 → 0.432 | **−0.003 [−0.004, −0.002]** | 0.394 → 0.388 | **−0.006 [−0.009, −0.003]** |
+| 3y multichannel | 0.100 → 0.098 | −0.002 [−0.006, +0.003] | 0.257 → 0.258 | +0.002 [−0.002, +0.005] |
+| 5y electronics | 0.404 → 0.403 | **−0.002 [−0.003, −0.000]** | 0.406 → 0.404 | **−0.002 [−0.003, −0.001]** |
+
 **What is still owed (§5, test 4).** Refit-only noise is known (§6.1) and the pilot covers
 four studies. Nobody has retrained one fixed configuration many times and forecast it with
 and without the refit, on every panel. That would split the spread into training, refit
