@@ -18,11 +18,13 @@ those of `docs/studies-run.md` §4.
 Every training configuration that has been run, which model ran it, on which panels, and
 how many times, so it is clear which ones to keep.
 
-**The refit is in every forecast.** The refit's settings date from 15 June 2026. ADR-0008
-(commit `b2609d4`, 13 August) made it the only route to a forecast, and no study has
-overridden them: all 16,850 stored study configs carry empty `refit_kwargs`. Every holdout
-result below therefore comes from the same refit. The exceptions are the epoch probe (B3),
-which forecasts only the validation window, and the four-study pilot (A3).
+**The refit is in almost every forecast.** The refit's settings date from 15 June 2026.
+ADR-0008 (commit `b2609d4`, 13 August) made it the only route to a forecast, and no study
+has overridden them: all 16,850 stored study configs carry empty `refit_kwargs`. ADR-0011
+(8 October) made it optional: `StudySuiteConfig.refit=False` forecasts from the winning
+checkpoint as it stands. The default is still the refit, so every holdout result below
+comes from the same refit, except those in A3 (the 24 September pilot and the selection
+audit) and the epoch probe (B3), which forecasts only the validation window.
 
 **Terms.**
 - **Refit:** 5 epochs over the full calibration window at learning rate 1e-3, batch 512,
@@ -75,13 +77,17 @@ added batch 32).
 
 SR allows 200 epochs instead of 100; patience 7 reaches neither limit.
 
-**A3. Default without refit:** the forecast comes from the trial's own checkpoint.
+**A3. Default without refit:** the forecast comes from the trial's own checkpoint, and
+from the refit as well, so the two are paired.
 
 | run | model | panels | runs |
 | --- | --- | --- | --- |
 | pilot (24 Sep, not a family; §6.4) | LSTM; ValendinLSTM | electronics (3 studies); cdnow (1 study) | 121 trials in all, each forecast with and without the refit |
+| selection audit (8–9 Oct, not a family; §6.4) | ValendinLSTM; LSTM + AR_52 | all 8 panel-calibrations | 20 × 100 × 500 per model and panel-calibration; the winner, 15 other completed trials and 4 retrains of the winner, each forecast with and without the refit |
 
-Too small to support a claim.
+The pilot is too small to support a claim. The selection audit runs A2's settings (patience
+7, corrected validation loss, archive search space) and is the checkpoint-against-refit
+comparison of record.
 
 **A4. Notebook recipe, pinned (`paper`):** learning rate 1e-3, no weight decay, batch 32,
 patience 5, at most 150 epochs. One trial, so no search; refit as usual.
@@ -148,8 +154,9 @@ refit, corrected validation loss.
 - **The floors and pinned recipes (A4–A7) were candidate fixes, now replaced by PQ1.** They
   remain evidence that patience 7 undertrains on electronics and multichannel, not
   settings to adopt.
-- **The refit was never varied.** Apart from the four-study pilot (A3), every result rests
-  on one untested refit.
+- **The refit has been switched off only under patience 7.** The selection audit (A3)
+  compares the checkpoint with the refit on all 8 panel-calibrations (§6.4). Every other
+  result, PQ1 (A8) included, rests on the one refit, and no other refit has been tried.
 - **Coverage is uneven.** ValendinLSTM has 20 runs per configuration and is the only model
   tested under PQ1. The LSTM's largest runs (O and P, 100 studies each) are all A1. The
   Transformer's training length is untested outside 5y.
@@ -159,12 +166,15 @@ refit, corrected validation loss.
 **Proposed decision.**
 - **Baseline:** A2 (SR `patience7`).
 - **Candidate default:** A8 (SR `pq1`).
+- **Forecast route:** the checkpoint, not the refit, for ValendinLSTM (§6.4: never worse on MAPE or |bias|,
+  better on electronics and 3y multichannel). Open for LSTM + AR_52, which loses customer
+  ranking without the refit on the 2y panels.
 - **Supporting evidence:** A1; T and U, bearing in mind they used the biased validation
-  loss; B3.
+  loss; B3; the selection audit.
 - **Archived as superseded:** A4–A7.
-- **To run next, ValendinLSTM, 20 per arm:** A9, and the refit variants A10–A12. The refit
-  variants reuse the winners' checkpoints kept by SR's two arms, so they need no new
-  searches.
+- **To run next, ValendinLSTM, 20 per arm:** A9, and the refit variants A10–A12. A10
+  repeats the selection audit's no-refit arm under PQ1. The refit variants reuse the
+  winners' checkpoints kept by SR's two arms, so they need no new searches.
 
 ## 1. How a study runs
 
@@ -1036,12 +1046,51 @@ excludes 0.
 | 3y multichannel | 0.100 → 0.098 | −0.002 [−0.006, +0.003] | 0.257 → 0.258 | +0.002 [−0.002, +0.005] |
 | 5y electronics | 0.404 → 0.403 | **−0.002 [−0.003, −0.000]** | 0.406 → 0.404 | **−0.002 [−0.003, −0.001]** |
 
-**What is still owed (§5, test 4).** Refit-only noise is known (§6.1) and the pilot covers
-four studies. Nobody has retrained one fixed configuration many times and forecast it with
-and without the refit, on every panel. That would split the spread into training, refit
-and Monte Carlo, and test the cheapest remedies: no refit, a refit at the tuned learning
-rate with the optimiser state kept (closer to the paper's reduced-rate fine-tune, §3.5),
-and averaging several refits (S7). Test 4 scores them on the same checkpoints, paired.
+**What it shows.**
+- **For ValendinLSTM the checkpoint forecasts at least as well as the refit everywhere.**
+  MAPE is lower without the refit on 2y electronics (−9.9), 3y electronics (−6.0) and 3y
+  multichannel (−9.7), and |bias| on 2y and 3y electronics (−15.7, −11.5). No MAPE or
+  |bias| cell favours the refit. Customer ranking hardly moves (|Δ Spearman| ≤ 0.04); the
+  largest change favours the refit, on 2y gift (−0.034).
+- **The refit shifts the level, and the direction depends on the model.**
+  - It raises ValendinLSTM's forecast on every panel but 5y: by 9–27 points on
+    electronics and multichannel, by 1–3 on CDNOW and gift. For the winners the shift is
+    supported only on 2y electronics, where an under-forecast of −8.1% becomes an
+    over-forecast of +18.9% (Δ bias −27.0 [−41.1, −12.0]).
+  - It lowers LSTM + AR_52's forecast on all four 2y panels, by 15–23 points, supported
+    on each (Δ bias +14.6 to +23.2, every interval above 0). Where the checkpoint
+    over-forecast, this helps: 2y multichannel's |bias| is 13.5 points better with the
+    refit. Where it did not, the refit overshoots: 2y gift goes from −10.3% to −31.0%.
+  - The 24 September pilot's LSTM moved the other way on electronics (−6% → +20%), so
+    the shift is a property of the model and its winner, not of the panel.
+  - Selection reads cross-entropy, which barely registers the level (§6.2, point 1). So
+    the refit sets the reported bias through a step the search never scored.
+- **LSTM + AR_52 loses customer ranking without the refit on the 2y panels.** Spearman
+  falls by 0.06–0.19 on all four, e.g. 2y gift 0.308 → 0.121. On 3y and 5y the change is
+  at most 0.006. One reading, untested: only the refit trains on the validation tail
+  (ADR-0011, Consequences), and that tail is 52 weeks, half of a 2y calibration window, a
+  third of a 3y one and a fifth of 5y. CDNOW does not fit this reading: its tail is 8 of
+  39 weeks, yet it loses as much ranking (−0.127) as the other 2y panels.
+- **On 5y the two routes nearly agree.** The one supported effect is LSTM + AR_52's MAPE,
+  1.1 points higher without the refit.
+- **Several supported Spearman effects are too small to matter** (−0.002 to −0.006 on 3y
+  gift and 5y). They are supported because the two routes share a checkpoint and a
+  Monte Carlo seed, which makes the paired differences tiny and consistent.
+
+*Scope: the winners only; the current refit only; patience 7, not PQ1. The tables hold
+48 intervals with no correction for multiple comparisons. Read an isolated cell whose
+interval just reaches 0 as a direction, not a finding.*
+
+**What is still owed (§5, test 4).** The selection audit settles the no-refit arm under
+patience 7, for the winners. Still to do:
+- **The rest of the audit's data.** Its non-winning trials and retrains, each also
+  forecast both ways, are in the archive but not yet analysed here. They answer two
+  questions: does the validation loss still rank trials after the refit (the pilot's
+  question), and does dropping the refit make retrains of one winner agree more closely?
+- **No refit under PQ1 (A10).**
+- **The other two remedies** (A11, A12): a refit at the tuned learning rate with the
+  optimiser state kept (closer to the paper's reduced-rate fine-tune, §3.5), and an
+  average of several refits (S7). Test 4 scores them on the same checkpoints, paired.
 
 ### 6.5 Sources
 
