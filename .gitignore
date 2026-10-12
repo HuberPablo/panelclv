@@ -53,3 +53,6 @@ VastAI/state/
 # Rescored trials (regenerable: scripts/run_rescore_trials.py)
 Rescored/
 Rescored_local/
+
+# Local-only: thesis literature review draft
+/litterature_review.md
