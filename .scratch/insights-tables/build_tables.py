@@ -27,6 +27,7 @@ Sources (all per replication, all already cached or stored):
     §5.2  .scratch/training-budget/results/factorial.csv (family U)
     §6    load_all (families O, P, N, Pareto/NBD 2y and 3y)
     §7    .scratch/feature-engineering-5y/results/per_forecast.csv (families Y and Pareto/NBD)
+    §12   the same sources, every configuration per (panel, calibration window)
 
 Writes `results/tables.md`.
 
@@ -405,10 +406,125 @@ def table_7() -> list[str]:
     return out
 
 
+MET4 = ("bias_percent", "mape_aggregate", "rmse", "spearman")
+
+
+def candidates(d: pd.DataFrame) -> list[dict]:
+    """Every configuration that forecast a block's customers over its holdout.
+
+    A block is one panel and one calibration window. Each candidate carries its
+    architecture, a configuration label and its per-replication scores.
+    """
+    out = []
+
+    def add(block, arch, config, x):
+        out.append({"block": block, "arch": arch, "config": config, "n": len(x),
+                    **{k: (x[k].to_numpy() if k in x else np.array([])) for k in MET4}})
+
+    # Benchmark windows, 2 years (CDNOW: 39 weeks): families N, O, U.
+    fac = pd.read_csv(REPO / ".scratch/training-budget/results/factorial.csv")
+    for p in bm.WINDOWS:
+        blk = (p, "2y")
+        add(blk, "ValendinLSTM", "paper recipe (family N)",
+            d[(d.panel == p) & (d.cal == "2y") & (d.label == "ValendinLSTM")])
+        for e, name in ENC.items():
+            add(blk, "LSTM", f"`{e}` (family O)",
+                d[(d.panel == p) & (d.cal == "2y") & (d.label == f"LSTM + {e}")])
+        for (m, tr, cl), x in fac[fac.panel == p].groupby(["model", "training", "cluster"]):
+            add(blk, m, f"`{tr} / {cl}` (family U)", x)
+    # Electronics 2 years: families E, H and F share the benchmark's windows.
+    blk = ("electronics", "2y")
+    for lab in d[(d.panel == "electronics") & d.group.isin(["E", "H"])].label.unique():
+        arch, arm, fam = lab.split()[0], lab.split()[1], "E" if "ar_encoding" in lab else "H"
+        add(blk, arch, f"`{arm}` (family {fam})", d[(d.panel == "electronics") & (d.label == lab)])
+    sp = family_f_spearman()
+    for arm in rca.ARMS:
+        lv = pd.concat([pd.read_csv(S / rca.suite_name("electronics", arm, sh) / "results.csv")
+                        for sh in rca.SHARDS])
+        x = lv[["bias_percent", "mape_aggregate", "rmse"]].reset_index(drop=True)
+        x["spearman"] = np.nan
+        sx = sp[sp.arm == arm].spearman.to_numpy()
+        x = x.reindex(range(max(len(x), len(sx))))
+        x.loc[:len(sx) - 1, "spearman"] = sx
+        add(blk, "LSTM", f"`{arm}` (family F)", x)
+    # CDNOW's pre-ADR-0009 38-week window: families E, H, F and one Pareto/NBD fit.
+    blk = ("cdnow", "38w")
+    for lab in d[(d.panel == "cdnow") & (d.cal == "2y-arms")].label.unique():
+        if "Pareto" in lab:
+            continue
+        arch, arm, fam = lab.split()[0], lab.split()[1], "E" if "ar_encoding" in lab else "H"
+        add(blk, arch, f"`{arm}` (family {fam})", d[(d.panel == "cdnow") & (d.label == lab)])
+    add(blk, "Transformer", "`no_ar` (family H)", cdnow_transformer_no_ar())
+    for arm in rca.ARMS:
+        lv = pd.concat([pd.read_csv(S / rca.suite_name("cdnow", arm, sh) / "results.csv")
+                        for sh in rca.SHARDS])
+        add(blk, "LSTM", f"`{arm}` (family F)", lv)
+    one = pd.read_csv(S / "real_panel_arms__ParetoNBD__cdnow" / "results.csv")
+    add(blk, "Pareto/NBD", "one fit", one)
+    # Three years: family P.
+    for p in ("electronics", "gift", "multichannel"):
+        for e in ENC:
+            add((p, "3y"), "LSTM", f"`{e}` (family P)",
+                d[(d.panel == p) & (d.cal == "3y") & (d.label == f"LSTM + {e}")])
+    # electronic_5y: family Y.
+    per = pd.read_csv(REPO / ".scratch/feature-engineering-5y/results/per_forecast.csv")
+    for (m, arm, feat), x in per[per.model != "ParetoNBD"].groupby(["model", "arm", "feature"]):
+        add(("electronic_5y", "5y"), m, f"`{arm}`, input {feat}", x)
+    # Pareto/NBD, 20 seeded fits, on every block that has them.
+    for p, cal in [(p, "2y") for p in bm.WINDOWS] + [(p, "3y") for p in
+                                                     ("electronics", "gift", "multichannel")]:
+        add((p, cal), "Pareto/NBD", "20 seeded fits", pareto(p, cal))
+    add(("electronic_5y", "5y"), "Pareto/NBD", "20 seeded fits", per[per.model == "ParetoNBD"])
+    return out
+
+
+BLOCKS = [("cdnow", "2y", "CDNOW", "39 weeks (2-year windows)"),
+          ("cdnow", "38w", "CDNOW", "38 weeks (pre-ADR-0009)"),
+          ("electronics", "2y", "electronics", "2 years"),
+          ("electronics", "3y", "electronics", "3 years"),
+          ("gift", "2y", "gift", "2 years"), ("gift", "3y", "gift", "3 years"),
+          ("multichannel", "2y", "multichannel", "2 years"),
+          ("multichannel", "3y", "multichannel", "3 years"),
+          ("electronic_5y", "5y", "electronic_5y", "5 years")]
+ARCH = ("LSTM", "ValendinLSTM", "LSTMAttention", "Transformer")
+
+
+def table_best(d) -> list[str]:
+    """§12: per block, each architecture's best configuration by MAPE and by Spearman."""
+    cand = candidates(d)
+    rows = []
+    for panel, cal, title, window in BLOCKS:
+        blk = [c for c in cand if c["block"] == (panel, cal)]
+        for arch in ARCH:
+            own = [c for c in blk if c["arch"] == arch]
+            if not own:
+                continue
+            chosen = {}
+            for met, pick in (("mape_aggregate", min), ("spearman", max)):
+                scored = [c for c in own if len(clean(c[met]))]
+                if scored:
+                    c = pick(scored, key=lambda c: clean(c[met]).mean())
+                    chosen.setdefault(id(c), [c, []])[1].append(
+                        {"mape_aggregate": "MAPE", "spearman": "Spearman"}[met])
+            for c, why in chosen.values():
+                rows.append({**c, "block": (panel, cal), "panel": title, "window": window,
+                             "why": " and ".join(why), "name": f"{arch}: {c['config']}"})
+        for c in blk:
+            if c["arch"] == "Pareto/NBD":
+                rows.append({**c, "block": (panel, cal), "panel": title, "window": window,
+                             "why": "benchmark",
+                             "n": f"{c['n']} fit" + "s" * (c["n"] > 1),
+                             "name": f"Pareto/NBD (benchmark), {c['config']}"})
+    head = ["| panel | calibration | model: best configuration | chosen on | n | bias % | MAPE "
+            "| RMSE | Spearman |", "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
+    return head + render(rows, list(MET4), ["panel", "window", "name", "why", "n"])
+
+
 def main() -> None:
     d = bre.load_all()
     parts = {"§3": census(), "§4.1": table_41(d), "§4.3": table_43(d), "§4.4": table_44(),
-             "§5.1": table_51(), "§5.2": table_52(), "§6": table_6(d), "§7": table_7()}
+             "§5.1": table_51(), "§5.2": table_52(), "§6": table_6(d), "§7": table_7(),
+             "§12": table_best(d)}
     text = "\n\n".join(f"## {k}\n\n" + "\n".join(v) for k, v in parts.items()) + "\n"
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(text)

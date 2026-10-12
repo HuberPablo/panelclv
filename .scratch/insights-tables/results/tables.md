@@ -244,3 +244,48 @@ Transformer:
 | `from30` | `kmeans_8` | 1.306 [1.295, 1.318] | **+10.6 [+6.7, +14.7]** | <u>24.4 [22.1, 27.0]</u> | 0.352 [0.349, 0.354] | 1.69 [1.66, 1.73] |
 | Pareto/NBD (benchmark), 20 fits | — | **1.228 [1.228, 1.229]** | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
 
+
+## §12
+
+| panel | calibration | model: best configuration | chosen on | n | bias % | MAPE | RMSE | Spearman |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| CDNOW | 39 weeks (2-year windows) | LSTM: `ratio` (family O) | MAPE | 100 | +17.6 [+13.0, +22.5] | 32.2 [29.4, 35.1] | 0.1466 [0.1464, 0.1469] | 0.439 [0.437, 0.441] |
+| CDNOW | 39 weeks (2-year windows) | LSTM: `log` (family O) | Spearman | 100 | +65.8 [+60.2, +71.6] | 68.4 [63.2, 73.7] | 0.1536 [0.1526, 0.1547] | 0.442 [0.439, 0.444] |
+| CDNOW | 39 weeks (2-year windows) | ValendinLSTM: paper recipe (family N) | MAPE | 20 | −23.7 [−31.8, −14.6] | 36.2 [32.8, 39.7] | 0.1468 [0.1465, 0.1472] | 0.404 [0.393, 0.414] |
+| CDNOW | 39 weeks (2-year windows) | ValendinLSTM: `floored / kmeans_8` (family U) | Spearman | 20 | +33.4 [+21.2, +46.2] | 51.0 [42.3, 61.1] | 0.1539 [0.1523, 0.1556] | 0.406 [0.394, 0.417] |
+| CDNOW | 39 weeks (2-year windows) | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | **−14.1 [−15.2, −13.2]** | **20.5 [20.1, 20.9]** | **0.1455 [0.1455, 0.1455]** | **0.450 [0.447, 0.452]** |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded` (family H) | MAPE | 20 | <u>−11.8 [−15.8, −7.4]</u> | 21.0 [19.6, 22.5] | 0.1475 [0.1474, 0.1475] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `ar_bounded` (family H) | MAPE | 20 | −13.6 [−20.8, −6.2] | 25.6 [22.7, 28.6] | 0.1479 [0.1476, 0.1481] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Pareto/NBD (benchmark), one fit | benchmark | 1 fit | **−11.6** | **18.7** | **0.1468** | n/a |
+| electronics | 2 years | LSTM: `ar_saturating` (family E) | MAPE | 100 | <u>−11.6 [−15.0, −7.9]</u> | **43.3 [42.6, 44.0]** | **0.3757 [0.3757, 0.3758]** | 0.299 [0.295, 0.302] |
+| electronics | 2 years | LSTM: `ratio` (family O) | Spearman | 100 | +49.1 [+42.2, +57.0] | 71.0 [65.7, 77.4] | 0.3772 [0.3766, 0.3779] | 0.306 [0.303, 0.308] |
+| electronics | 2 years | ValendinLSTM: `floored / no_cluster` (family U) | MAPE | 20 | <u>−2.5 [−13.0, +8.2]</u> | <u>46.3 [43.2, 49.7]</u> | 0.3763 [0.3761, 0.3766] | 0.178 [0.144, 0.210] |
+| electronics | 2 years | ValendinLSTM: `floored / kmeans_8` (family U) | Spearman | 20 | +31.6 [+17.5, +44.7] | 58.8 [52.6, 65.2] | 0.3793 [0.3782, 0.3805] | 0.305 [0.298, 0.312] |
+| electronics | 2 years | Transformer: `ar_bounded` (family H) | MAPE and Spearman | 20 | **+2.5 [−6.4, +10.8]** | 49.5 [47.6, 51.4] | 0.3763 [0.3762, 0.3764] | 0.201 [0.137, 0.251] |
+| electronics | 2 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | −63.1 [−63.3, −62.9] | 65.7 [65.6, 65.8] | 0.3758 [0.3758, 0.3758] | **0.314 [0.310, 0.318]** |
+| electronics | 3 years | LSTM: `bounded32` (family P) | MAPE | 100 | −12.8 [−16.4, −9.1] | **38.2 [37.3, 39.2]** | **0.4041 [0.4041, 0.4042]** | 0.322 [0.318, 0.325] |
+| electronics | 3 years | LSTM: `ratio` (family P) | Spearman | 100 | **+6.0 [+3.5, +8.6]** | <u>39.1 [38.3, 40.0]</u> | 0.4046 [0.4045, 0.4047] | 0.323 [0.322, 0.325] |
+| electronics | 3 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | −65.2 [−65.4, −65.1] | 66.0 [65.8, 66.1] | 0.4049 [0.4049, 0.4050] | **0.332 [0.330, 0.334]** |
+| gift | 2 years | LSTM: `archive / kmeans_8` (family U) | MAPE | 20 | **−10.0 [−13.9, −6.4]** | <u>29.3 [27.1, 31.8]</u> | 0.1068 [0.1067, 0.1069] | 0.356 [0.350, 0.362] |
+| gift | 2 years | LSTM: `ratio` (family O) | Spearman | 100 | <u>−2.9 [−5.9, +0.5]</u> | 32.4 [30.9, 34.7] | 0.1066 [0.1065, 0.1067] | **0.392 [0.390, 0.393]** |
+| gift | 2 years | ValendinLSTM: `floored / no_cluster` (family U) | MAPE | 20 | <u>−10.6 [−16.5, −4.8]</u> | **28.9 [27.5, 30.2]** | 0.1067 [0.1066, 0.1068] | 0.280 [0.232, 0.320] |
+| gift | 2 years | ValendinLSTM: paper recipe (family N) | Spearman | 20 | −15.7 [−22.5, −8.5] | <u>29.7 [27.8, 32.0]</u> | **0.1064 [0.1064, 0.1064]** | 0.368 [0.360, 0.375] |
+| gift | 2 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | <u>−11.4 [−11.7, −11.1]</u> | 42.7 [42.6, 42.8] | 0.1066 [0.1066, 0.1066] | 0.378 [0.375, 0.381] |
+| gift | 3 years | LSTM: `bounded32` (family P) | MAPE | 100 | −5.4 [−7.6, −3.3] | **27.9 [27.3, 28.4]** | 0.1001 [0.1000, 0.1001] | 0.423 [0.421, 0.426] |
+| gift | 3 years | LSTM: `ratio` (family P) | Spearman | 100 | +15.1 [+12.2, +18.1] | 31.3 [29.6, 33.1] | **0.1000 [0.0999, 0.1000]** | **0.441 [0.440, 0.442]** |
+| gift | 3 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | **−8.1 [−8.3, −7.9]** | 42.8 [42.8, 42.9] | 0.1001 [0.1001, 0.1001] | 0.437 [0.435, 0.439] |
+| multichannel | 2 years | LSTM: `floored / no_cluster` (family U) | MAPE | 20 | +15.9 [+6.5, +25.6] | **52.8 [50.2, 55.6]** | 0.0569 [0.0569, 0.0569] | 0.079 [0.056, 0.101] |
+| multichannel | 2 years | LSTM: `floored / kmeans_8` (family U) | Spearman | 20 | +27.0 [+17.5, +37.2] | <u>57.7 [53.0, 63.2]</u> | 0.0572 [0.0571, 0.0573] | <u>0.189 [0.174, 0.202]</u> |
+| multichannel | 2 years | ValendinLSTM: `floored / no_cluster` (family U) | MAPE | 20 | +22.1 [+13.7, +30.5] | <u>56.0 [53.0, 59.3]</u> | 0.0569 [0.0569, 0.0569] | 0.119 [0.098, 0.140] |
+| multichannel | 2 years | ValendinLSTM: `floored / kmeans_8` (family U) | Spearman | 20 | +28.2 [+14.8, +43.4] | 63.4 [56.3, 72.6] | 0.0573 [0.0572, 0.0575] | **0.195 [0.187, 0.204]** |
+| multichannel | 2 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | **+6.5 [+5.7, +7.3]** | 55.8 [55.6, 55.9] | **0.0567 [0.0567, 0.0567]** | 0.185 [0.180, 0.190] |
+| multichannel | 3 years | LSTM: `bounded32` (family P) | MAPE | 100 | +33.3 [+28.2, +38.2] | 63.8 [61.5, 66.3] | 0.0489 [0.0489, 0.0489] | 0.236 [0.230, 0.242] |
+| multichannel | 3 years | LSTM: `log` (family P) | Spearman | 100 | +57.0 [+51.9, +62.4] | 75.0 [71.3, 79.0] | 0.0491 [0.0490, 0.0491] | <u>0.248 [0.243, 0.252]</u> |
+| multichannel | 3 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | **+22.6 [+21.8, +23.2]** | **60.4 [60.2, 60.5]** | **0.0488 [0.0488, 0.0488]** | **0.253 [0.249, 0.257]** |
+| electronic_5y | 5 years | LSTM: `nofloor`, input ar_bounded_52 | MAPE | 20 | <u>+8.7 [+5.1, +12.1]</u> | <u>17.5 [16.6, 18.6]</u> | 0.1112 [0.1112, 0.1112] | 0.399 [0.396, 0.402] |
+| electronic_5y | 5 years | LSTM: `searched`, input none | Spearman | 20 | +13.8 [+9.3, +18.8] | 20.5 [17.9, 23.7] | **0.1111 [0.1111, 0.1112]** | **0.405 [0.404, 0.406]** |
+| electronic_5y | 5 years | LSTMAttention: `from30`, input ar_bounded_52 | MAPE | 20 | **+9.3 [+7.2, +11.6]** | **17.0 [16.1, 18.0]** | 0.1113 [0.1113, 0.1113] | 0.402 [0.400, 0.404] |
+| electronic_5y | 5 years | LSTMAttention: `searched`, input none | Spearman | 20 | +16.0 [+11.2, +21.4] | 21.4 [18.2, 25.3] | 0.1113 [0.1113, 0.1113] | <u>0.403 [0.402, 0.405]</u> |
+| electronic_5y | 5 years | Transformer: `from30`, input ar_bounded_52 | MAPE | 20 | <u>+12.5 [+8.9, +16.3]</u> | 21.7 [19.7, 24.0] | 0.1116 [0.1115, 0.1116] | 0.397 [0.396, 0.399] |
+| electronic_5y | 5 years | Transformer: `nofloor`, input ar_bounded_52 | Spearman | 20 | +12.5 [+4.1, +20.8] | 31.5 [27.4, 35.9] | 0.1116 [0.1115, 0.1118] | 0.401 [0.400, 0.402] |
+| electronic_5y | 5 years | Pareto/NBD (benchmark), 20 seeded fits | benchmark | 20 fits | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.1115 [0.1115, 0.1115] | 0.395 [0.394, 0.396] |
