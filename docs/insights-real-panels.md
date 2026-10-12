@@ -349,7 +349,7 @@ Against Pareto/NBD's 20 fits (40 / 20), every labelled arm still ranks below it:
   `ar_unbounded` gives |bias| **−114.0** (−179.0, −49.5). On CDNOW the difference is not
   clear (−41.5, −246.6 to +144.1). The rescued arm is still far worse than `no_cluster`.
 
-### 5.2 Training × label on four panels (family U)
+### 5.2 Training × cluster label on four panels (family U)
 
 ValendinLSTM and LSTM, `archive` (patience 7, 100-trial search) against `floored` (the paper
 recipe plus `min_epochs=90`), crossed with `no_cluster` / `kmeans_8`. 20 replications a
@@ -368,9 +368,9 @@ cell, 2-year windows. The floor's own effect is in `docs/insight-training-effici
 | | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
 
 Forecast CV on the collapsed cells (`archive / no_cluster`): electronics 0.08–0.09 and
-multichannel 0.13–0.15, against 1.14–2.16 with the label.
+multichannel 0.13–0.15, against 1.14–2.16 with the cluster label.
 
-| panel | model | label alone | floor alone | +floor (on label) | +label (on floor) |
+| panel | model | cluster label alone | floor alone | +floor (on cluster label) | +cluster label (on floor) |
 | --- | --- | ---: | ---: | ---: | ---: |
 | cdnow | ValendinLSTM | +0.039 (−0.003, +0.086) | +0.019 (−0.019, +0.065) | +0.003 (−0.023, +0.033) | **+0.023 (+0.001, +0.047)** |
 | | LSTM | +0.012 (−0.013, +0.039) | −0.034 (−0.095, +0.019) | +0.004 (−0.014, +0.024) | **+0.051 (+0.001, +0.113)** |
@@ -381,16 +381,16 @@ multichannel 0.13–0.15, against 1.14–2.16 with the label.
 | multichannel | ValendinLSTM | **+0.182 (+0.163, +0.199)** | **+0.123 (+0.099, +0.147)** | **+0.018 (+0.003, +0.035)** | **+0.077 (+0.054, +0.100)** |
 | | LSTM | **+0.173 (+0.158, +0.186)** | **+0.076 (+0.051, +0.101)** | +0.014 (−0.004, +0.031) | **+0.111 (+0.083, +0.137)** |
 
-`label alone` and `floor alone` are measured against `archive / no_cluster`; `+label` and
-`+floor` against the other lever already applied.
+`cluster label alone` and `floor alone` are measured against `archive / no_cluster`;
+`+cluster label` and `+floor` against the other lever already applied.
 
-- **The label alone is supported on electronics and multichannel** (+0.17 to +0.28), on
-  gift for the LSTM only (+0.030), and not on CDNOW.
-- **The label added to an already-floored model helps in all eight cells** (+0.023 to
-  +0.127). That is the robust form of the claim.
-- **Stacking adds little.** The floor on top of the label is supported in 1 of 8 cells
-  (multichannel/ValendinLSTM, +0.018). Every interval rules out a gain above about +0.035,
-  which is the order of the refit noise.
+- **The cluster label alone is supported on electronics and multichannel** (+0.17 to
+  +0.28), on gift for the LSTM only (+0.030), and not on CDNOW.
+- **The cluster label added to an already-floored model helps in all eight cells**
+  (+0.023 to +0.127). That is the robust form of the claim.
+- **Stacking adds little.** The floor on top of the cluster label is supported in 1 of 8
+  cells (multichannel/ValendinLSTM, +0.018). Every interval rules out a gain above about
+  +0.035, which is the order of the refit noise.
 - **Against Pareto/NBD** (best cell `floored / kmeans_8`):
   - electronics: below on both models (ValendinLSTM **−0.009**, −0.017 to −0.000; LSTM
     **−0.012**);
