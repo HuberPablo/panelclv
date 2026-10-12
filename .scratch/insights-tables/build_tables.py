@@ -409,6 +409,35 @@ def table_7() -> list[str]:
 MET4 = ("bias_percent", "mape_aggregate", "rmse", "spearman")
 
 
+def family_h(panel: str) -> list[tuple[str, str, pd.DataFrame]]:
+    """Every `real_panel_arms` suite of one panel at 200 paths: (architecture, arm, scores).
+
+    Level (bias, MAPE, RMSE) is each suite's own results.csv, as `load_all` reads it.
+    Electronics' Spearman is scored from the stored forecasts; CDNOW's 38-week forecasts
+    cannot be, so it has none. The one CDNOW suite without a results.csv (Transformer
+    `no_ar`, 19 of 20) is scored from its stored forecasts.
+    """
+    if panel == "electronics":
+        data = bm.build_data("electronics", "2y")
+        actual, ids = holdout_actuals(data), np.asarray(data["ids"])
+    out = []
+    for suite in sorted(S.glob(f"real_panel_arms__*__{panel}__*__a")):
+        arch = suite.name.split("__")[1]
+        arm = suite.name.split("__")[3].replace("-valendin", "")
+        if not (suite / "results.csv").exists():
+            out.append((arch, arm, cdnow_transformer_no_ar()))
+            continue
+        r = pd.read_csv(suite / "results.csv")
+        r = r[r.model == arch].set_index("study")[["bias_percent", "mape_aggregate", "rmse"]]
+        if panel == "electronics":
+            sp = pd.DataFrame(bre.score_dir(suite / arch, actual, ids)).set_index("study").spearman
+            r = r.join(sp, how="outer")
+        else:
+            r["spearman"] = np.nan
+        out.append((arch, arm, r.reset_index()))
+    return out
+
+
 def candidates(d: pd.DataFrame) -> list[dict]:
     """Every configuration that forecast a block's customers over its holdout.
 
@@ -434,9 +463,10 @@ def candidates(d: pd.DataFrame) -> list[dict]:
             add(blk, m, f"`{tr} / {cl}` (family U)", x)
     # Electronics 2 years: families E, H and F share the benchmark's windows.
     blk = ("electronics", "2y")
-    for lab in d[(d.panel == "electronics") & d.group.isin(["E", "H"])].label.unique():
-        arch, arm, fam = lab.split()[0], lab.split()[1], "E" if "ar_encoding" in lab else "H"
-        add(blk, arch, f"`{arm}` (family {fam})", d[(d.panel == "electronics") & (d.label == lab)])
+    for lab in d[(d.panel == "electronics") & (d.group == "E")].label.unique():
+        add(blk, "LSTM", f"`{lab.split()[1]}` (family E)", d[(d.panel == "electronics") & (d.label == lab)])
+    for arch, arm, x in family_h("electronics"):
+        add(blk, arch, f"`{arm}` (family H)", x)
     sp = family_f_spearman()
     for arm in rca.ARMS:
         lv = pd.concat([pd.read_csv(S / rca.suite_name("electronics", arm, sh) / "results.csv")
@@ -449,12 +479,10 @@ def candidates(d: pd.DataFrame) -> list[dict]:
         add(blk, "LSTM", f"`{arm}` (family F)", x)
     # CDNOW's pre-ADR-0009 38-week window: families E, H, F and one Pareto/NBD fit.
     blk = ("cdnow", "38w")
-    for lab in d[(d.panel == "cdnow") & (d.cal == "2y-arms")].label.unique():
-        if "Pareto" in lab:
-            continue
-        arch, arm, fam = lab.split()[0], lab.split()[1], "E" if "ar_encoding" in lab else "H"
-        add(blk, arch, f"`{arm}` (family {fam})", d[(d.panel == "cdnow") & (d.label == lab)])
-    add(blk, "Transformer", "`no_ar` (family H)", cdnow_transformer_no_ar())
+    for lab in d[(d.panel == "cdnow") & (d.group == "E")].label.unique():
+        add(blk, "LSTM", f"`{lab.split()[1]}` (family E)", d[(d.panel == "cdnow") & (d.label == lab)])
+    for arch, arm, x in family_h("cdnow"):
+        add(blk, arch, f"`{arm}` (family H)", x)
     for arm in rca.ARMS:
         lv = pd.concat([pd.read_csv(S / rca.suite_name("cdnow", arm, sh) / "results.csv")
                         for sh in rca.SHARDS])

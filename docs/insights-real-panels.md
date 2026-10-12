@@ -779,7 +779,10 @@ run is **extreme** if it lies more than 3 scaled MADs from its cell's median.
 Every configuration that forecast a block's customers over its holdout, from every
 family: N, O, U and the seeded Pareto/NBD fits on the benchmark windows; E, H and F beside
 them on electronics; E, H and F on CDNOW's 38-week window; P at three years; Y on
-electronic_5y. Pareto/NBD is a row of every block. Marks follow the conventions above:
+electronic_5y. Family H enters with all its arms, for all three architectures: with and
+without the cluster label, and with each calendar variant (`-tf`, `-no_tf`, `-week_emb`).
+Family G is left out because H supersedes it, and family M because its budgets are not
+comparable (`docs/studies-run.md` §4). Pareto/NBD is a row of every block. Marks follow the conventions above:
 **bold** is the best value of each metric in its block, <u>underlined</u> rows are not
 clearly different from it.
 
@@ -806,25 +809,45 @@ Two cautions:
 | CDNOW | 39 weeks (2-year windows) | ValendinLSTM: `floored / kmeans_8` (family U) | 20 | +33.4 [+21.2, +46.2] | 51.0 [42.3, 61.1] | 0.1539 [0.1523, 0.1556] | 0.406 [0.394, 0.417] |
 | CDNOW | 39 weeks (2-year windows) | ValendinLSTM: `floored / no_cluster` (family U) | 20 | +6.0 [−18.0, +36.6] | 56.5 [41.0, 78.6] | 0.1486 [0.1472, 0.1506] | 0.383 [0.361, 0.402] |
 | CDNOW | 39 weeks (2-year windows) | Pareto/NBD (benchmark), 20 seeded fits | 20 fits | **−14.1 [−15.2, −13.2]** | **20.5 [20.1, 20.9]** | **0.1455 [0.1455, 0.1455]** | **0.450 [0.447, 0.452]** |
-| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar` (family E) | 100 | **−0.7 [−3.8, +2.5]** | 22.4 [20.9, 24.1] | 0.1475 [0.1474, 0.1475] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar` (family E) | 100 | <u>−0.7 [−3.8, +2.5]</u> | 22.4 [20.9, 24.1] | 0.1475 [0.1474, 0.1475] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded_16` (family E) | 100 | −8.5 [−11.4, −5.5] | 22.6 [21.6, 23.8] | 0.1473 [0.1473, 0.1474] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded_32` (family E) | 40 | +42.9 [+29.9, +56.5] | 55.4 [44.4, 67.2] | 0.1498 [0.1489, 0.1508] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_saturating` (family E) | 100 | +12.9 [+10.1, +15.8] | 27.4 [25.7, 29.1] | 0.1479 [0.1477, 0.1482] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_log` (family E) | 100 | +20.5 [+17.6, +23.8] | 33.3 [31.2, 35.8] | 0.1488 [0.1486, 0.1490] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_ratio` (family E) | 80 | +24.3 [+21.0, +27.7] | 34.6 [32.3, 37.1] | 0.1492 [0.1486, 0.1499] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_unbounded` (family E) | 40 | +334.1 [+189.7, +507.0] | 345.7 [202.5, 518.1] | 0.2652 [0.2110, 0.3262] | n/a |
-| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar` (family H) | 20 | −0.5 [−9.6, +10.0] | 26.7 [22.0, 32.5] | 0.1479 [0.1476, 0.1482] | n/a |
-| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded` (family H) | 20 | <u>−11.8 [−15.8, −7.4]</u> | 21.0 [19.6, 22.5] | 0.1475 [0.1474, 0.1475] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded-kmeans_8-tf` (family H) | 20 | +48.3 [+33.7, +63.8] | 58.3 [45.4, 72.3] | 0.1539 [0.1527, 0.1552] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded-kmeans_8` (family H) | 20 | <u>+10.4 [+5.9, +15.3]</u> | 27.5 [24.7, 30.7] | 0.1503 [0.1500, 0.1507] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded-no_cluster-tf` (family H) | 20 | −13.7 [−27.2, +3.5] | 35.4 [28.6, 44.5] | 0.1483 [0.1480, 0.1487] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_bounded-no_cluster` (family H) | 20 | <u>−11.8 [−15.8, −7.4]</u> | 21.0 [19.6, 22.5] | 0.1475 [0.1474, 0.1475] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar-kmeans_8-tf` (family H) | 20 | +116.7 [+86.6, +147.5] | 122.8 [96.0, 151.1] | 0.1639 [0.1605, 0.1673] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar-kmeans_8-week_emb` (family H) | 20 | +57.3 [+45.0, +70.5] | 67.7 [55.3, 80.8] | 0.1573 [0.1555, 0.1592] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar-kmeans_8` (family H) | 20 | <u>−0.6 [−8.8, +8.0]</u> | 26.0 [22.4, 30.8] | 0.1510 [0.1504, 0.1517] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar-no_cluster-tf` (family H) | 20 | +97.4 [+52.5, +144.0] | 114.3 [77.3, 154.5] | 0.1543 [0.1514, 0.1576] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar-no_cluster-week_emb` (family H) | 20 | +2.8 [−14.2, +24.0] | 44.3 [35.0, 59.5] | 0.1498 [0.1487, 0.1513] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_ar-no_cluster` (family H) | 20 | −0.5 [−9.6, +10.0] | 26.7 [22.0, 32.5] | 0.1479 [0.1476, 0.1482] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `no_cluster` (family F) | 40 | <u>−1.0 [−5.9, +4.2]</u> | 23.1 [21.0, 25.7] | 0.1475 [0.1474, 0.1477] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `cluster_4` (family F) | 40 | +30.0 [+21.9, +39.7] | 39.6 [32.5, 48.3] | 0.1515 [0.1507, 0.1524] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `cluster_8` (family F) | 40 | <u>+2.9 [−3.4, +9.2]</u> | 26.9 [23.7, 30.8] | 0.1507 [0.1503, 0.1511] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `cluster_16` (family F) | 40 | <u>+1.0 [−5.8, +9.0]</u> | 29.1 [25.2, 34.2] | 0.1513 [0.1505, 0.1524] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_unbounded` (family F) | 40 | +313.9 [+168.8, +487.6] | 325.6 [181.4, 498.2] | 0.2508 [0.1980, 0.3115] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | LSTM: `ar_plus_cluster_8` (family F) | 40 | +249.3 [+143.8, +365.6] | 296.7 [197.0, 408.3] | 0.2857 [0.2329, 0.3453] | n/a |
-| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `ar_bounded` (family H) | 20 | −13.6 [−20.8, −6.2] | 25.6 [22.7, 28.6] | 0.1479 [0.1476, 0.1481] | n/a |
-| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar` (family H) | 19 | +33.1 [+1.0, +86.4] | 52.1 [24.6, 101.3] | 0.1503 [0.1474, 0.1554] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | ValendinLSTM: `no_ar-kmeans_8-week_emb` (family H) | 20 | +28.9 [+20.1, +38.9] | 44.6 [38.3, 51.9] | 0.1546 [0.1534, 0.1561] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | ValendinLSTM: `no_ar-kmeans_8` (family H) | 20 | +9.0 [+0.5, +17.3] | 28.3 [24.3, 32.9] | 0.1511 [0.1505, 0.1517] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | ValendinLSTM: `no_ar-no_cluster-week_emb` (family H) | 20 | +3.1 [−13.6, +23.8] | 44.3 [33.3, 58.5] | 0.1493 [0.1484, 0.1506] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | ValendinLSTM: `no_ar-no_cluster` (family H) | 20 | <u>+0.5 [−7.7, +9.7]</u> | 24.5 [21.2, 28.7] | 0.1477 [0.1476, 0.1479] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `ar_bounded-kmeans_8-tf` (family H) | 20 | +23.0 [+9.9, +41.8] | 40.7 [30.8, 57.0] | 0.1520 [0.1508, 0.1540] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `ar_bounded-kmeans_8` (family H) | 20 | <u>+9.7 [+3.4, +15.5]</u> | 28.2 [25.9, 30.5] | 0.1508 [0.1504, 0.1512] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `ar_bounded-no_cluster-tf` (family H) | 20 | −23.8 [−30.0, −17.7] | 28.7 [24.7, 32.9] | 0.1485 [0.1483, 0.1487] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `ar_bounded-no_cluster` (family H) | 20 | −13.6 [−20.8, −6.2] | 25.6 [22.7, 28.6] | 0.1479 [0.1476, 0.1481] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar-kmeans_8-tf` (family H) | 20 | <u>+11.8 [+3.4, +21.5]</u> | 32.2 [26.6, 39.4] | 0.1518 [0.1511, 0.1526] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar-kmeans_8-week_emb` (family H) | 20 | **−7.2 [−11.7, −2.6]** | 24.4 [23.0, 25.8] | 0.1502 [0.1499, 0.1506] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar-kmeans_8` (family H) | 20 | <u>−4.5 [−9.2, +0.3]</u> | 24.4 [22.8, 26.0] | 0.1507 [0.1502, 0.1512] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar-no_cluster-tf` (family H) | 20 | +13.0 [+4.7, +20.9] | 29.0 [25.8, 32.3] | 0.1483 [0.1480, 0.1486] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar-no_cluster-week_emb` (family H) | 20 | +8.3 [−1.3, +18.3] | 31.8 [27.8, 36.5] | 0.1484 [0.1482, 0.1486] | n/a |
+| CDNOW | 38 weeks (pre-ADR-0009) | Transformer: `no_ar-no_cluster` (family H) | 19 | +33.1 [+1.0, +86.4] | 52.1 [24.6, 101.3] | 0.1503 [0.1474, 0.1554] | n/a |
 | CDNOW | 38 weeks (pre-ADR-0009) | Pareto/NBD (benchmark), one fit | 1 fit | <u>−11.6</u> | **18.7** | **0.1468** | n/a |
-| electronics | 2 years | LSTM: `bounded32` (family O) | 100 | <u>−1.7 [−5.2, +2.2]</u> | 45.0 [44.2, 45.9] | **0.3757 [0.3757, 0.3757]** | 0.263 [0.255, 0.271] |
+| electronics | 2 years | LSTM: `bounded32` (family O) | 100 | −1.7 [−5.2, +2.2] | 45.0 [44.2, 45.9] | **0.3757 [0.3757, 0.3757]** | 0.263 [0.255, 0.271] |
 | electronics | 2 years | LSTM: `log` (family O) | 100 | +32.5 [+27.6, +37.6] | 55.7 [52.7, 59.1] | 0.3816 [0.3795, 0.3840] | 0.296 [0.294, 0.298] |
 | electronics | 2 years | LSTM: `ratio` (family O) | 100 | +49.1 [+42.2, +57.0] | 71.0 [65.7, 77.4] | 0.3772 [0.3766, 0.3779] | 0.306 [0.303, 0.308] |
 | electronics | 2 years | LSTM: `bounded32ratio` (family O) | 100 | +33.0 [+28.6, +37.8] | 59.4 [56.7, 62.7] | 0.3762 [0.3760, 0.3763] | 0.302 [0.299, 0.304] |
@@ -833,17 +856,21 @@ Two cautions:
 | electronics | 2 years | LSTM: `floored / kmeans_8` (family U) | 20 | +17.1 [+1.7, +33.4] | 52.8 [45.5, 61.2] | 0.3780 [0.3771, 0.3791] | 0.302 [0.292, 0.311] |
 | electronics | 2 years | LSTM: `floored / no_cluster` (family U) | 20 | +27.3 [+16.2, +39.2] | 51.7 [45.6, 58.6] | 0.3766 [0.3764, 0.3768] | 0.182 [0.147, 0.213] |
 | electronics | 2 years | LSTM: `no_ar` (family E) | 100 | +22.4 [+19.3, +25.7] | 56.3 [54.9, 57.8] | 0.3767 [0.3766, 0.3767] | 0.041 [0.029, 0.054] |
-| electronics | 2 years | LSTM: `ar_bounded_32` (family E) | 100 | <u>+1.2 [−3.3, +5.9]</u> | 46.3 [44.8, 48.0] | 0.3760 [0.3759, 0.3760] | 0.257 [0.248, 0.265] |
-| electronics | 2 years | LSTM: `ar_bounded_52` (family E) | 100 | **−8.2 [−11.3, −4.9]** | 45.4 [44.5, 46.5] | 0.3760 [0.3759, 0.3761] | 0.202 [0.177, 0.223] |
+| electronics | 2 years | LSTM: `ar_bounded_32` (family E) | 100 | +1.2 [−3.3, +5.9] | 46.3 [44.8, 48.0] | 0.3760 [0.3759, 0.3760] | 0.257 [0.248, 0.265] |
+| electronics | 2 years | LSTM: `ar_bounded_52` (family E) | 100 | −8.2 [−11.3, −4.9] | 45.4 [44.5, 46.5] | 0.3760 [0.3759, 0.3761] | 0.202 [0.177, 0.223] |
 | electronics | 2 years | LSTM: `ar_saturating` (family E) | 100 | −11.6 [−15.0, −7.9] | **43.3 [42.6, 44.0]** | <u>0.3757 [0.3757, 0.3758]</u> | 0.299 [0.295, 0.302] |
 | electronics | 2 years | LSTM: `ar_log` (family E) | 100 | +41.5 [+35.1, +48.6] | 63.0 [58.5, 68.0] | 0.3855 [0.3825, 0.3890] | 0.292 [0.289, 0.295] |
 | electronics | 2 years | LSTM: `ar_ratio` (family E) | 100 | +47.1 [+41.8, +52.7] | 70.4 [66.8, 74.3] | 0.3772 [0.3769, 0.3775] | 0.304 [0.301, 0.306] |
 | electronics | 2 years | LSTM: `ar_unbounded` (family E) | 40 | +235.5 [+170.5, +310.5] | 240.7 [177.0, 314.4] | 0.4325 [0.4150, 0.4530] | 0.227 [0.206, 0.246] |
-| electronics | 2 years | LSTM: `no_ar` (family H) | 20 | +23.8 [+18.4, +29.4] | 56.3 [53.5, 59.1] | 0.3769 [0.3767, 0.3771] | 0.036 [0.010, 0.071] |
-| electronics | 2 years | LSTM: `ar_bounded` (family H) | 20 | <u>+2.0 [−10.5, +15.6]</u> | 48.4 [44.1, 53.5] | 0.3762 [0.3761, 0.3765] | 0.249 [0.232, 0.264] |
+| electronics | 2 years | LSTM: `ar_bounded-kmeans_8` (family H) | 20 | **+1.4 [−4.2, +7.1]** | <u>44.0 [42.9, 45.3]</u> | 0.3766 [0.3764, 0.3768] | 0.291 [0.284, 0.299] |
+| electronics | 2 years | LSTM: `ar_bounded-no_cluster` (family H) | 20 | +2.0 [−10.3, +16.4] | 48.4 [44.1, 53.7] | 0.3762 [0.3761, 0.3765] | 0.249 [0.232, 0.265] |
+| electronics | 2 years | LSTM: `no_ar-kmeans_8-no_tf` (family H) | 20 | <u>+1.8 [−4.5, +8.8]</u> | 52.6 [50.9, 54.6] | 0.3766 [0.3764, 0.3768] | 0.298 [0.279, 0.311] |
+| electronics | 2 years | LSTM: `no_ar-kmeans_8` (family H) | 20 | +32.7 [+22.7, +45.0] | 62.6 [56.6, 70.4] | 0.3777 [0.3771, 0.3784] | 0.271 [0.246, 0.292] |
+| electronics | 2 years | LSTM: `no_ar-no_cluster-no_tf` (family H) | 20 | +18.4 [+12.2, +24.5] | 57.4 [55.3, 59.5] | 0.3767 [0.3766, 0.3768] | 0.049 [0.017, 0.088] |
+| electronics | 2 years | LSTM: `no_ar-no_cluster` (family H) | 20 | +23.8 [+18.3, +29.3] | 56.3 [53.4, 59.1] | 0.3769 [0.3767, 0.3771] | 0.036 [0.010, 0.072] |
 | electronics | 2 years | LSTM: `no_cluster` (family F) | 40 | +20.9 [+16.6, +25.3] | 54.9 [52.9, 56.9] | 0.3766 [0.3765, 0.3767] | 0.039 [0.017, 0.064] |
-| electronics | 2 years | LSTM: `cluster_4` (family F) | 40 | <u>+13.3 [+6.2, +21.4]</u> | 51.8 [47.8, 56.4] | 0.3768 [0.3765, 0.3771] | 0.264 [0.260, 0.269] |
-| electronics | 2 years | LSTM: `cluster_8` (family F) | 40 | <u>+11.4 [+4.5, +18.4]</u> | 53.1 [49.2, 57.7] | 0.3766 [0.3764, 0.3768] | 0.270 [0.252, 0.286] |
+| electronics | 2 years | LSTM: `cluster_4` (family F) | 40 | +13.3 [+6.2, +21.4] | 51.8 [47.8, 56.4] | 0.3768 [0.3765, 0.3771] | 0.264 [0.260, 0.269] |
+| electronics | 2 years | LSTM: `cluster_8` (family F) | 40 | +11.4 [+4.5, +18.4] | 53.1 [49.2, 57.7] | 0.3766 [0.3764, 0.3768] | 0.270 [0.252, 0.286] |
 | electronics | 2 years | LSTM: `cluster_16` (family F) | 40 | +18.7 [+12.9, +24.6] | 55.2 [52.4, 58.2] | 0.3771 [0.3767, 0.3774] | 0.257 [0.244, 0.270] |
 | electronics | 2 years | LSTM: `ar_unbounded` (family F) | 40 | +208.6 [+157.2, +264.5] | 213.4 [163.5, 268.0] | 0.4328 [0.4159, 0.4517] | 0.229 [0.207, 0.249] |
 | electronics | 2 years | LSTM: `ar_plus_cluster_8` (family F) | 40 | +91.8 [+55.6, +133.3] | 115.5 [82.8, 154.2] | 0.4025 [0.3881, 0.4229] | 0.279 [0.261, 0.292] |
@@ -852,8 +879,14 @@ Two cautions:
 | electronics | 2 years | ValendinLSTM: `archive / no_cluster` (family U) | 20 | +42.9 [+38.3, +47.4] | 69.1 [64.8, 73.3] | 0.3775 [0.3773, 0.3777] | 0.021 [0.005, 0.038] |
 | electronics | 2 years | ValendinLSTM: `floored / kmeans_8` (family U) | 20 | +31.6 [+17.5, +44.7] | 58.8 [52.6, 65.2] | 0.3793 [0.3782, 0.3805] | 0.305 [0.298, 0.312] |
 | electronics | 2 years | ValendinLSTM: `floored / no_cluster` (family U) | 20 | −2.5 [−13.0, +8.2] | <u>46.3 [43.2, 49.7]</u> | 0.3763 [0.3761, 0.3766] | 0.178 [0.144, 0.210] |
-| electronics | 2 years | Transformer: `no_ar` (family H) | 20 | +15.9 [+7.7, +23.9] | 53.0 [50.5, 55.8] | 0.3792 [0.3789, 0.3794] | 0.113 [0.069, 0.159] |
-| electronics | 2 years | Transformer: `ar_bounded` (family H) | 20 | <u>+2.5 [−6.4, +10.8]</u> | 49.5 [47.6, 51.4] | 0.3763 [0.3762, 0.3764] | 0.201 [0.137, 0.251] |
+| electronics | 2 years | ValendinLSTM: `no_ar-kmeans_8-no_tf` (family H) | 20 | +13.8 [−0.5, +27.1] | 59.3 [56.1, 62.7] | 0.3779 [0.3769, 0.3793] | <u>0.291 [0.259, 0.315]</u> |
+| electronics | 2 years | ValendinLSTM: `no_ar-no_cluster-no_tf` (family H) | 20 | +32.1 [+24.1, +39.5] | 63.1 [60.0, 66.2] | 0.3770 [0.3768, 0.3772] | 0.031 [0.014, 0.050] |
+| electronics | 2 years | Transformer: `ar_bounded-kmeans_8` (family H) | 20 | +16.9 [+7.6, +26.9] | 53.0 [49.1, 57.4] | 0.3770 [0.3767, 0.3772] | <u>0.309 [0.303, 0.315]</u> |
+| electronics | 2 years | Transformer: `ar_bounded-no_cluster` (family H) | 20 | +2.5 [−6.4, +10.6] | 49.5 [47.6, 51.4] | 0.3763 [0.3762, 0.3764] | 0.201 [0.136, 0.252] |
+| electronics | 2 years | Transformer: `no_ar-kmeans_8-no_tf` (family H) | 20 | <u>+0.8 [−8.6, +11.8]</u> | 53.0 [49.5, 57.5] | 0.3788 [0.3783, 0.3795] | <u>0.309 [0.304, 0.315]</u> |
+| electronics | 2 years | Transformer: `no_ar-kmeans_8` (family H) | 20 | +15.0 [+3.1, +27.6] | 54.3 [49.9, 59.5] | 0.3769 [0.3765, 0.3773] | 0.302 [0.296, 0.308] |
+| electronics | 2 years | Transformer: `no_ar-no_cluster-no_tf` (family H) | 20 | +30.0 [+18.4, +43.4] | 63.6 [58.0, 70.9] | 0.3770 [0.3767, 0.3773] | 0.147 [0.095, 0.196] |
+| electronics | 2 years | Transformer: `no_ar-no_cluster` (family H) | 20 | +15.9 [+7.5, +23.8] | 53.0 [50.4, 55.8] | 0.3792 [0.3789, 0.3794] | 0.113 [0.067, 0.159] |
 | electronics | 2 years | Pareto/NBD (benchmark), 20 seeded fits | 20 fits | −63.1 [−63.3, −62.9] | 65.7 [65.6, 65.8] | 0.3758 [0.3758, 0.3758] | **0.314 [0.310, 0.318]** |
 | electronics | 3 years | LSTM: `bounded32` (family P) | 100 | −12.8 [−16.4, −9.1] | **38.2 [37.3, 39.2]** | **0.4041 [0.4041, 0.4042]** | 0.322 [0.318, 0.325] |
 | electronics | 3 years | LSTM: `log` (family P) | 100 | <u>+10.3 [+7.6, +13.1]</u> | 40.0 [39.0, 41.1] | 0.4044 [0.4044, 0.4045] | 0.307 [0.306, 0.308] |
@@ -931,12 +964,14 @@ Two cautions:
 | electronic_5y | 5 years | Pareto/NBD (benchmark), 20 seeded fits | 20 fits | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.1115 [0.1115, 0.1115] | 0.395 [0.394, 0.396] |
 
 - **CDNOW: Pareto/NBD is best on MAPE on both windows, and on every metric at 39 weeks.**
-  No neural row is level with it on MAPE or Spearman. On the 38-week window the LSTM
-  without features misses the total by least (`no_ar`, −0.7%).
+  No neural row is level with it on MAPE or Spearman. On the 38-week window the
+  Transformer `no_ar-kmeans_8-week_emb` misses the total by least (−7.2%).
 - **Electronics: the LSTM wins level, Pareto/NBD wins ranking, at both lengths.** The best
   MAPE is the LSTM's (`ar_saturating` 43.3 at two years, `bounded32` 38.2 at three), about
   22 and 28 points below Pareto/NBD. Pareto/NBD ranks best (0.314, 0.332). At two years
-  only ValendinLSTM `archive / kmeans_8` (0.305) is not clearly below it.
+  four rows with the cluster label are not clearly below it: two Transformer arms
+  (`ar_bounded-kmeans_8` and `no_ar-kmeans_8-no_tf`, both 0.309) and two ValendinLSTM arms
+  (`archive / kmeans_8` 0.305, `no_ar-kmeans_8-no_tf` 0.291).
 - **Gift: the neural models win both, at both lengths.** At two years ValendinLSTM
   `floored / no_cluster` has the best MAPE (28.9), with seven other family N and U rows
   level and Pareto/NBD 13.8 points behind. The LSTM with `ratio` ranks best (0.392, above
@@ -951,6 +986,8 @@ Two cautions:
   LSTMAttention `from30` with `ar_bounded_52` has the best MAPE (17.0), with most LSTM and
   LSTMAttention rows level. The searched LSTM ranks best (0.405), level with the LSTM
   `from20` and the searched LSTMAttention. Pareto/NBD sits at 27.7 MAPE and 0.395 Spearman.
-- **The Transformer is never best and never level with the best on MAPE or Spearman.** It
-  ran on CDNOW's 38-week window, electronics at two years and electronic_5y, and never on
-  gift, multichannel or the 3-year windows (§11).
+- **The Transformer is never best on MAPE or Spearman.** Its strongest showing is with
+  the cluster label: on electronics at two years it ranks level with Pareto/NBD (0.309
+  against 0.314), and on CDNOW's 38-week window it has the best |bias|. On MAPE it is never
+  level with the best. It ran on CDNOW's 38-week window, electronics at two years and
+  electronic_5y, and never on gift, multichannel or the 3-year windows (§11).
