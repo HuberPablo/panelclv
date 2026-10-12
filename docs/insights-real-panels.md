@@ -13,7 +13,20 @@ Covered elsewhere:
 Conventions:
 - Every comparison is Δ = mean(B) − mean(A) with a 95% percentile-bootstrap interval
   from `evaluation.effects.effect` (`docs/statistical-protocol.md`), independent
-  replications unless stated. **Bold** marks an interval that excludes 0.
+  replications unless stated. In a table of Δs, **bold** marks an interval that excludes
+  0.
+- In a table of results, a cell is the mean over replications with its 95% interval,
+  `mean [lo, hi]`. Pareto/NBD, the benchmark, is a row of every block; a block is the rows
+  that forecast the same customers over the same holdout. Within a block, per column:
+  - **bold** is the best mean: highest Spearman, lowest MAPE, |bias| and RMSE;
+  - <u>underlined</u> rows are not clearly different from it: their Δ against the best has
+    an interval containing 0.
+
+  The bias column prints signed bias but is ranked on each replication's |bias|. A single
+  Pareto/NBD fit (CDNOW's pre-ADR-0009 window) prints without an interval and is compared
+  as a constant. Forecast CV is a diagnostic and is not ranked. The tables are rebuilt by
+  `.scratch/insights-tables/build_tables.py`. §9's ensembles are single forecasts, so
+  they carry no interval.
 - Spearman (of per-customer holdout totals) carries ranking claims; aggregate MAPE
   carries level claims; |bias| is secondary.
 - RMSE is descriptive and separates nothing on panels that are 98–99.7% zeros
@@ -87,42 +100,46 @@ gift does not.
 It is 0 when every customer gets the same number. Spearman says whether that variation is
 in the right order.
 
-**Electronics census.** Every stored forecast on the benchmark windows: 1,643 distinct
-forecasts over 488 suites, matched by execution (holdout, cohort and order checked). A row
+**Electronics census.** Every stored forecast on the benchmark windows: 2,181 distinct
+forecasts over 1,028 suites, matched by execution (holdout, cohort and order checked). A row
 is what the model read, i.e. its per-customer channels beside the count. Regenerate with
-`PYTHONPATH=src python scripts/measure_forecast_collapse.py`.
+`PYTHONPATH=src python scripts/measure_forecast_collapse.py`. All rows forecast the same
+customers, so the table is one block; the Pareto/NBD row is its 20 seeded fits plus one
+earlier fit.
 
-| per-customer input beside the count | model | calendar | forecasts | median CV | mean Spearman |
+| per-customer input beside the count | model | calendar | forecasts | median CV | mean Spearman [95% CI] |
 | --- | --- | --- | ---: | ---: | ---: |
-| count only | ValendinLSTM | week | 20 | 0.05 | 0.03 |
-| count only | LSTM | week_sin, week_cos | 184 | 0.07 | 0.04 |
-| count only | ValendinLSTM | none | 20 | 0.08 | 0.03 |
-| count only | LSTM | none | 20 | 0.09 | 0.05 |
-| count only | Transformer | week_sin, week_cos | 34 | 0.16 | 0.09 |
-| count only | Transformer | none | 20 | 0.19 | 0.15 |
-| active_in_last_{2,4,8,16,32}_periods, has_transacted_before | Transformer | week_sin, week_cos | 20 | 0.21 | 0.20 |
-| active_in_last_{2,4,8,16,32,52}_periods, has_transacted_before | LSTM | week_sin, week_cos | 100 | 0.30 | 0.20 |
-| active_in_last_{2,4,8,16,32}_periods, has_transacted_before | LSTM | week_sin, week_cos | 220 | 0.34 | 0.26 |
-| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, recency_over_tenure, transaction_rate, saturating_tenure_26_periods | LSTM | week_sin, week_cos | 100 | 0.36 | 0.30 |
-| recency_over_tenure, transaction_rate, saturating_tenure_26_periods, has_transacted_before | LSTM | week_sin, week_cos | 200 | 0.43 | 0.30 |
-| saturating_recency_26_periods, transaction_rate, saturating_tenure_26_periods | LSTM | week_sin, week_cos | 100 | 0.49 | 0.30 |
-| kmeans_16 | LSTM | week_sin, week_cos | 40 | 0.75 | 0.26 |
-| kmeans_8 | LSTM | week_sin, week_cos | 60 | 0.93 | 0.27 |
-| recency, frequency, tenure (HB MCMC) | ParetoNBD | — | 2 | 1.12 | 0.30 |
-| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8 | Transformer | week_sin, week_cos | 20 | 1.16 | 0.31 |
-| kmeans_4 | LSTM | week_sin, week_cos | 40 | 1.24 | 0.26 |
-| kmeans_8 | Transformer | week_sin, week_cos | 20 | 1.26 | 0.30 |
-| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8 | LSTM | week_sin, week_cos | 20 | 1.32 | 0.29 |
-| kmeans_8 | Transformer | none | 20 | 1.37 | 0.31 |
-| log_period_since_last_transaction, cumulative_transactions, log_period_since_first_transaction | LSTM | week_sin, week_cos | 200 | 1.42 | 0.29 |
-| kmeans_8 | ValendinLSTM | none | 20 | 1.42 | 0.29 |
-| kmeans_8 | LSTM | none | 20 | 1.50 | 0.30 |
-| period_since_last_transaction, cumulative_transactions, period_since_first_transaction, kmeans_8 | LSTM | week_sin, week_cos | 40 | 1.69 | 0.28 |
-| period_since_last_transaction, cumulative_transactions, period_since_first_transaction | LSTM | week_sin, week_cos | 100 | 1.71 | 0.23 |
-| recency, frequency, tenure (MLE) | ParetoNBD_MLE | — | 3 | 2.26 | 0.28 |
+| count only | ValendinLSTM | none | 20 | 0.08 | 0.031 [0.014, 0.051] |
+| count only | LSTM | week_sin, week_cos | 364 | 0.08 | 0.054 [0.046, 0.062] |
+| count only | ValendinLSTM | week | 259 | 0.08 | 0.096 [0.084, 0.109] |
+| count only | LSTM | none | 20 | 0.09 | 0.049 [0.018, 0.088] |
+| count only | Transformer | week_sin, week_cos | 34 | 0.16 | 0.086 [0.054, 0.119] |
+| count only | Transformer | none | 20 | 0.19 | 0.147 [0.096, 0.196] |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before | Transformer | week_sin, week_cos | 20 | 0.21 | 0.201 [0.137, 0.251] |
+| active_in_last_{2,4,8,16,32,52}_periods, has_transacted_before | LSTM | week_sin, week_cos | 100 | 0.30 | 0.202 [0.177, 0.223] |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before | LSTM | week_sin, week_cos | 220 | 0.34 | 0.259 [0.253, 0.265] |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, recency_over_tenure, transaction_rate, saturating_tenure_26_periods | LSTM | week_sin, week_cos | 100 | 0.36 | 0.302 [0.299, 0.304] |
+| active_in_last_{2,4,8,16,32,52}_periods, has_transacted_before | LSTM_AR52 | week_sin, week_cos | 20 | 0.40 | 0.281 [0.266, 0.295] |
+| recency_over_tenure, transaction_rate, saturating_tenure_26_periods, has_transacted_before | LSTM | week_sin, week_cos | 200 | 0.43 | 0.305 [0.303, 0.307] |
+| saturating_recency_26_periods, transaction_rate, saturating_tenure_26_periods | LSTM | week_sin, week_cos | 100 | 0.49 | 0.299 [0.295, 0.302] |
+| kmeans_16 | LSTM | week_sin, week_cos | 40 | 0.75 | 0.257 [0.244, 0.270] |
+| recency, frequency, tenure (HB MCMC) | Pareto/NBD (benchmark) | — | 21 | 1.11 | **0.313 [0.310, 0.317]** |
+| kmeans_8 | LSTM | week_sin, week_cos | 100 | 1.13 | 0.280 [0.270, 0.289] |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8 | Transformer | week_sin, week_cos | 20 | 1.16 | <u>0.309 [0.303, 0.315]</u> |
+| kmeans_4 | LSTM | week_sin, week_cos | 40 | 1.24 | 0.264 [0.260, 0.269] |
+| kmeans_8 | Transformer | week_sin, week_cos | 20 | 1.26 | 0.302 [0.296, 0.307] |
+| active_in_last_{2,4,8,16,32}_periods, has_transacted_before, kmeans_8 | LSTM | week_sin, week_cos | 20 | 1.32 | 0.291 [0.284, 0.299] |
+| kmeans_8 | ValendinLSTM | week | 40 | 1.34 | 0.305 [0.299, 0.311] |
+| kmeans_8 | Transformer | none | 20 | 1.37 | <u>0.309 [0.304, 0.315]</u> |
+| log_period_since_last_transaction, cumulative_transactions, log_period_since_first_transaction | LSTM | week_sin, week_cos | 200 | 1.42 | 0.294 [0.292, 0.296] |
+| kmeans_8 | ValendinLSTM | none | 20 | 1.42 | <u>0.291 [0.259, 0.315]</u> |
+| kmeans_8 | LSTM | none | 20 | 1.50 | 0.298 [0.279, 0.311] |
+| period_since_last_transaction, cumulative_transactions, period_since_first_transaction, kmeans_8 | LSTM | week_sin, week_cos | 40 | 1.69 | 0.279 [0.261, 0.292] |
+| period_since_last_transaction, cumulative_transactions, period_since_first_transaction | LSTM | week_sin, week_cos | 100 | 1.71 | 0.226 [0.213, 0.238] |
+| recency, frequency, tenure (MLE) | ParetoNBD_MLE | — | 3 | 2.26 | 0.280 [0.279, 0.282] |
 
 - **Every neural model collapses when the count is its only per-customer input.** That
-  holds across three architectures and three calendar treatments: CV 0.05–0.19, Spearman
+  holds across three architectures and three calendar treatments: CV 0.08–0.19, Spearman
   0.03–0.15. The calendar is the same for every customer, so it cannot separate them.
 - **One persistent per-customer channel undoes it, and which one barely matters.** Any
   such channel gives CV ≥ 0.21 and Spearman ≥ 0.20.
@@ -167,33 +184,31 @@ benchmarks.
 
 | panel | model and features | n | trials / paths | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
-| electronics | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
-| electronics | **Benchmark: Pareto/NBD** | 20 fits | — | −63.1 ± 0.4 | 65.7 ± 0.3 | 0.3758 ± 0.0000 | 0.314 ± 0.010 |
-| electronics | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | +22.4 ± 16.4 | 56.3 ± 7.5 | 0.3767 ± 0.0003 | 0.041 ± 0.065 |
-| electronics | LSTM ar_bounded_32 (`ar_encoding`) | 100 | 50 / 300 | +1.2 ± 23.6 | 46.3 ± 8.4 | 0.3760 ± 0.0003 | 0.257 ± 0.044 |
-| electronics | LSTM ar_bounded_52 (`ar_encoding`) | 100 | 50 / 300 | −8.2 ± 16.4 | 45.4 ± 5.0 | 0.3760 ± 0.0004 | 0.202 ± 0.121 |
-| electronics | **LSTM ar_saturating (`ar_encoding`)** | 100 | 50 / 300 | **−11.6 ± 18.0** | **43.3 ± 3.6** | 0.3757 ± 0.0002 | **0.299 ± 0.019** |
-| electronics | LSTM ar_log (`ar_encoding`) | 100 | 50 / 300 | +41.5 ± 34.5 | 63.0 ± 24.3 | 0.3855 ± 0.0167 | 0.292 ± 0.015 |
-| electronics | LSTM ar_ratio (`ar_encoding`) | 100 | 50 / 300 | +47.1 ± 27.7 | 70.4 ± 19.1 | 0.3772 ± 0.0015 | 0.304 ± 0.013 |
-| electronics | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +235.5 ± 230.4 | 240.7 ± 226.3 | 0.4325 ± 0.0632 | 0.227 ± 0.065 |
-| electronics | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | +23.8 ± 12.8 | 56.3 ± 6.6 | 0.3769 ± 0.0004 | 0.036 ± 0.073 |
-| electronics | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.0 ± 31.1 | 48.4 ± 11.2 | 0.3762 ± 0.0005 | 0.249 ± 0.038 |
-| electronics | Transformer no_ar (`real_panel_arms`) | 20 | 50 / 200 | +15.9 ± 19.2 | 53.0 ± 6.3 | 0.3792 ± 0.0006 | 0.113 ± 0.107 |
-| electronics | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | +2.5 ± 19.9 | 49.5 ± 4.6 | 0.3763 ± 0.0003 | 0.201 ± 0.135 |
-| cdnow | **Benchmark: ValendinLSTM**, count + week | 20 | 100 / 500 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
-| cdnow | **Benchmark: Pareto/NBD** | 20 fits | — | −14.1 ± 2.3 | 20.5 ± 0.8 | 0.1455 ± 0.0000 | 0.450 ± 0.006 |
-| cdnow | Pareto/NBD on the arms' 38-week window (`real_panel_arms__ParetoNBD__cdnow`) | 1 fit | — | −11.6 | 18.7 | 0.1468 | n/a |
-| cdnow | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | −0.7 ± 16.2 | 22.4 ± 8.2 | 0.1475 ± 0.0003 | n/a |
-| cdnow | LSTM ar_bounded_16 (`ar_encoding`) | 100 | 50 / 300 | −8.5 ± 15.2 | 22.6 ± 5.7 | 0.1473 ± 0.0002 | n/a |
-| cdnow | LSTM ar_bounded_32 (`ar_encoding`) | 40 | 50 / 300 | +42.9 ± 43.7 | 55.4 ± 37.2 | 0.1498 ± 0.0030 | n/a |
-| cdnow | LSTM ar_saturating (`ar_encoding`) | 100 | 50 / 300 | +12.9 ± 14.6 | 27.4 ± 8.7 | 0.1479 ± 0.0013 | n/a |
-| cdnow | LSTM ar_log (`ar_encoding`) | 100 | 50 / 300 | +20.5 ± 15.8 | 33.3 ± 11.7 | 0.1488 ± 0.0011 | n/a |
-| cdnow | LSTM ar_ratio (`ar_encoding`) | **80** | 50 / 300 | +24.3 ± 15.4 | 34.6 ± 11.2 | 0.1492 ± 0.0031 | n/a |
-| cdnow | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +334.1 ± 525.2 | 345.7 ± 522.3 | 0.2652 ± 0.1899 | n/a |
-| cdnow | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | −0.5 ± 23.2 | 26.7 ± 12.4 | 0.1479 ± 0.0007 | n/a |
-| cdnow | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −11.8 ± 9.9 | 21.0 ± 3.3 | 0.1475 ± 0.0002 | n/a |
-| cdnow | Transformer no_ar (`real_panel_arms`) | **19** | 50 / 200 | +32.1 ± 108.1 | 51.2 ± 101.8 | 0.1518 ± 0.0105 | n/a |
-| cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 ± 17.3 | 25.6 ± 6.9 | 0.1479 ± 0.0006 | n/a |
+| electronics | ValendinLSTM (benchmark), count + week | 20 | 100 / 500 | +46.0 [+39.2, +51.8] | 70.8 [68.0, 73.5] | 0.3770 [0.3768, 0.3771] | 0.032 [0.017, 0.046] |
+| electronics | Pareto/NBD (benchmark) | 20 fits | — | −63.1 [−63.3, −62.9] | 65.7 [65.6, 65.8] | 0.3758 [0.3758, 0.3758] | **0.314 [0.310, 0.318]** |
+| electronics | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | +22.4 [+19.3, +25.7] | 56.3 [54.9, 57.8] | 0.3767 [0.3766, 0.3767] | 0.041 [0.029, 0.054] |
+| electronics | LSTM ar_bounded_32 (`ar_encoding`) | 100 | 50 / 300 | <u>+1.2 [−3.3, +5.9]</u> | 46.3 [44.8, 48.0] | 0.3760 [0.3759, 0.3760] | 0.257 [0.248, 0.265] |
+| electronics | LSTM ar_bounded_52 (`ar_encoding`) | 100 | 50 / 300 | **−8.2 [−11.3, −4.9]** | 45.4 [44.5, 46.5] | 0.3760 [0.3759, 0.3761] | 0.202 [0.177, 0.223] |
+| electronics | LSTM ar_saturating (`ar_encoding`) | 100 | 50 / 300 | −11.6 [−15.0, −7.9] | **43.3 [42.6, 44.0]** | **0.3757 [0.3757, 0.3758]** | 0.299 [0.295, 0.302] |
+| electronics | LSTM ar_log (`ar_encoding`) | 100 | 50 / 300 | +41.5 [+35.1, +48.6] | 63.0 [58.5, 68.0] | 0.3855 [0.3825, 0.3890] | 0.292 [0.289, 0.295] |
+| electronics | LSTM ar_ratio (`ar_encoding`) | 100 | 50 / 300 | +47.1 [+41.8, +52.7] | 70.4 [66.8, 74.3] | 0.3772 [0.3769, 0.3775] | 0.304 [0.301, 0.306] |
+| electronics | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +235.5 [+170.5, +310.5] | 240.7 [177.0, 314.4] | 0.4325 [0.4150, 0.4530] | 0.227 [0.206, 0.246] |
+| electronics | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | +23.8 [+18.4, +29.4] | 56.3 [53.5, 59.1] | 0.3769 [0.3767, 0.3771] | 0.036 [0.010, 0.071] |
+| electronics | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | <u>+2.0 [−10.5, +15.6]</u> | 48.4 [44.1, 53.5] | 0.3762 [0.3761, 0.3765] | 0.249 [0.232, 0.264] |
+| electronics | Transformer no_ar (`real_panel_arms`) | 20 | 50 / 200 | +15.9 [+7.7, +23.9] | 53.0 [50.5, 55.8] | 0.3792 [0.3789, 0.3794] | 0.113 [0.069, 0.159] |
+| electronics | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | <u>+2.5 [−6.4, +10.8]</u> | 49.5 [47.6, 51.4] | 0.3763 [0.3762, 0.3764] | 0.201 [0.137, 0.251] |
+| cdnow | Pareto/NBD (benchmark), one fit (`real_panel_arms__ParetoNBD__cdnow`) | 1 fit | — | <u>−11.6</u> | **18.7** | **0.1468** | n/a |
+| cdnow | LSTM no_ar (`ar_encoding`) | 100 | 50 / 300 | **−0.7 [−3.8, +2.5]** | 22.4 [20.9, 24.1] | 0.1475 [0.1474, 0.1475] | n/a |
+| cdnow | LSTM ar_bounded_16 (`ar_encoding`) | 100 | 50 / 300 | −8.5 [−11.4, −5.5] | 22.6 [21.6, 23.8] | 0.1473 [0.1473, 0.1474] | n/a |
+| cdnow | LSTM ar_bounded_32 (`ar_encoding`) | 40 | 50 / 300 | +42.9 [+29.9, +56.5] | 55.4 [44.4, 67.2] | 0.1498 [0.1489, 0.1508] | n/a |
+| cdnow | LSTM ar_saturating (`ar_encoding`) | 100 | 50 / 300 | +12.9 [+10.1, +15.8] | 27.4 [25.7, 29.1] | 0.1479 [0.1477, 0.1482] | n/a |
+| cdnow | LSTM ar_log (`ar_encoding`) | 100 | 50 / 300 | +20.5 [+17.6, +23.8] | 33.3 [31.2, 35.8] | 0.1488 [0.1486, 0.1490] | n/a |
+| cdnow | LSTM ar_ratio (`ar_encoding`) | 80 | 50 / 300 | +24.3 [+21.0, +27.7] | 34.6 [32.3, 37.1] | 0.1492 [0.1486, 0.1499] | n/a |
+| cdnow | LSTM ar_unbounded (`ar_encoding`) | 40 | 50 / 300 | +334.1 [+189.7, +507.0] | 345.7 [202.5, 518.1] | 0.2652 [0.2110, 0.3262] | n/a |
+| cdnow | LSTM no_ar (`real_panel_arms`) | 20 | 50 / 200 | −0.5 [−9.6, +10.0] | 26.7 [22.0, 32.5] | 0.1479 [0.1476, 0.1482] | n/a |
+| cdnow | LSTM ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | <u>−11.8 [−15.8, −7.4]</u> | 21.0 [19.6, 22.5] | 0.1475 [0.1474, 0.1475] | n/a |
+| cdnow | Transformer no_ar (`real_panel_arms`) | 19 | 50 / 200 | +33.1 [+1.0, +86.4] | 52.1 [24.6, 101.3] | 0.1503 [0.1474, 0.1554] | n/a |
+| cdnow | Transformer ar_bounded (`real_panel_arms`) | 20 | 50 / 200 | −13.6 [−20.8, −6.2] | 25.6 [22.7, 28.6] | 0.1479 [0.1476, 0.1481] | n/a |
 
 - **Electronics: the flags beat both benchmarks on MAPE** (45–48 against 70.8 and 65.7;
   every Δ supported). Pareto/NBD's −63% is a unit mismatch (`docs/benchmarks.md`).
@@ -204,8 +219,8 @@ benchmarks.
   multichannel.
 - **CDNOW Transformer `no_ar` is dominated by one run.** It is the 19-of-20 suite
   (`docs/studies-run.md` §4.2), scored from its stored forecasts against the
-  pre-ADR-0009 panel. Study 14 forecasts +469% bias; the other 18 give bias +7.9 ± 23.5
-  and MAPE 28.0 ± 12.8. Median bias +6.9, median MAPE 24.7.
+  pre-ADR-0009 panel. Study 14 forecasts +473% bias; the other 18 give bias +8.7 ± 23.7
+  and MAPE 28.6 ± 12.9. Median bias +6.3, median MAPE 24.3.
 - **CDNOW: the flags only shift the level down.** Bias Δ −7.8 (−12.2, −3.5) and −11.4
   (−22.4, −1.1) against `no_ar`. Every CDNOW arm has a higher MAPE than the one Pareto/NBD
   fit on its window; `real_panel_arms` flags are closest (+2.3, +0.9 to +3.8).
@@ -233,30 +248,30 @@ benchmark.
 
 | panel | model | n | bias % | MAPE | RMSE | Spearman |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| cdnow | LSTM + bounded32 | 100 | +37.1 ± 47.7 | 65.3 ± 30.7 | 0.1498 ± 0.0026 | 0.085 ± 0.170 |
-| cdnow | LSTM + log | 100 | +65.8 ± 29.1 | 68.4 ± 26.9 | 0.1536 ± 0.0055 | 0.442 ± 0.015 |
-| cdnow | **LSTM + ratio** | 100 | +17.6 ± 24.0 | 32.2 ± 14.4 | 0.1466 ± 0.0012 | 0.439 ± 0.009 |
-| cdnow | ValendinLSTM (benchmark) | 20 | −23.7 ± 20.2 | 36.2 ± 8.2 | 0.1468 ± 0.0008 | 0.404 ± 0.024 |
-| cdnow | Pareto/NBD (benchmark) | 20 fits | −14.1 ± 2.3 | 20.5 ± 0.8 | 0.1455 ± 0.0000 | 0.450 ± 0.006 |
-| electronics | **LSTM + bounded32** | 100 | −1.7 ± 18.9 | 45.0 ± 4.5 | 0.3757 ± 0.0002 | 0.263 ± 0.042 |
-| electronics | LSTM + log | 100 | +32.5 ± 25.7 | 55.7 ± 16.5 | 0.3816 ± 0.0116 | 0.296 ± 0.010 |
-| electronics | LSTM + ratio | 100 | +49.1 ± 37.4 | 71.0 ± 29.8 | 0.3772 ± 0.0034 | 0.306 ± 0.013 |
-| electronics | ValendinLSTM (benchmark) | 20 | +46.0 ± 14.8 | 70.8 ± 6.4 | 0.3770 ± 0.0003 | 0.032 ± 0.033 |
-| electronics | Pareto/NBD (benchmark) | 20 fits | −63.1 ± 0.4 | 65.7 ± 0.3 | 0.3758 ± 0.0000 | 0.314 ± 0.010 |
-| gift | LSTM + bounded32 | 100 | −18.5 ± 15.3 | 31.4 ± 5.2 | 0.1066 ± 0.0001 | 0.331 ± 0.035 |
-| gift | LSTM + log | 100 | +11.0 ± 17.7 | 32.1 ± 9.9 | 0.1102 ± 0.0106 | 0.381 ± 0.007 |
-| gift | **LSTM + ratio** | 100 | −2.9 ± 16.4 | 32.4 ± 10.0 | 0.1066 ± 0.0007 | 0.392 ± 0.008 |
-| gift | ValendinLSTM (benchmark) | 20 | −15.7 ± 16.4 | 29.7 ± 4.9 | 0.1064 ± 0.0001 | 0.368 ± 0.017 |
-| gift | Pareto/NBD (benchmark) | 20 fits | −11.4 ± 0.7 | 42.7 ± 0.2 | 0.1066 ± 0.0000 | 0.378 ± 0.006 |
-| multichannel | **LSTM + bounded32** | 100 | +17.0 ± 20.0 | 53.2 ± 8.2 | 0.0569 ± 0.0000 | 0.096 ± 0.054 |
-| multichannel | LSTM + log | 100 | +70.9 ± 81.8 | 90.9 ± 73.8 | 0.0596 ± 0.0077 | 0.123 ± 0.116 |
-| multichannel | LSTM + ratio | 100 | +79.7 ± 47.8 | 98.0 ± 43.0 | 0.0571 ± 0.0015 | 0.175 ± 0.015 |
-| multichannel | ValendinLSTM (benchmark) | 20 | +66.6 ± 55.5 | 96.6 ± 39.7 | 0.0570 ± 0.0001 | 0.005 ± 0.029 |
-| multichannel | Pareto/NBD (benchmark) | 20 fits | +6.5 ± 1.8 | 55.8 ± 0.3 | 0.0567 ± 0.0000 | 0.185 ± 0.012 |
-| cdnow | LSTM + **bounded32 + ratio** | 100 | +26.5 ± 32.4 | 40.7 ± 26.3 | 0.1466 ± 0.0017 | 0.425 ± 0.025 |
-| electronics | LSTM + **bounded32 + ratio** | 100 | +33.0 ± 23.3 | 59.4 ± 15.5 | 0.3762 ± 0.0007 | 0.302 ± 0.014 |
-| gift | LSTM + **bounded32 + ratio** | 100 | +5.3 ± 18.8 | 35.3 ± 10.7 | 0.1068 ± 0.0020 | 0.385 ± 0.013 |
-| multichannel | LSTM + **bounded32 + ratio** | 100 | +55.0 ± 25.3 | 73.8 ± 18.3 | 0.0569 ± 0.0002 | 0.176 ± 0.015 |
+| cdnow | LSTM + bounded32 | 100 | +37.1 [+27.7, +46.3] | 65.3 [59.3, 71.3] | 0.1498 [0.1493, 0.1503] | 0.085 [0.053, 0.119] |
+| cdnow | LSTM + log | 100 | +65.8 [+60.2, +71.6] | 68.4 [63.2, 73.7] | 0.1536 [0.1526, 0.1547] | 0.442 [0.439, 0.444] |
+| cdnow | LSTM + ratio | 100 | +17.6 [+13.0, +22.5] | 32.2 [29.4, 35.1] | 0.1466 [0.1464, 0.1469] | 0.439 [0.437, 0.441] |
+| cdnow | LSTM + bounded32 + ratio | 100 | +26.5 [+20.6, +33.1] | 40.7 [36.1, 46.3] | 0.1466 [0.1463, 0.1469] | 0.425 [0.419, 0.429] |
+| cdnow | ValendinLSTM (benchmark) | 20 | −23.7 [−31.8, −14.6] | 36.2 [32.8, 39.7] | 0.1468 [0.1465, 0.1472] | 0.404 [0.393, 0.414] |
+| cdnow | Pareto/NBD (benchmark) | 20 fits | **−14.1 [−15.2, −13.2]** | **20.5 [20.1, 20.9]** | **0.1455 [0.1455, 0.1455]** | **0.450 [0.447, 0.452]** |
+| electronics | LSTM + bounded32 | 100 | **−1.7 [−5.2, +2.2]** | **45.0 [44.2, 45.9]** | **0.3757 [0.3757, 0.3757]** | 0.263 [0.255, 0.271] |
+| electronics | LSTM + log | 100 | +32.5 [+27.6, +37.6] | 55.7 [52.7, 59.1] | 0.3816 [0.3795, 0.3840] | 0.296 [0.294, 0.298] |
+| electronics | LSTM + ratio | 100 | +49.1 [+42.2, +57.0] | 71.0 [65.7, 77.4] | 0.3772 [0.3766, 0.3779] | 0.306 [0.303, 0.308] |
+| electronics | LSTM + bounded32 + ratio | 100 | +33.0 [+28.6, +37.8] | 59.4 [56.7, 62.7] | 0.3762 [0.3760, 0.3763] | 0.302 [0.299, 0.304] |
+| electronics | ValendinLSTM (benchmark) | 20 | +46.0 [+39.2, +51.8] | 70.8 [68.0, 73.5] | 0.3770 [0.3768, 0.3771] | 0.032 [0.017, 0.046] |
+| electronics | Pareto/NBD (benchmark) | 20 fits | −63.1 [−63.3, −62.9] | 65.7 [65.6, 65.8] | 0.3758 [0.3758, 0.3758] | **0.314 [0.310, 0.318]** |
+| gift | LSTM + bounded32 | 100 | −18.5 [−21.5, −15.5] | <u>31.4 [30.4, 32.5]</u> | 0.1066 [0.1066, 0.1067] | 0.331 [0.324, 0.338] |
+| gift | LSTM + log | 100 | +11.0 [+7.8, +14.5] | <u>32.1 [30.3, 34.1]</u> | 0.1102 [0.1084, 0.1125] | 0.381 [0.380, 0.382] |
+| gift | LSTM + ratio | 100 | <u>−2.9 [−5.9, +0.5]</u> | <u>32.4 [30.9, 34.7]</u> | 0.1066 [0.1065, 0.1067] | **0.392 [0.390, 0.393]** |
+| gift | LSTM + bounded32 + ratio | 100 | <u>+5.3 [+1.8, +9.0]</u> | 35.3 [33.5, 37.6] | 0.1068 [0.1066, 0.1073] | 0.385 [0.382, 0.387] |
+| gift | ValendinLSTM (benchmark) | 20 | −15.7 [−22.5, −8.5] | **29.7 [27.8, 32.0]** | **0.1064 [0.1064, 0.1064]** | 0.368 [0.360, 0.375] |
+| gift | Pareto/NBD (benchmark) | 20 fits | **−11.4 [−11.7, −11.1]** | 42.7 [42.6, 42.8] | 0.1066 [0.1066, 0.1066] | 0.378 [0.375, 0.381] |
+| multichannel | LSTM + bounded32 | 100 | +17.0 [+13.2, +20.9] | **53.2 [51.7, 54.8]** | 0.0569 [0.0568, 0.0569] | 0.096 [0.085, 0.106] |
+| multichannel | LSTM + log | 100 | +70.9 [+56.1, +87.7] | 90.9 [77.6, 106.5] | 0.0596 [0.0583, 0.0613] | 0.123 [0.099, 0.145] |
+| multichannel | LSTM + ratio | 100 | +79.7 [+71.5, +90.1] | 98.0 [90.8, 107.4] | 0.0571 [0.0569, 0.0575] | 0.175 [0.172, 0.178] |
+| multichannel | LSTM + bounded32 + ratio | 100 | +55.0 [+50.1, +60.1] | 73.8 [70.2, 77.4] | 0.0569 [0.0569, 0.0569] | 0.176 [0.173, 0.179] |
+| multichannel | ValendinLSTM (benchmark) | 20 | +66.6 [+44.0, +90.9] | 96.6 [80.7, 114.5] | 0.0570 [0.0569, 0.0571] | 0.005 [−0.008, 0.017] |
+| multichannel | Pareto/NBD (benchmark) | 20 fits | **+6.5 [+5.7, +7.3]** | 55.8 [55.6, 55.9] | **0.0567 [0.0567, 0.0567]** | **0.185 [0.180, 0.190]** |
 
 Every comparison below is n = 100 / 100 (or 100 / 20 against a benchmark).
 
@@ -288,16 +303,25 @@ Every comparison below is n = 100 / 100 (or 100 / 20 against a benchmark).
 ### 4.4 The unbounded blow-up is LSTM-specific
 
 Family G (family H's arm grid, run first at 50 paths and then superseded by H; CDNOW
-38-week window and electronics; 20 studies × 50 trials × 50 paths;
-ensemble of 20):
+38-week window and electronics; 20 studies × 50 trials × 50 paths), `ar_unbounded`, mean
+bias over the 20 studies:
 
-| CDNOW `ar_unbounded` | LSTM | Transformer |
-|---|---|---|
-| `no_cluster` | +155.5% (sd 343, max +1,480) | **+35.5% (sd 21)** |
-| `kmeans_8` | +244.7% (sd 510, max +1,885) | **−29.8% (sd 17)** |
+| panel | cluster | model | n | bias % |
+| --- | --- | --- | ---: | ---: |
+| cdnow | `no_cluster` | LSTM | 20 | +155.5 [+40.1, +329.8] |
+| cdnow | `no_cluster` | Transformer | 20 | +35.5 [+26.4, +44.7] |
+| cdnow | `no_cluster` | Pareto/NBD (benchmark), one fit | 1 fit | **−11.6** |
+| cdnow | `kmeans_8` | LSTM | 20 | +244.7 [+54.5, +484.7] |
+| cdnow | `kmeans_8` | Transformer | 20 | −29.8 [−37.5, −22.5] |
+| cdnow | `kmeans_8` | Pareto/NBD (benchmark), one fit | 1 fit | **−11.6** |
+| electronics | `no_cluster` | LSTM | 20 | +196.7 [+114.2, +300.5] |
+| electronics | `no_cluster` | Transformer | 20 | **+56.4 [+33.0, +85.4]** |
+| electronics | `no_cluster` | Pareto/NBD (benchmark) | 20 fits | <u>−63.1 [−63.3, −62.9]</u> |
+| electronics | `kmeans_8` | LSTM | 20 | +155.1 [+58.4, +277.8] |
+| electronics | `kmeans_8` | Transformer | 20 | **+44.6 [+24.0, +65.5]** |
+| electronics | `kmeans_8` | Pareto/NBD (benchmark) | 20 fits | <u>−63.1 [−63.3, −62.9]</u> |
 
-Electronics shows the same pattern (LSTM +196.7%, Transformer +56.4%). On per-study
-|bias| (20 / 20), the Transformer is closer to the truth in all four panel × cluster
+On per-study |bias| (20 / 20), the Transformer is closer to the truth in all four panel × cluster
 cells:
 - CDNOW Δ **−127.5** (−288.7, −15.0) and **−241.6** (−473.7, −59.7);
 - electronics **−138.3** (−243.5, −52.2) and **−110.5** (−229.6, −14.4).
@@ -312,28 +336,35 @@ The encoding is dangerous; the recurrence makes it catastrophic. The synthetic g
 LSTM only, `valendin` embedder, 40 replications × 50 trials × 300 paths per arm. Cluster arms
 carry no AR channel. CDNOW is on the pre-ADR-0009 window, so it has no Spearman.
 
-| panel | arm | mean \|bias\| | Δ \|bias\| [95% CI] | mean MAPE | Δ MAPE [95% CI] |
-|---|---|---:|---:|---:|---:|
-| electronics | `no_cluster` | 21.7 | — | 54.9 | — |
-| | `cluster_4` | 19.8 | −1.8 [−8.6, +5.8] | 51.8 | −3.1 [−7.6, +2.0] |
-| | `cluster_8` | 19.0 | −2.7 [−9.0, +3.9] | 53.1 | −1.9 [−6.3, +3.2] |
-| | `cluster_16` | 21.0 | −0.6 [−7.0, +5.9] | 55.2 | +0.3 [−3.2, +3.9] |
-| | `ar_unbounded` | 208.6 | **+186.9 [+136.0, +242.9]** | 213.4 | **+158.5 [+108.8, +213.1]** |
-| | `ar_plus_cluster_8` | 94.5 | **+72.9 [+37.2, +114.0]** | 115.5 | **+60.6 [+27.9, +99.4]** |
-| CDNOW | `no_cluster` | 12.9 | — | 23.1 | — |
-| | `cluster_4` | 30.1 | **+17.2 [+8.5, +27.4]** | 39.6 | **+16.5 [+8.9, +25.6]** |
-| | `cluster_8` | 14.3 | +1.4 [−3.8, +7.1] | 26.9 | +3.9 [−0.2, +8.2] |
-| | `cluster_16` | 15.7 | +2.8 [−3.1, +9.7] | 29.1 | **+6.1 [+1.2, +11.7]** |
-| | `ar_unbounded` | 314.6 | **+301.8 [+156.5, +476.1]** | 325.6 | **+302.6 [+158.2, +475.8]** |
-| | `ar_plus_cluster_8` | 273.2 | **+260.3 [+160.4, +373.2]** | 296.7 | **+273.7 [+174.1, +384.8]** |
+| panel | arm | n | \|bias\| | MAPE | Spearman |
+| --- | --- | ---: | ---: | ---: | ---: |
+| electronics | `no_cluster` | 40 | <u>21.7 [17.6, 25.8]</u> | <u>54.9 [52.9, 56.9]</u> | 0.039 [0.017, 0.064] |
+| electronics | `cluster_4` | 40 | <u>19.8 [14.2, 26.3]</u> | **51.8 [47.8, 56.4]** | 0.264 [0.260, 0.269] |
+| electronics | `cluster_8` | 40 | **19.0 [14.1, 24.4]** | <u>53.1 [49.2, 57.7]</u> | 0.270 [0.252, 0.286] |
+| electronics | `cluster_16` | 40 | <u>21.0 [16.2, 26.1]</u> | <u>55.2 [52.4, 58.2]</u> | 0.257 [0.244, 0.270] |
+| electronics | `ar_unbounded` | 40 | 208.6 [157.2, 264.5] | 213.4 [163.5, 268.0] | 0.229 [0.207, 0.249] |
+| electronics | `ar_plus_cluster_8` | 40 | 94.5 [59.0, 135.2] | 115.5 [82.8, 154.2] | 0.279 [0.261, 0.292] |
+| electronics | Pareto/NBD (benchmark) | 20 fits | 63.1 [62.9, 63.3] | 65.7 [65.6, 65.8] | **0.314 [0.310, 0.318]** |
+| CDNOW | `no_cluster` | 40 | <u>12.9 [10.1, 16.0]</u> | 23.1 [21.0, 25.7] | n/a |
+| CDNOW | `cluster_4` | 40 | 30.1 [22.0, 39.7] | 39.6 [32.5, 48.3] | n/a |
+| CDNOW | `cluster_8` | 40 | <u>14.3 [10.0, 19.2]</u> | 26.9 [23.7, 30.8] | n/a |
+| CDNOW | `cluster_16` | 40 | <u>15.7 [10.8, 21.8]</u> | 29.1 [25.2, 34.2] | n/a |
+| CDNOW | `ar_unbounded` | 40 | 314.6 [169.7, 488.0] | 325.6 [181.4, 498.2] | n/a |
+| CDNOW | `ar_plus_cluster_8` | 40 | 273.2 [173.2, 385.3] | 296.7 [197.0, 408.3] | n/a |
+| CDNOW | Pareto/NBD (benchmark), one fit | 1 fit | **11.6** | **18.7** | n/a |
 
-| arm | Spearman | Δ vs `no_cluster` [95% CI] | mean \|bias\| |
-|---|---:|---:|---:|
-| `no_cluster` | 0.039 ± 0.078 | — | 21.7 |
-| `cluster_4` | 0.264 ± 0.015 | **+0.226 [+0.199, +0.248]** | 19.8 |
-| `cluster_8` | 0.270 ± 0.055 | **+0.232 [+0.200, +0.259]** | 19.0 |
-| `cluster_16` | 0.257 ± 0.043 | **+0.219 [+0.189, +0.244]** | 21.0 |
-| Pareto/NBD (benchmark, 20 seeded refits) | 0.314 ± 0.010 | +0.275 [+0.249, +0.297] | 63.1 |
+| panel | arm | Δ \|bias\| [95% CI] | Δ MAPE [95% CI] | Δ Spearman [95% CI] |
+| --- | --- | ---: | ---: | ---: |
+| electronics | `cluster_4` | −1.8 [−8.6, +5.8] | −3.1 [−7.6, +2.0] | **+0.226 [+0.199, +0.248]** |
+| electronics | `cluster_8` | −2.7 [−9.0, +3.9] | −1.9 [−6.3, +3.2] | **+0.232 [+0.200, +0.258]** |
+| electronics | `cluster_16` | −0.6 [−7.0, +5.9] | +0.3 [−3.2, +3.9] | **+0.219 [+0.189, +0.244]** |
+| electronics | `ar_unbounded` | **+186.9 [+136.0, +242.9]** | **+158.5 [+108.8, +213.1]** | **+0.190 [+0.156, +0.220]** |
+| electronics | `ar_plus_cluster_8` | **+72.9 [+37.2, +114.0]** | **+60.6 [+27.9, +99.4]** | **+0.240 [+0.209, +0.266]** |
+| CDNOW | `cluster_4` | **+17.2 [+8.5, +27.4]** | **+16.5 [+8.9, +25.6]** | n/a |
+| CDNOW | `cluster_8` | +1.4 [−3.8, +7.1] | +3.9 [−0.2, +8.2] | n/a |
+| CDNOW | `cluster_16` | +2.8 [−3.1, +9.7] | **+6.1 [+1.2, +11.7]** | n/a |
+| CDNOW | `ar_unbounded` | **+301.8 [+156.5, +476.1]** | **+302.6 [+158.2, +475.8]** | n/a |
+| CDNOW | `ar_plus_cluster_8` | **+260.3 [+160.4, +373.2]** | **+273.7 [+174.1, +384.8]** | n/a |
 
 Against Pareto/NBD's 20 fits (40 / 20), every arm with a cluster label still ranks below
 it: `cluster_4` **−0.049**, `cluster_8` **−0.043**, `cluster_16` **−0.056**,
@@ -357,16 +388,20 @@ recipe plus `min_epochs=90`), crossed with `no_cluster` / `kmeans_8`. 20 replica
 cell, 2-year windows. The floor's own effect is in `docs/insight-training-efficiency.md`
 §5.2.
 
-| panel | model | archive / no_cluster | archive / kmeans_8 | floored / no_cluster | **floored / kmeans_8** | Pareto/NBD |
+| panel | model | archive / no_cluster | archive / kmeans_8 | floored / no_cluster | floored / kmeans_8 | Pareto/NBD |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| cdnow | ValendinLSTM | 0.364 | 0.403 | 0.383 | **0.406** | 0.450 |
-| | LSTM | 0.386 | 0.398 | 0.352 | **0.403** | |
-| electronics | ValendinLSTM | 0.021 | 0.305 | 0.178 | **0.305** | 0.314 |
-| | LSTM | 0.029 | 0.289 | 0.182 | **0.302** | |
-| gift | ValendinLSTM | 0.349 | 0.359 | 0.280 | **0.363** | 0.378 |
-| | LSTM | 0.326 | 0.356 | 0.263 | **0.359** | |
-| multichannel | ValendinLSTM | −0.004 | 0.178 | 0.119 | **0.195** | 0.185 |
-| | LSTM | 0.003 | 0.175 | 0.079 | **0.189** | |
+| cdnow | ValendinLSTM | 0.364 [0.322, 0.393] | 0.403 [0.374, 0.427] | 0.383 [0.361, 0.402] | 0.406 [0.394, 0.417] | |
+| cdnow | LSTM | 0.386 [0.362, 0.406] | 0.398 [0.383, 0.412] | 0.352 [0.294, 0.400] | 0.403 [0.390, 0.415] | |
+| cdnow | Pareto/NBD (benchmark), 20 fits | | | | | **0.450 [0.447, 0.452]** |
+| electronics | ValendinLSTM | 0.021 [0.005, 0.038] | <u>0.305 [0.296, 0.313]</u> | 0.178 [0.144, 0.210] | 0.305 [0.298, 0.312] | |
+| electronics | LSTM | 0.029 [0.013, 0.044] | 0.289 [0.269, 0.303] | 0.182 [0.147, 0.213] | 0.302 [0.292, 0.311] | |
+| electronics | Pareto/NBD (benchmark), 20 fits | | | | | **0.314 [0.310, 0.318]** |
+| gift | ValendinLSTM | 0.349 [0.334, 0.361] | 0.359 [0.351, 0.366] | 0.280 [0.232, 0.320] | 0.363 [0.358, 0.368] | |
+| gift | LSTM | 0.326 [0.295, 0.350] | 0.356 [0.350, 0.362] | 0.263 [0.216, 0.305] | 0.359 [0.353, 0.365] | |
+| gift | Pareto/NBD (benchmark), 20 fits | | | | | **0.378 [0.375, 0.381]** |
+| multichannel | ValendinLSTM | −0.004 [−0.017, 0.008] | 0.178 [0.163, 0.188] | 0.119 [0.098, 0.140] | **0.195 [0.187, 0.204]** | |
+| multichannel | LSTM | 0.003 [−0.008, 0.014] | 0.175 [0.165, 0.184] | 0.079 [0.056, 0.101] | <u>0.189 [0.174, 0.202]</u> | |
+| multichannel | Pareto/NBD (benchmark), 20 fits | | | | | 0.185 [0.180, 0.190] |
 
 Forecast CV on the collapsed cells (`archive / no_cluster`): electronics 0.08–0.09 and
 multichannel 0.13–0.15, against 1.14–2.16 with the cluster label.
@@ -424,7 +459,7 @@ Family P: the four family O encodings on electronics, gift and multichannel, wit
 calibration years (two to fit, the third for validation) and the following year as the
 holdout. Family Q is Pareto/NBD on the same windows, 20 seeded fits. CDNOW is too short.
 **The holdout year moves with the window**, so Pareto/NBD is the control for an easier or
-harder year.
+harder year. The 2- and 3-year rows forecast different years, so each is its own block.
 
 | panel | customers | calibration | validation from | holdout | T_CAL / T_HOLD | holdout transactions | zero cells |
 | --- | ---: | --- | --- | --- | ---: | ---: | ---: |
@@ -432,31 +467,41 @@ harder year.
 | gift | 2,062 | 2001-02-25 → 2004-02-24 | 2003-02-25 | 2004-02-25 → 2005-02-24 | 156 / 52 | 1,040 | 99.1% |
 | multichannel | 1,402 | 2005-01-01 → 2007-12-31 | 2007-01-01 | 2008-01-01 → 2008-12-31 | 156 / 52 | 173 | 99.8% |
 
-Each cell is bias % / MAPE / Spearman, mean of 100 replications:
-
-| panel | encoding | 2-year calibration | **3-year calibration** |
-| --- | --- | --- | --- |
-| electronics | bounded32 | −1.7 / 45.0 / 0.263 | **−12.8 / 38.2 / 0.322** |
-| electronics | log | +32.5 / 55.7 / 0.296 | **+10.3 / 40.0 / 0.307** |
-| electronics | ratio | +49.1 / 71.0 / 0.306 | **+6.0 / 39.1 / 0.323** |
-| electronics | bounded32 + ratio | +33.0 / 59.4 / 0.302 | **+8.8 / 39.9 / 0.323** |
-| gift | bounded32 | −18.5 / 31.4 / 0.331 | **−5.4 / 27.9 / 0.423** |
-| gift | log | +11.0 / 32.1 / 0.381 | **+33.1 / 38.3 / 0.430** |
-| gift | ratio | −2.9 / 32.4 / 0.392 | **+15.1 / 31.3 / 0.441** |
-| gift | bounded32 + ratio | +5.3 / 35.3 / 0.385 | **+15.0 / 30.7 / 0.441** |
-| multichannel | bounded32 | +17.0 / 53.2 / 0.096 | **+33.3 / 63.8 / 0.236** |
-| multichannel | log | +70.9 / 90.9 / 0.123 | **+57.0 / 75.0 / 0.248** |
-| multichannel | ratio | +79.7 / 98.0 / 0.175 | **+46.2 / 68.1 / 0.241** |
-| multichannel | bounded32 + ratio | +55.0 / 73.8 / 0.176 | **+47.1 / 68.3 / 0.240** |
-
-| panel | model | bias % | MAPE | RMSE | Spearman |
-| --- | --- | ---: | ---: | ---: | ---: |
-| electronics | **Pareto/NBD, 3-year (20 fits)** | −65.2 ± 0.3 | 66.0 ± 0.3 | 0.4049 | 0.332 ± 0.005 |
-| electronics | LSTM + bounded32, 3-year (best MAPE) | −12.8 ± 19.0 | 38.2 ± 4.8 | 0.4041 | 0.322 ± 0.017 |
-| gift | **Pareto/NBD, 3-year (20 fits)** | −8.1 ± 0.5 | 42.8 ± 0.2 | 0.1001 | 0.437 ± 0.005 |
-| gift | LSTM + bounded32, 3-year (best MAPE) | −5.4 ± 10.9 | 27.9 ± 2.6 | 0.1001 | 0.423 ± 0.013 |
-| multichannel | **Pareto/NBD, 3-year (20 fits)** | +22.6 ± 1.6 | 60.4 ± 0.4 | 0.0488 | 0.253 ± 0.009 |
-| multichannel | LSTM + bounded32, 3-year (best MAPE) | +33.3 ± 25.5 | 63.8 ± 12.2 | 0.0489 | 0.236 ± 0.032 |
+| panel | calibration | model | n | bias % | MAPE | RMSE | Spearman |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| electronics | 2-year | LSTM + bounded32 | 100 | **−1.7 [−5.2, +2.2]** | **45.0 [44.2, 45.9]** | **0.3757 [0.3757, 0.3757]** | 0.263 [0.255, 0.271] |
+| electronics | 2-year | LSTM + log | 100 | +32.5 [+27.6, +37.6] | 55.7 [52.7, 59.1] | 0.3816 [0.3795, 0.3840] | 0.296 [0.294, 0.298] |
+| electronics | 2-year | LSTM + ratio | 100 | +49.1 [+42.2, +57.0] | 71.0 [65.7, 77.4] | 0.3772 [0.3766, 0.3779] | 0.306 [0.303, 0.308] |
+| electronics | 2-year | LSTM + bounded32 + ratio | 100 | +33.0 [+28.6, +37.8] | 59.4 [56.7, 62.7] | 0.3762 [0.3760, 0.3763] | 0.302 [0.299, 0.304] |
+| electronics | 2-year | ValendinLSTM (benchmark) | 20 | +46.0 [+39.2, +51.8] | 70.8 [68.0, 73.5] | 0.3770 [0.3768, 0.3771] | 0.032 [0.017, 0.046] |
+| electronics | 2-year | Pareto/NBD (benchmark) | 20 fits | −63.1 [−63.3, −62.9] | 65.7 [65.6, 65.8] | 0.3758 [0.3758, 0.3758] | **0.314 [0.310, 0.318]** |
+| electronics | 3-year | LSTM + bounded32 | 100 | −12.8 [−16.4, −9.1] | **38.2 [37.3, 39.2]** | **0.4041 [0.4041, 0.4042]** | 0.322 [0.318, 0.325] |
+| electronics | 3-year | LSTM + log | 100 | <u>+10.3 [+7.6, +13.1]</u> | 40.0 [39.0, 41.1] | 0.4044 [0.4044, 0.4045] | 0.307 [0.306, 0.308] |
+| electronics | 3-year | LSTM + ratio | 100 | **+6.0 [+3.5, +8.6]** | <u>39.1 [38.3, 40.0]</u> | 0.4046 [0.4045, 0.4047] | 0.323 [0.322, 0.325] |
+| electronics | 3-year | LSTM + bounded32 + ratio | 100 | <u>+8.8 [+5.8, +12.0]</u> | 39.9 [38.7, 41.1] | 0.4043 [0.4042, 0.4043] | 0.323 [0.321, 0.324] |
+| electronics | 3-year | Pareto/NBD (benchmark) | 20 fits | −65.2 [−65.4, −65.1] | 66.0 [65.8, 66.1] | 0.4049 [0.4049, 0.4050] | **0.332 [0.330, 0.334]** |
+| gift | 2-year | LSTM + bounded32 | 100 | −18.5 [−21.5, −15.5] | <u>31.4 [30.4, 32.5]</u> | 0.1066 [0.1066, 0.1067] | 0.331 [0.324, 0.338] |
+| gift | 2-year | LSTM + log | 100 | +11.0 [+7.8, +14.5] | <u>32.1 [30.3, 34.1]</u> | 0.1102 [0.1084, 0.1125] | 0.381 [0.380, 0.382] |
+| gift | 2-year | LSTM + ratio | 100 | <u>−2.9 [−5.9, +0.5]</u> | <u>32.4 [30.9, 34.7]</u> | 0.1066 [0.1065, 0.1067] | **0.392 [0.390, 0.393]** |
+| gift | 2-year | LSTM + bounded32 + ratio | 100 | <u>+5.3 [+1.8, +9.0]</u> | 35.3 [33.5, 37.6] | 0.1068 [0.1066, 0.1073] | 0.385 [0.382, 0.387] |
+| gift | 2-year | ValendinLSTM (benchmark) | 20 | −15.7 [−22.5, −8.5] | **29.7 [27.8, 32.0]** | **0.1064 [0.1064, 0.1064]** | 0.368 [0.360, 0.375] |
+| gift | 2-year | Pareto/NBD (benchmark) | 20 fits | **−11.4 [−11.7, −11.1]** | 42.7 [42.6, 42.8] | 0.1066 [0.1066, 0.1066] | 0.378 [0.375, 0.381] |
+| gift | 3-year | LSTM + bounded32 | 100 | −5.4 [−7.6, −3.3] | **27.9 [27.3, 28.4]** | 0.1001 [0.1000, 0.1001] | 0.423 [0.421, 0.426] |
+| gift | 3-year | LSTM + log | 100 | +33.1 [+30.0, +36.3] | 38.3 [36.0, 40.8] | 0.1004 [0.1002, 0.1006] | 0.430 [0.429, 0.431] |
+| gift | 3-year | LSTM + ratio | 100 | +15.1 [+12.2, +18.1] | 31.3 [29.6, 33.1] | <u>0.1000 [0.0999, 0.1000]</u> | **0.441 [0.440, 0.442]** |
+| gift | 3-year | LSTM + bounded32 + ratio | 100 | +15.0 [+11.7, +18.2] | 30.7 [29.2, 32.3] | **0.0999 [0.0999, 0.1000]** | <u>0.441 [0.440, 0.442]</u> |
+| gift | 3-year | Pareto/NBD (benchmark) | 20 fits | **−8.1 [−8.3, −7.9]** | 42.8 [42.8, 42.9] | 0.1001 [0.1001, 0.1001] | 0.437 [0.435, 0.439] |
+| multichannel | 2-year | LSTM + bounded32 | 100 | +17.0 [+13.2, +20.9] | **53.2 [51.7, 54.8]** | 0.0569 [0.0568, 0.0569] | 0.096 [0.085, 0.106] |
+| multichannel | 2-year | LSTM + log | 100 | +70.9 [+56.1, +87.7] | 90.9 [77.6, 106.5] | 0.0596 [0.0583, 0.0613] | 0.123 [0.099, 0.145] |
+| multichannel | 2-year | LSTM + ratio | 100 | +79.7 [+71.5, +90.1] | 98.0 [90.8, 107.4] | 0.0571 [0.0569, 0.0575] | 0.175 [0.172, 0.178] |
+| multichannel | 2-year | LSTM + bounded32 + ratio | 100 | +55.0 [+50.1, +60.1] | 73.8 [70.2, 77.4] | 0.0569 [0.0569, 0.0569] | 0.176 [0.173, 0.179] |
+| multichannel | 2-year | ValendinLSTM (benchmark) | 20 | +66.6 [+44.0, +90.9] | 96.6 [80.7, 114.5] | 0.0570 [0.0569, 0.0571] | 0.005 [−0.008, 0.017] |
+| multichannel | 2-year | Pareto/NBD (benchmark) | 20 fits | **+6.5 [+5.7, +7.3]** | 55.8 [55.6, 55.9] | **0.0567 [0.0567, 0.0567]** | **0.185 [0.180, 0.190]** |
+| multichannel | 3-year | LSTM + bounded32 | 100 | +33.3 [+28.2, +38.2] | 63.8 [61.5, 66.3] | 0.0489 [0.0489, 0.0489] | 0.236 [0.230, 0.242] |
+| multichannel | 3-year | LSTM + log | 100 | +57.0 [+51.9, +62.4] | 75.0 [71.3, 79.0] | 0.0491 [0.0490, 0.0491] | <u>0.248 [0.243, 0.252]</u> |
+| multichannel | 3-year | LSTM + ratio | 100 | +46.2 [+42.2, +50.4] | 68.1 [65.5, 70.9] | 0.0490 [0.0489, 0.0491] | 0.241 [0.239, 0.243] |
+| multichannel | 3-year | LSTM + bounded32 + ratio | 100 | +47.1 [+43.6, +50.7] | 68.3 [66.2, 70.6] | 0.0489 [0.0489, 0.0489] | 0.240 [0.237, 0.243] |
+| multichannel | 3-year | Pareto/NBD (benchmark) | 20 fits | **+22.6 [+21.8, +23.2]** | **60.4 [60.2, 60.5]** | **0.0488 [0.0488, 0.0488]** | **0.253 [0.249, 0.257]** |
 
 - **Ranking improves in all 12 cells** (+0.011 to +0.140), **but Pareto/NBD gains too.**
   Its gains are electronics **+0.019**, gift **+0.059**, multichannel **+0.068**. Against
@@ -513,49 +558,49 @@ Mean [95% interval] over 20 studies. LSTM:
 
 | rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | 1.163 [1.159, 1.168] | +13.8 [+9.3, +18.8] | 20.5 [17.9, 23.7] | 0.405 [0.404, 0.406] | 1.27 [1.24, 1.31] |
-| `nofloor` | none | 1.178 [1.164, 1.198] | +13.2 [+6.7, +20.8] | 21.5 [17.6, 27.3] | 0.402 [0.399, 0.404] | 1.24 [1.17, 1.29] |
-| `nofloor` | `ar_bounded_52` | 1.183 [1.174, 1.193] | +8.7 [+5.1, +12.1] | 17.5 [16.6, 18.6] | 0.399 [0.396, 0.402] | 1.14 [1.10, 1.17] |
-| `nofloor` | `kmeans_8` | 1.279 [1.268, 1.289] | +9.0 [+4.9, +13.5] | 18.5 [16.4, 21.0] | 0.358 [0.352, 0.364] | 1.62 [1.56, 1.68] |
-| `from20` | none | 1.159 [1.154, 1.164] | +10.2 [+7.1, +13.4] | 17.8 [16.6, 19.3] | 0.403 [0.400, 0.405] | 1.30 [1.27, 1.33] |
-| `from20` | `ar_bounded_52` | 1.154 [1.146, 1.161] | +13.5 [+10.5, +16.7] | 19.5 [17.9, 21.3] | 0.401 [0.399, 0.403] | 1.28 [1.24, 1.32] |
-| `from20` | `kmeans_8` | 1.270 [1.261, 1.279] | +12.4 [+9.0, +15.9] | 18.7 [17.0, 20.6] | 0.354 [0.349, 0.359] | 1.63 [1.58, 1.68] |
-| `from30` | none | 1.157 [1.151, 1.163] | +12.7 [+9.5, +15.7] | 19.4 [17.9, 20.8] | 0.402 [0.399, 0.405] | 1.31 [1.28, 1.34] |
-| `from30` | `ar_bounded_52` | 1.157 [1.149, 1.165] | +10.0 [+7.1, +13.1] | 18.4 [17.2, 19.9] | 0.400 [0.397, 0.402] | 1.23 [1.19, 1.26] |
-| `from30` | `kmeans_8` | 1.266 [1.257, 1.276] | +11.5 [+7.6, +15.7] | 18.3 [16.1, 20.9] | 0.351 [0.344, 0.357] | 1.66 [1.59, 1.72] |
-| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
+| `searched` | none | 1.163 [1.159, 1.168] | <u>+13.8 [+9.3, +18.8]</u> | 20.5 [17.9, 23.7] | **0.405 [0.404, 0.406]** | 1.27 [1.24, 1.31] |
+| `nofloor` | none | 1.178 [1.164, 1.198] | <u>+13.2 [+6.7, +20.8]</u> | <u>21.5 [17.6, 27.3]</u> | 0.402 [0.399, 0.404] | 1.24 [1.17, 1.29] |
+| `nofloor` | `ar_bounded_52` | 1.183 [1.174, 1.193] | <u>+8.7 [+5.1, +12.1]</u> | **17.5 [16.6, 18.6]** | 0.399 [0.396, 0.402] | 1.14 [1.10, 1.17] |
+| `nofloor` | `kmeans_8` | 1.279 [1.268, 1.289] | **+9.0 [+4.9, +13.5]** | <u>18.5 [16.4, 21.0]</u> | 0.358 [0.352, 0.364] | 1.62 [1.56, 1.68] |
+| `from20` | none | <u>1.159 [1.154, 1.164]</u> | <u>+10.2 [+7.1, +13.4]</u> | <u>17.8 [16.6, 19.3]</u> | <u>0.403 [0.400, 0.405]</u> | 1.30 [1.27, 1.33] |
+| `from20` | `ar_bounded_52` | **1.154 [1.146, 1.161]** | <u>+13.5 [+10.5, +16.7]</u> | 19.5 [17.9, 21.3] | 0.401 [0.399, 0.403] | 1.28 [1.24, 1.32] |
+| `from20` | `kmeans_8` | 1.270 [1.261, 1.279] | <u>+12.4 [+9.0, +15.9]</u> | <u>18.7 [17.0, 20.6]</u> | 0.354 [0.349, 0.359] | 1.63 [1.58, 1.68] |
+| `from30` | none | <u>1.157 [1.151, 1.163]</u> | <u>+12.7 [+9.5, +15.7]</u> | 19.4 [17.9, 20.8] | 0.402 [0.399, 0.405] | 1.31 [1.28, 1.34] |
+| `from30` | `ar_bounded_52` | <u>1.157 [1.149, 1.165]</u> | <u>+10.0 [+7.1, +13.1]</u> | <u>18.4 [17.2, 19.9]</u> | 0.400 [0.397, 0.402] | 1.23 [1.19, 1.26] |
+| `from30` | `kmeans_8` | 1.266 [1.257, 1.276] | <u>+11.5 [+7.6, +15.7]</u> | <u>18.3 [16.1, 20.9]</u> | 0.351 [0.344, 0.357] | 1.66 [1.59, 1.72] |
+| Pareto/NBD (benchmark), 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
 
 LSTMAttention:
 
 | rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | 1.208 [1.205, 1.213] | +16.0 [+11.2, +21.4] | 21.4 [18.2, 25.3] | 0.403 [0.402, 0.405] | 1.07 [1.05, 1.10] |
+| `searched` | none | 1.208 [1.205, 1.213] | +16.0 [+11.2, +21.4] | 21.4 [18.2, 25.3] | **0.403 [0.402, 0.405]** | 1.07 [1.05, 1.10] |
 | `nofloor` | none | 1.205 [1.201, 1.210] | +14.1 [+10.4, +18.0] | 19.6 [17.5, 22.2] | 0.399 [0.397, 0.401] | 1.06 [1.03, 1.10] |
-| `nofloor` | `ar_bounded_52` | 1.221 [1.217, 1.224] | +9.1 [+4.7, +13.9] | 18.3 [16.1, 20.8] | 0.399 [0.397, 0.400] | 1.09 [1.06, 1.11] |
+| `nofloor` | `ar_bounded_52` | 1.221 [1.217, 1.224] | <u>+9.1 [+4.7, +13.9]</u> | <u>18.3 [16.1, 20.8]</u> | 0.399 [0.397, 0.400] | 1.09 [1.06, 1.11] |
 | `nofloor` | `kmeans_8` | 1.294 [1.287, 1.300] | +15.7 [+12.9, +18.6] | 20.2 [18.4, 22.1] | 0.366 [0.362, 0.369] | 1.51 [1.48, 1.55] |
-| `from20` | none | 1.199 [1.193, 1.203] | +14.8 [+11.2, +18.3] | 20.1 [18.2, 22.4] | 0.400 [0.398, 0.403] | 1.13 [1.10, 1.16] |
-| `from20` | `ar_bounded_52` | 1.208 [1.204, 1.211] | +9.3 [+5.7, +13.1] | 17.6 [16.0, 19.6] | 0.401 [0.399, 0.403] | 1.16 [1.14, 1.18] |
+| `from20` | none | **1.199 [1.193, 1.203]** | +14.8 [+11.2, +18.3] | 20.1 [18.2, 22.4] | <u>0.400 [0.398, 0.403]</u> | 1.13 [1.10, 1.16] |
+| `from20` | `ar_bounded_52` | 1.208 [1.204, 1.211] | <u>+9.3 [+5.7, +13.1]</u> | <u>17.6 [16.0, 19.6]</u> | <u>0.401 [0.399, 0.403]</u> | 1.16 [1.14, 1.18] |
 | `from20` | `kmeans_8` | 1.283 [1.276, 1.290] | +13.7 [+10.6, +16.9] | 19.1 [17.3, 20.9] | 0.370 [0.369, 0.372] | 1.52 [1.49, 1.55] |
-| `from30` | none | 1.200 [1.195, 1.204] | +10.8 [+7.8, +13.6] | 18.1 [17.1, 19.3] | 0.400 [0.398, 0.403] | 1.17 [1.14, 1.19] |
-| `from30` | `ar_bounded_52` | 1.202 [1.196, 1.207] | +9.3 [+7.2, +11.6] | 17.0 [16.1, 18.0] | 0.402 [0.400, 0.404] | 1.18 [1.16, 1.20] |
+| `from30` | none | <u>1.200 [1.195, 1.204]</u> | <u>+10.8 [+7.8, +13.6]</u> | <u>18.1 [17.1, 19.3]</u> | <u>0.400 [0.398, 0.403]</u> | 1.17 [1.14, 1.19] |
+| `from30` | `ar_bounded_52` | <u>1.202 [1.196, 1.207]</u> | **+9.3 [+7.2, +11.6]** | **17.0 [16.1, 18.0]** | <u>0.402 [0.400, 0.404]</u> | 1.18 [1.16, 1.20] |
 | `from30` | `kmeans_8` | 1.289 [1.282, 1.296] | +15.5 [+12.5, +18.4] | 19.9 [17.9, 21.9] | 0.369 [0.366, 0.372] | 1.52 [1.48, 1.55] |
-| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
+| Pareto/NBD (benchmark), 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
 
 Transformer:
 
 | rule | input | RMSE (customer total) | bias % | MAPE | Spearman | forecast CV |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `searched` | none | 1.325 [1.279, 1.377] | +51.7 [+42.0, +62.1] | 54.2 [45.1, 64.0] | 0.400 [0.398, 0.402] | 1.33 [1.28, 1.37] |
+| `searched` | none | 1.325 [1.279, 1.377] | +51.7 [+42.0, +62.1] | 54.2 [45.1, 64.0] | <u>0.400 [0.398, 0.402]</u> | 1.33 [1.28, 1.37] |
 | `nofloor` | none | 1.290 [1.268, 1.314] | +34.1 [+25.3, +42.8] | 43.5 [37.1, 49.9] | 0.396 [0.395, 0.398] | 1.32 [1.28, 1.35] |
-| `nofloor` | `ar_bounded_52` | 1.257 [1.238, 1.282] | +12.5 [+4.1, +20.8] | 31.5 [27.4, 35.9] | 0.401 [0.400, 0.402] | 1.28 [1.21, 1.37] |
-| `nofloor` | `kmeans_8` | 1.330 [1.316, 1.346] | +16.4 [+11.9, +21.2] | 32.2 [28.4, 36.5] | 0.347 [0.342, 0.351] | 1.62 [1.59, 1.65] |
+| `nofloor` | `ar_bounded_52` | 1.257 [1.238, 1.282] | +12.5 [+4.1, +20.8] | 31.5 [27.4, 35.9] | **0.401 [0.400, 0.402]** | 1.28 [1.21, 1.37] |
+| `nofloor` | `kmeans_8` | 1.330 [1.316, 1.346] | <u>+16.4 [+11.9, +21.2]</u> | 32.2 [28.4, 36.5] | 0.347 [0.342, 0.351] | 1.62 [1.59, 1.65] |
 | `from20` | none | 1.298 [1.274, 1.326] | +39.8 [+32.8, +46.7] | 44.4 [38.8, 50.1] | 0.396 [0.393, 0.398] | 1.32 [1.29, 1.36] |
-| `from20` | `ar_bounded_52` | 1.251 [1.239, 1.265] | +13.7 [+8.8, +19.1] | 24.2 [21.2, 27.6] | 0.399 [0.398, 0.400] | 1.27 [1.22, 1.31] |
-| `from20` | `kmeans_8` | 1.314 [1.305, 1.324] | +11.6 [+8.0, +15.3] | 26.2 [23.8, 28.8] | 0.349 [0.345, 0.352] | 1.67 [1.63, 1.70] |
+| `from20` | `ar_bounded_52` | 1.251 [1.239, 1.265] | <u>+13.7 [+8.8, +19.1]</u> | <u>24.2 [21.2, 27.6]</u> | 0.399 [0.398, 0.400] | 1.27 [1.22, 1.31] |
+| `from20` | `kmeans_8` | 1.314 [1.305, 1.324] | <u>+11.6 [+8.0, +15.3]</u> | 26.2 [23.8, 28.8] | 0.349 [0.345, 0.352] | 1.67 [1.63, 1.70] |
 | `from30` | none | 1.294 [1.275, 1.315] | +40.1 [+32.2, +48.0] | 44.0 [37.4, 50.9] | 0.396 [0.394, 0.399] | 1.31 [1.28, 1.34] |
-| `from30` | `ar_bounded_52` | 1.246 [1.240, 1.251] | +12.5 [+8.9, +16.3] | 21.7 [19.7, 24.0] | 0.397 [0.396, 0.399] | 1.24 [1.20, 1.28] |
-| `from30` | `kmeans_8` | 1.306 [1.295, 1.318] | +10.6 [+6.7, +14.7] | 24.4 [22.1, 27.0] | 0.352 [0.349, 0.354] | 1.69 [1.66, 1.73] |
-| Pareto/NBD, 20 fits | — | 1.228 [1.228, 1.229] | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
+| `from30` | `ar_bounded_52` | 1.246 [1.240, 1.251] | <u>+12.5 [+8.9, +16.3]</u> | **21.7 [19.7, 24.0]** | 0.397 [0.396, 0.399] | 1.24 [1.20, 1.28] |
+| `from30` | `kmeans_8` | 1.306 [1.295, 1.318] | **+10.6 [+6.7, +14.7]** | <u>24.4 [22.1, 27.0]</u> | 0.352 [0.349, 0.354] | 1.69 [1.66, 1.73] |
+| Pareto/NBD (benchmark), 20 fits | — | **1.228 [1.228, 1.229]** | −16.6 [−16.9, −16.3] | 27.7 [27.7, 27.7] | 0.395 [0.394, 0.396] | 1.40 [1.40, 1.41] |
 
 **Every one of the 30 cells over-forecasts, supported.** The lowest lower bound is +4.1%.
 Every cell's bias is above Pareto/NBD's by +25.3 to +68.2.
