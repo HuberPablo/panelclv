@@ -490,34 +490,21 @@ ARCH = ("LSTM", "ValendinLSTM", "LSTMAttention", "Transformer")
 
 
 def table_best(d) -> list[str]:
-    """§12: per block, each architecture's best configuration by MAPE and by Spearman."""
+    """§12: every configuration of every architecture per block, beside Pareto/NBD."""
     cand = candidates(d)
     rows = []
     for panel, cal, title, window in BLOCKS:
         blk = [c for c in cand if c["block"] == (panel, cal)]
-        for arch in ARCH:
-            own = [c for c in blk if c["arch"] == arch]
-            if not own:
-                continue
-            chosen = {}
-            for met, pick in (("mape_aggregate", min), ("spearman", max)):
-                scored = [c for c in own if len(clean(c[met]))]
-                if scored:
-                    c = pick(scored, key=lambda c: clean(c[met]).mean())
-                    chosen.setdefault(id(c), [c, []])[1].append(
-                        {"mape_aggregate": "MAPE", "spearman": "Spearman"}[met])
-            for c, why in chosen.values():
+        for arch in ARCH + ("Pareto/NBD",):
+            for c in (c for c in blk if c["arch"] == arch):
+                bench = arch == "Pareto/NBD"
                 rows.append({**c, "block": (panel, cal), "panel": title, "window": window,
-                             "why": " and ".join(why), "name": f"{arch}: {c['config']}"})
-        for c in blk:
-            if c["arch"] == "Pareto/NBD":
-                rows.append({**c, "block": (panel, cal), "panel": title, "window": window,
-                             "why": "benchmark",
-                             "n": f"{c['n']} fit" + "s" * (c["n"] > 1),
-                             "name": f"Pareto/NBD (benchmark), {c['config']}"})
-    head = ["| panel | calibration | model: best configuration | chosen on | n | bias % | MAPE "
-            "| RMSE | Spearman |", "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
-    return head + render(rows, list(MET4), ["panel", "window", "name", "why", "n"])
+                             "n": f"{c['n']} fit" + "s" * (c["n"] > 1) if bench else c["n"],
+                             "name": (f"Pareto/NBD (benchmark), {c['config']}" if bench
+                                      else f"{arch}: {c['config']}")})
+    head = ["| panel | calibration | model: configuration | n | bias % | MAPE | RMSE "
+            "| Spearman |", "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
+    return head + render(rows, list(MET4), ["panel", "window", "name", "n"])
 
 
 def main() -> None:
