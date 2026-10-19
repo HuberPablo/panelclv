@@ -76,6 +76,35 @@ def groupings(cc, h):
     g["holdout"] = cut(H, [-1, 0, 1, 3, np.inf], ["0", "1", "2-3", "4+"])
     g["valendin"] = np.where((H == 0) & (f >= mean_f), "At Risk", np.where(H > f, "Opportunity", "Other"))
     g["all"] = np.array(["all"] * len(f))
+
+    # --- §11 groupings (docs/Customer_Analysis_2.md) ---
+    # Frequency ladder: calibration transactions 1 / 2 / 3-4 / 5+ (repeat purchases x = 0, 1, 2-3, 4+).
+    ladder = np.select([f <= 1, f == 2, f <= 4], ["1", "2", "3-4"], "5+")
+    g["ladder"] = ladder
+    # Recency within the ladder, repeaters only; one-timers stay one group (no recency variation:
+    # in a single acquisition cohort their only purchase is the acquisition purchase).
+    band = np.select([weeks_since <= 13, weeks_since <= 52], ["R<=13", "R14-52"], "R>52")
+    g["ladder_x_recency"] = np.where(f <= 1, "1", np.char.add(np.char.add(ladder.astype(str), " "), band.astype(str)))
+    # Momentum: share of purchase weeks in the second half of the customer's own tenure
+    # (first purchase -> calibration end). Needs >= 2 purchase weeks.
+    mom = np.full(len(f), np.nan)
+    for i in np.flatnonzero(nweeks_active >= 2):
+        w = np.flatnonzero(active[i])
+        mom[i] = (w >= first[i] + tenure[i] / 2).mean()
+    for name, cutoff in [("momentum", 0.5), ("momentum_40", 0.4), ("momentum_60", 0.6)]:
+        g[name] = np.where(np.isnan(mom), "one purchase week",
+                           np.where(mom >= cutoff, "rising", "declining"))
+    # Momentum within frequency x recency cells, for the within-cell comparison of §11.
+    g["momentum_cell"] = np.where(np.isnan(mom), "n/a", np.char.add(np.char.add(
+        np.char.add(ladder.astype(str), "|"), band.astype(str)),
+        np.where(mom >= 0.5, "|rising", "|declining")))
+    # Overdue: weeks silent / own mean gap between purchase weeks (a reading of recency).
+    g["overdue"] = np.where(nweeks_active <= 1, "one purchase week",
+                   np.where(overdue <= 1, "on schedule",
+                   np.where(overdue <= 3, "overdue 1-3x", "overdue >3x")))
+    # Valendin et al. (2022) At Risk split by the frequency ladder (they split by
+    # calibration-frequency percentile; the ladder is used here so groups match §11).
+    g["at_risk_by_freq"] = np.where(g["valendin"] == "At Risk", np.char.add("At Risk, F ", ladder.astype(str)), "not At Risk")
     return g
 
 
@@ -122,6 +151,7 @@ for (panel, cal), models in SETS.items():
                         pred_q1=float(P[m, :q].sum()), act_q1=float(h[m, :q].sum()),
                         pred_q4=float(P[m, -q:].sum()), act_q4=float(h[m, -q:].sum()),
                         sse_tot=float(((p - a) ** 2).sum()),
+                        ret=int((a > 0).sum()),
                         auc=auc(p, a > 0),
                     ))
             print(panel, cal, model, rep, flush=True) if rep % 25 == 0 else None

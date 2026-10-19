@@ -25,7 +25,7 @@ Nothing was trained for this doc. Every number is read from forecasts already on
 8. [Every contrast against Pareto/NBD](#8-every-contrast-against-paretonbd)
 9. [What is not an LSTM failure](#9-what-is-not-an-lstm-failure)
 10. [Enhancements to try](#10-enhancements-to-try)
-11. [Next: choosing the customer groups](#11-next-choosing-the-customer-groups)
+11. [The customer groups](#11-the-customer-groups)
 12. [Reproducing](#12-reproducing)
 
 ## 1. Set-up
@@ -111,6 +111,14 @@ and search.
    high share of one-timers. On the same panel, **going from 2 to 3 years of calibration
    lifts the separation captured** on all three panels (supported). With four panels,
    sparsity, one-timer share and purchases per customer cannot be told apart. (§7)
+6. **The customer groups to report** are frequency, recency within frequency, overdue as a
+   reading of recency, momentum, and Valendin et al.'s groups. Clumpiness and regularity
+   were dropped: our histories are too short for them, by the papers' own requirements.
+   (§11)
+7. **Momentum (rising vs declining buyers) is the one buying pattern with information
+   beyond frequency and recency.** Pareto/NBD cannot use it, and the LSTMs use it only with
+   five years of history. Frequent buyers who have gone quiet are over-forecast by both
+   model families. (§11.3, §11.4)
 
 ## 3. One-timers are over-forecast
 
@@ -533,20 +541,536 @@ Ordered by how directly the evidence above points to them.
      `log` / `ratio`, which rank at 0.44 on CDNOW against `bounded32`'s 0.085.
    - A rule of thumb to test: no flag deeper than about half the calibration window.
    - This is a config change, not a code change.
-4. **Train on the model's own simulated histories.** During the refit, recompute the AR
+4. **Give the model a momentum signal it cannot lose.** Add a frozen, calibration-only
+   input that tells the model whether each customer is speeding up or slowing down: the
+   §11.4 momentum share, or the purchase rate in the second half of their tenure divided
+   by the first.
+   - Targets §11.4: rising customers are under-forecast at 0.47–0.86×, and on CDNOW and
+     gift 2y the LSTM reproduces almost none of the actual rising − declining gap.
+   - Targets §11.3: frequent customers gone quiet are over-forecast. This is where a
+     sequence model should beat Pareto/NBD by design, and it currently does not.
+   - It would also complement item 2: a fading customer should get a higher hazard.
+   - Success: the within-cell gap of §11.4 moves toward the actual, and rising customers
+     toward 1×.
+5. **Train on the model's own simulated histories.** During the refit, recompute the AR
    features from sampled counts, so the model learns states it will meet in the holdout.
-   It targets both sides of §4's drift, at higher cost than items 1–3.
-5. **Cheap checks.**
+   It targets both sides of §4's drift, at higher cost than items 1–4.
+6. **Cheap checks.**
    - `bounded32` on CDNOW without `week_sin` / `week_cos`, to tell §6's two candidate
      causes apart.
    - An open top class ("6 or more") for the old electronics panel (§9).
 
-## 11. Next: choosing the customer groups
+## 11. The customer groups
 
-Open, to settle together. The groups here (F × R, one-timers, hot/cold) were chosen to
-expose the failure. A thesis chapter needs a small set justified by the literature
-(`docs/cohort-analysis.md` §1) and by the four panels, and stable enough to report on
-every window. To be discussed.
+§3–§8 used groups chosen to expose the failure. This section settles the groups to report
+on every window. Each candidate was judged on three questions:
+
+1. **Does the literature use it?** Each paper was read at its methods section where
+   reachable. Anything that could only be read as an abstract, or not at all, is said so.
+2. **Does it make sense on our panels?** Our setting:
+   - weekly counts;
+   - one acquisition cohort per panel, whose first purchases fall in the first 13 weeks
+     (52 on electronic_5y);
+   - 39–260 calibration weeks;
+   - a median of 1–4 purchases per customer.
+
+   Most published measures were built for richer histories.
+3. **Does it carry information on our data?** Three tests:
+   - **coverage:** the share of customers it can be computed for;
+   - **stability:** do the first and second halves of a customer's calibration agree?
+   - **added information:** inside the same frequency × recency cell, does it separate
+     holdout buyers from non-buyers?
+
+Kept: frequency (§11.1), recency within frequency (§11.2), overdue as a reading of recency
+(§11.3), momentum (§11.4) and the groups of Valendin et al. (§11.5). Considered and dropped:
+clumpiness and regularity (§11.6). Acquisition characteristics (channel, first spend) are
+left out: the trained panels do not carry them, and they answer a different question
+(`docs/cohort-analysis.md` §1.5).
+
+Conventions for this section:
+- A purchase week is a week with at least one transaction.
+- † marks a group with fewer than 30 customers.
+- "Return rate" is the share of the group with at least one holdout transaction.
+- Model cells read predicted tx / customer → **pred ÷ act** [95% CI over runs].
+- Tables computed from actuals alone have 95% intervals from a seeded bootstrap over
+  customers. They describe the panel; they are not model comparisons.
+
+| grouping | literature | fits our panels | carries information here | verdict |
+|---|---|---|---|---|
+| frequency | standard BTYD validation | yes | yes | keep |
+| recency within frequency | used descriptively | yes; CDNOW has no > 52-week band | yes | keep |
+| overdue | no published precedent | needs ≥ 2 purchase weeks | mostly repeats recency | keep as a reading of recency |
+| momentum | no published measure; the idea is supported | needs ≥ 2 purchase weeks | yes, beyond frequency and recency | keep |
+| Valendin et al. groups | the paper we reproduce | yes (defined by the holdout outcome) | — | keep, flagged |
+| clumpiness | published, built for digital daily data | poorly: too few events | weak, and confounded with leaving | drop |
+| regularity | published; needs ~10 purchases per customer | no | unstable, no added information | drop |
+
+### 11.1 Frequency: 1 / 2 / 3–4 / 5+ calibration purchases
+
+**Definition.** Calibration transactions 1, 2, 3–4 or 5+, the same as repeat purchases
+x = 0, 1, 2–3, 4+ in BTYD notation.
+
+**Literature: the field's standard check.**
+- Fader, Hardie & Lee (2005a) validate BG/NBD on CDNOW by "conditional expectations": the
+  average holdout purchases of customers grouped by calibration repeat purchases, x = 0, 1,
+  …, 6, 7+ ([PDF](http://www.brucehardie.com/papers/018/fader_et_al_mksc_05.pdf), Fig. 3).
+  Their zero-repeat class made 18% of all holdout transactions, "second only to the 7+
+  group".
+- Valendin et al. (2022, doi
+  [10.1016/j.ijresmar.2022.02.007](https://doi.org/10.1016/j.ijresmar.2022.02.007),
+  App. B.3, Fig. 11) reuse the same plot for the LSTM.
+- Vanderveld et al. (2016, KDD, doi
+  [10.1145/2939672.2939693](https://doi.org/10.1145/2939672.2939693)) build "one-time
+  buyer", "sporadic buyer" and "power user" cohorts at Groupon and report every metric per
+  cohort. One-time and sporadic buyers had the weakest correlations (0.22, 0.23), and
+  sporadic buyers "the noisiest purchasing behavior".
+- Our cut points are our own: Vanderveld et al. do not publish theirs, and BTYD plots use
+  every value of x.
+
+**Our panels.** The ladder covers every customer, and both the return rate and the ranking
+signal rise along it:
+
+| window | 1 purchase | 2 | 3–4 | 5+ |
+|---|---|---|---|---|
+| cdnow 2y | 14% · AUC 0.56 (1417) | 35% · AUC 0.62 (435) | 58% · AUC 0.66 (312) | 78% · AUC 0.67 (193) |
+| electronics 2y | 26% · AUC 0.44 (150) | 31% · AUC 0.51 (134) | 36% · AUC 0.60 (175) | 49% · AUC 0.71 (370) |
+| electronics 3y | 27% · AUC 0.43 (111) | 16% · AUC 0.58 (109) | 26% · AUC 0.52 (150) | 42% · AUC 0.72 (459) |
+| electronic_5y | 11% · AUC 0.53 (861) | 15% · AUC 0.61 (690) | 23% · AUC 0.61 (951) | 48% · AUC 0.70 (1253) |
+| gift 2y | 16% · AUC 0.50 (1058) | 35% · AUC 0.62 (453) | 53% · AUC 0.64 (415) | 71% · AUC 0.76 (136) |
+| gift 3y | 11% · AUC 0.52 (891) | 24% · AUC 0.62 (413) | 38% · AUC 0.63 (454) | 67% · AUC 0.67 (304) |
+| multichannel 2y | 7% · AUC 0.48 (1028) | 17% · AUC 0.57 (242) | 29% · AUC 0.48 (106) | 58% · AUC 0.77 (26†) |
+| multichannel 3y | 4% · AUC 0.38 (951) | 13% · AUC 0.60 (262) | 23% · AUC 0.56 (142) | 57% · AUC 0.67 (47) |
+
+Each cell gives:
+- the return rate;
+- the AUC of recency inside the group (fewer weeks silent ranks higher; 0.5 = chance),
+  computed from actuals alone;
+- n.
+
+Three readings:
+- **One-timers cannot be ranked among themselves** (AUC 0.38–0.56). In a single
+  acquisition cohort their one purchase is the acquisition purchase, so their history is a
+  single number.
+- **The second purchase adds a weak but real signal** (0.57–0.62 on six windows).
+- The signal is strongest with 5+ purchases (0.67–0.77).
+- **The old electronics panel breaks the ladder**: there one-timers come back more often
+  than two-timers. That panel counts line items rather than trips (§1).
+
+**Forecasts by frequency:**
+
+| window | group | n | return rate | actual tx / customer | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---|---:|---:|---:|---|---|---|
+| cdnow 2y | 1 | 1417 | 14% | 0.24 | 0.37 → **1.50×** [1.32, 1.71] | 1.04 → **4.25×** [3.87, 4.61] | 0.17 → **0.68×** [0.67, 0.69] |
+| cdnow 2y | 2 | 435 | 35% | 0.71 | 0.46 → **0.65×** [0.57, 0.74] | 0.87 → **1.22×** [1.13, 1.31] | 0.63 → **0.89×** [0.88, 0.90] |
+| cdnow 2y | 3-4 | 312 | 58% | 1.44 | 0.83 → **0.58×** [0.50, 0.67] | 0.99 → **0.69×** [0.65, 0.73] | 1.35 → **0.94×** [0.93, 0.95] |
+| cdnow 2y | 5+ | 193 | 78% | 4.10 | 2.41 → **0.59×** [0.52, 0.66] | 2.29 → **0.56×** [0.53, 0.58] | 3.60 → **0.88×** [0.87, 0.89] |
+| electronics 2y | 1 | 150 | 26% | 0.82 | 2.58 → **3.14×** [2.99, 3.27] | 1.40 → **1.71×** [1.66, 1.75] | 0.15 → **0.18×** [0.18, 0.18] |
+| electronics 2y | 2 | 134 | 31% | 1.05 | 2.58 → **2.45×** [2.33, 2.55] | 1.46 → **1.39×** [1.34, 1.43] | 0.26 → **0.25×** [0.25, 0.25] |
+| electronics 2y | 3-4 | 175 | 36% | 1.25 | 2.58 → **2.06×** [1.97, 2.15] | 1.57 → **1.25×** [1.21, 1.30] | 0.44 → **0.35×** [0.35, 0.35] |
+| electronics 2y | 5+ | 370 | 49% | 2.66 | 2.59 → **0.97×** [0.93, 1.01] | 2.06 → **0.78×** [0.74, 0.81] | 1.10 → **0.41×** [0.41, 0.42] |
+| electronics 3y | 1 | 111 | 27% | 1.30 | not run | 0.93 → **0.72×** [0.69, 0.75] | 0.12 → **0.10×** [0.10, 0.10] |
+| electronics 3y | 2 | 109 | 16% | 0.50 | not run | 1.00 → **2.01×** [1.92, 2.11] | 0.23 → **0.46×** [0.46, 0.47] |
+| electronics 3y | 3-4 | 150 | 26% | 0.87 | not run | 1.11 → **1.28×** [1.22, 1.34] | 0.34 → **0.39×** [0.39, 0.40] |
+| electronics 3y | 5+ | 459 | 42% | 2.64 | not run | 2.10 → **0.80×** [0.76, 0.83] | 0.97 → **0.37×** [0.37, 0.37] |
+| electronic_5y | 1 | 861 | 11% | 0.15 | 0.24 → **1.62×** [1.52, 1.72] | 0.27 → **1.86×** [1.77, 1.94] | 0.06 → **0.43×** [0.43, 0.43] |
+| electronic_5y | 2 | 690 | 15% | 0.24 | 0.31 → **1.32×** [1.25, 1.39] | 0.32 → **1.34×** [1.29, 1.39] | 0.17 → **0.72×** [0.72, 0.73] |
+| electronic_5y | 3-4 | 951 | 23% | 0.36 | 0.45 → **1.26×** [1.20, 1.32] | 0.43 → **1.20×** [1.15, 1.24] | 0.33 → **0.91×** [0.91, 0.92] |
+| electronic_5y | 5+ | 1253 | 48% | 1.21 | 1.28 → **1.05×** [1.01, 1.09] | 1.18 → **0.97×** [0.94, 1.00] | 1.05 → **0.86×** [0.86, 0.87] |
+| gift 2y | 1 | 1058 | 16% | 0.23 | 0.31 → **1.34×** [1.24, 1.42] | 0.37 → **1.59×** [1.53, 1.65] | 0.22 → **0.94×** [0.94, 0.95] |
+| gift 2y | 2 | 453 | 35% | 0.50 | 0.41 → **0.81×** [0.73, 0.91] | 0.43 → **0.86×** [0.82, 0.90] | 0.49 → **0.97×** [0.96, 0.97] |
+| gift 2y | 3-4 | 415 | 53% | 1.00 | 0.68 → **0.68×** [0.59, 0.77] | 0.57 → **0.57×** [0.54, 0.60] | 0.84 → **0.85×** [0.85, 0.85] |
+| gift 2y | 5+ | 136 | 71% | 1.93 | 1.30 → **0.67×** [0.61, 0.72] | 0.86 → **0.45×** [0.43, 0.46] | 1.59 → **0.82×** [0.82, 0.83] |
+| gift 3y | 1 | 891 | 11% | 0.15 | not run | 0.24 → **1.63×** [1.57, 1.69] | 0.13 → **0.92×** [0.91, 0.92] |
+| gift 3y | 2 | 413 | 24% | 0.31 | not run | 0.34 → **1.13×** [1.09, 1.16] | 0.34 → **1.10×** [1.10, 1.10] |
+| gift 3y | 3-4 | 454 | 38% | 0.65 | not run | 0.59 → **0.91×** [0.89, 0.93] | 0.62 → **0.96×** [0.96, 0.97] |
+| gift 3y | 5+ | 304 | 67% | 1.62 | not run | 1.19 → **0.74×** [0.72, 0.76] | 1.37 → **0.85×** [0.84, 0.85] |
+| multichannel 2y | 1 | 1028 | 7% | 0.09 | 0.27 → **2.87×** [2.48, 3.28] | 0.18 → **1.87×** [1.82, 1.93] | 0.08 → **0.86×** [0.85, 0.87] |
+| multichannel 2y | 2 | 242 | 17% | 0.22 | 0.27 → **1.24×** [1.07, 1.42] | 0.21 → **0.97×** [0.92, 1.02] | 0.29 → **1.30×** [1.29, 1.32] |
+| multichannel 2y | 3-4 | 106 | 29% | 0.41 | 0.27 → **0.67×** [0.58, 0.77] | 0.25 → **0.61×** [0.57, 0.65] | 0.57 → **1.41×** [1.40, 1.42] |
+| multichannel 2y | 5+ | 26† | 58% | 1.35 | 0.27 → **0.20×** [0.17, 0.23] | 0.29 → **0.22×** [0.20, 0.23] | 1.14 → **0.85×** [0.84, 0.85] |
+| multichannel 3y | 1 | 951 | 4% | 0.05 | not run | 0.11 → **2.37×** [2.28, 2.45] | 0.06 → **1.15×** [1.14, 1.16] |
+| multichannel 3y | 2 | 262 | 13% | 0.16 | not run | 0.18 → **1.16×** [1.10, 1.22] | 0.21 → **1.32×** [1.31, 1.33] |
+| multichannel 3y | 3-4 | 142 | 23% | 0.27 | not run | 0.35 → **1.28×** [1.21, 1.35] | 0.42 → **1.55×** [1.54, 1.56] |
+| multichannel 3y | 5+ | 47 | 57% | 1.00 | not run | 0.52 → **0.52×** [0.49, 0.55] | 0.95 → **0.95×** [0.95, 0.96] |
+
+- **The squeeze reads straight off the ladder.** On CDNOW, gift and multichannel 2y the
+  LSTMs' pred ÷ act falls steadily from over-forecast at 1 purchase to under-forecast at
+  5+, for example `bounded32` on gift 2y: 1.59 → 0.86 → 0.57 → 0.45. Pareto/NBD stays
+  within 0.68–0.97× on CDNOW and gift.
+- **Multichannel 2y:** ValendinLSTM's 0.27 for every step is the collapse.
+- **Pareto/NBD's own weakness shows on multichannel:** it over-forecasts the middle of the
+  ladder (1.30–1.55×).
+- **Inside each group (AUC of the forecast):**
+  - ValendinLSTM is at chance on electronics 2y at every step (0.49–0.53).
+  - `bounded32` on CDNOW is below chance at 2 and 3–4 purchases (0.41, 0.45): the recency
+    reversal of §6.
+  - Elsewhere all three models are within about 0.05 of each other. The full table is in
+    `results/tables_groups.md`.
+
+### 11.2 Recency within frequency
+
+**Definition.** Repeat buyers (2, 3–4, 5+) by weeks silent at the end of calibration: ≤ 13,
+14–52, > 52. One-timers are not split, because on these panels a one-timer's only purchase
+is the acquisition purchase, so they are all equally long-silent. CDNOW has no > 52 band.
+
+**Literature.** Fader, Hardie & Lee (2005b, "RFM and CLV: using iso-value curves", JMR
+42(4); [working paper](http://www.brucehardie.com/papers/rfm_clv_2005-02-16.pdf), Fig. 1)
+lay out CDNOW's holdout value on a recency × frequency grid. They use it to describe
+customers, not to score forecasts. The exact bins of their grid were not verified. Scoring
+forecasts on such a grid is our use.
+
+**Our panels.** This is the test that exposed §6's behaviours. The full table, every cell
+on every window, is in `results/tables_groups.md`. Excerpt, predicted tx / customer:
+
+| window | frequency | recency | n | actual | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---|---|---:|---:|---:|---:|---:|
+| cdnow 2y | 2 | R ≤ 13 | 125 | 0.94 | 0.56 | **0.49** | 1.02 |
+| cdnow 2y | 2 | R 14–38 | 310 | 0.62 | 0.42 | **1.02** | 0.48 |
+| cdnow 2y | 3–4 | R ≤ 13 | 174 | 1.73 | 1.03 | **0.86** | 1.78 |
+| cdnow 2y | 3–4 | R 14–38 | 138 | 1.07 | 0.58 | **1.15** | 0.80 |
+| gift 2y | 3–4 | R ≤ 13 | 183 | 1.34 | 0.80 | 0.61 | 0.92 |
+| gift 2y | 3–4 | R 14–52 | 139 | 0.94 | 0.63 | 0.57 | 0.84 |
+| gift 2y | 3–4 | R > 52 | 93 | 0.41 | 0.51 | 0.46 | 0.70 |
+| gift 3y | 3–4 | R ≤ 13 | 139 | 0.94 | not run | 0.90 | 0.74 |
+| gift 3y | 3–4 | R 14–52 | 120 | 0.72 | not run | 0.59 | 0.68 |
+| gift 3y | 3–4 | R > 52 | 195 | 0.39 | not run | 0.36 | 0.50 |
+| electronic_5y | 5+ | R ≤ 13 | 339 | 2.34 | 2.38 | 2.13 | 1.77 |
+| electronic_5y | 5+ | R 14–52 | 420 | 1.10 | 1.23 | 1.16 | 1.20 |
+| electronic_5y | 5+ | R > 52 | 494 | 0.54 | 0.56 | 0.54 | 0.42 |
+
+How each model handles recency here:
+- **`bounded32` on CDNOW reverses recency at both frequency levels** (bold).
+- **On gift it flattens recency at 2 years** (0.61 → 0.46 where the actual is 1.34 → 0.41)
+  **and tracks it at 3 years** (0.90 / 0.59 / 0.36 against 0.94 / 0.72 / 0.39).
+- **On electronic_5y both LSTMs track it** more closely than Pareto/NBD.
+- **On the old electronics and multichannel 2y**, many cells have fewer than 30 customers,
+  so read those windows by frequency (§11.1) rather than by cell.
+
+### 11.3 Overdue: a reading of recency
+
+**Definition.** For customers with at least 2 purchase weeks:
+- **usual gap** = (last purchase week − first purchase week) ÷ (purchase weeks − 1);
+- **overdue ratio** = weeks silent ÷ usual gap;
+- **groups:** on schedule (≤ 1), overdue 1–3×, overdue > 3×.
+
+Example: two customers each silent for 20 weeks. One bought every 15 weeks (ratio 1.3,
+overdue 1–3×); the other every 2 weeks (ratio 10, overdue > 3×).
+
+**Literature: no published precedent for this grouping.**
+- **The closest idea:** Platzer & Reutterer (2016, Pareto/GGG, doi
+  [10.1287/mksc.2015.0963](https://doi.org/10.1287/mksc.2015.0963)). In their simulation
+  the largest gains over Pareto/NBD (+41% MAE) are for regular, frequent customers whose
+  last purchase was over 8 weeks ago. Their abstract names "previously very frequently
+  active" customers with "a longer purchase hiatus".
+- **The best-known silence heuristic is different:** Wübben & Wangenheim (2008, doi
+  [10.1509/jmkg.72.3.082](https://doi.org/10.1509/jmkg.72.3.082)) use a fixed calendar
+  window, not the customer's own gap.
+
+**Our panels: once frequency is fixed, overdue is almost entirely recency.** The test
+compares overdue > 3× with on-schedule customers inside the same frequency × recency cell:
+
+| window | Δ return rate, overdue > 3× − on schedule, pts [95% CI] | customers in comparable cells |
+|---|---|---:|
+| cdnow 2y | −23.5 [−43.7, −3.0] | 213 |
+| electronics 2y | +24.0 [−14.7, +54.3] | 60 |
+| electronics 3y | no cell has ≥ 10 on each side | 0 |
+| electronic_5y | +3.1 [−5.1, +10.0] | 1072 |
+| gift 2y | no cell has ≥ 10 on each side | 0 |
+| gift 3y | +0.2 [−12.4, +13.1] | 205 |
+| multichannel 2y | no cell has ≥ 10 on each side | 0 |
+| multichannel 3y | −9.7 [−26.9, +4.3] | 121 |
+
+On three windows no cell even holds both kinds of customer, and only CDNOW shows a
+difference beyond recency. So overdue is kept as a readable way of *describing* recency,
+not as independent information.
+
+**Forecasts by overdue group:**
+
+| window | group | n | return rate | actual tx / customer | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---|---:|---:|---:|---|---|---|
+| cdnow 2y | on schedule | 389 | 65% | 2.55 | 1.46 → **0.57×** [0.51, 0.65] | 1.26 → **0.49×** [0.47, 0.51] | 2.23 → **0.88×** [0.87, 0.88] |
+| cdnow 2y | overdue 1–3× | 222 | 54% | 1.41 | 0.83 → **0.59×** [0.53, 0.66] | 1.04 → **0.74×** [0.69, 0.80] | 1.54 → **1.09×** [1.08, 1.11] |
+| cdnow 2y | overdue > 3× | 317 | 36% | 0.78 | 0.53 → **0.68×** [0.60, 0.78] | 1.24 → **1.59×** [1.48, 1.70] | 0.56 → **0.73×** [0.71, 0.74] |
+| electronics 2y | on schedule | 222 | 57% | 2.98 | 2.61 → **0.88×** [0.83, 0.91] | 2.36 → **0.79×** [0.75, 0.83] | 1.31 → **0.44×** [0.44, 0.44] |
+| electronics 2y | overdue 1–3× | 132 | 44% | 2.16 | 2.58 → **1.19×** [1.14, 1.24] | 1.77 → **0.82×** [0.78, 0.86] | 1.08 → **0.50×** [0.50, 0.50] |
+| electronics 2y | overdue > 3× | 156 | 31% | 1.26 | 2.58 → **2.05×** [1.96, 2.13] | 1.53 → **1.22×** [1.16, 1.27] | 0.40 → **0.32×** [0.31, 0.32] |
+| electronics 3y | on schedule | 273 | 48% | 3.05 | not run | 2.48 → **0.81×** [0.78, 0.85] | 1.09 → **0.36×** [0.36, 0.36] |
+| electronics 3y | overdue 1–3× | 149 | 40% | 2.09 | not run | 1.65 → **0.79×** [0.75, 0.82] | 0.93 → **0.45×** [0.44, 0.45] |
+| electronics 3y | overdue > 3× | 181 | 17% | 0.85 | not run | 1.16 → **1.37×** [1.31, 1.44] | 0.39 → **0.46×** [0.46, 0.47] |
+| electronic_5y | on schedule | 1125 | 44% | 1.10 | 1.21 → **1.10×** [1.06, 1.15] | 1.10 → **1.01×** [0.97, 1.04] | 0.93 → **0.85×** [0.85, 0.85] |
+| electronic_5y | overdue 1–3× | 751 | 32% | 0.59 | 0.67 → **1.13×** [1.09, 1.18] | 0.63 → **1.08×** [1.04, 1.11] | 0.66 → **1.12×** [1.12, 1.13] |
+| electronic_5y | overdue > 3× | 972 | 20% | 0.35 | 0.39 → **1.10×** [1.04, 1.16] | 0.39 → **1.09×** [1.05, 1.13] | 0.20 → **0.57×** [0.57, 0.57] |
+| gift 2y | on schedule | 537 | 59% | 1.26 | 0.76 → **0.60×** [0.55, 0.66] | 0.61 → **0.49×** [0.47, 0.51] | 0.90 → **0.71×** [0.71, 0.71] |
+| gift 2y | overdue 1–3× | 268 | 41% | 0.60 | 0.51 → **0.86×** [0.76, 0.96] | 0.47 → **0.79×** [0.76, 0.82] | 0.68 → **1.14×** [1.14, 1.15] |
+| gift 2y | overdue > 3× | 195 | 24% | 0.34 | 0.49 → **1.42×** [1.25, 1.62] | 0.46 → **1.35×** [1.27, 1.42] | 0.63 → **1.83×** [1.81, 1.84] |
+| gift 3y | on schedule | 629 | 51% | 1.07 | not run | 0.89 → **0.83×** [0.81, 0.85] | 0.87 → **0.81×** [0.81, 0.81] |
+| gift 3y | overdue 1–3× | 257 | 38% | 0.61 | not run | 0.47 → **0.77×** [0.75, 0.79] | 0.69 → **1.13×** [1.12, 1.13] |
+| gift 3y | overdue > 3× | 282 | 21% | 0.27 | not run | 0.32 → **1.18×** [1.14, 1.23] | 0.40 → **1.48×** [1.47, 1.49] |
+| multichannel 2y | on schedule | 164 | 26% | 0.46 | 0.27 → **0.59×** [0.51, 0.68] | 0.27 → **0.58×** [0.55, 0.62] | 0.56 → **1.22×** [1.21, 1.23] |
+| multichannel 2y | overdue 1–3× | 102 | 28% | 0.38 | 0.27 → **0.71×** [0.61, 0.81] | 0.20 → **0.53×** [0.49, 0.56] | 0.39 → **1.02×** [1.01, 1.03] |
+| multichannel 2y | overdue > 3× | 97 | 14% | 0.14 | 0.27 → **1.87×** [1.62, 2.14] | 0.20 → **1.36×** [1.28, 1.44] | 0.28 → **1.95×** [1.92, 1.99] |
+| multichannel 3y | on schedule | 188 | 28% | 0.40 | not run | 0.35 → **0.86×** [0.82, 0.89] | 0.48 → **1.18×** [1.17, 1.18] |
+| multichannel 3y | overdue 1–3× | 124 | 17% | 0.23 | not run | 0.24 → **1.01×** [0.96, 1.06] | 0.34 → **1.47×** [1.46, 1.48] |
+| multichannel 3y | overdue > 3× | 129 | 16% | 0.17 | not run | 0.20 → **1.19×** [1.11, 1.28] | 0.20 → **1.20×** [1.19, 1.21] |
+
+**Overdue > 3× customers are over-forecast:**
+- by `bounded32` on 7 of 8 windows (1.09–1.59×);
+- by Pareto/NBD on gift and multichannel (1.20–1.95×).
+
+**On-schedule customers are under-forecast** by the LSTMs on CDNOW, gift and multichannel
+(0.49–0.86×).
+
+These over-forecast customers are frequent buyers who have gone quiet. Pareto/NBD cannot
+tell their silence apart from an irregular buyer's pause: that is the Pareto/GGG argument
+above. A sequence model could in principle, but these LSTMs do not.
+
+### 11.4 Momentum: rising vs declining buyers
+
+**Definition.** For customers with at least 2 purchase weeks: the share of their purchase
+weeks that fall in the second half of their own tenure (first purchase → end of
+calibration). **Rising** if at least 0.5, **declining** otherwise.
+
+| | purchase weeks | tenure | share in second half | group |
+|---|---|---|---|---|
+| customer A | 2 and 90 | weeks 2–103 | 1/2 | rising |
+| customer B | 2, 5 and 9 | weeks 2–103 | 0/3 | declining |
+
+For a two-timer, "rising" simply means the second purchase came in the second half of
+their tenure.
+
+**Literature: no published measure of this kind; it is our construct.** The idea it
+captures, that a customer's buying rate changes over time, is well supported:
+- Romero, van der Lans & Wierenga (2013, doi
+  [10.1016/j.intmar.2013.04.003](https://doi.org/10.1016/j.intmar.2013.04.003); abstract
+  only) state that standard stochastic CLV models assume purchase behaviour constant over
+  time and defection permanent. That is the assumption momentum tests.
+- Netzer, Lattin & Srinivasan (2008, doi
+  [10.1287/mksc.1070.0294](https://doi.org/10.1287/mksc.1070.0294)) model donors moving
+  between latent "dormant", "occasional" and "active" states (yearly alumni giving).
+- Miguéis et al. (2012, Ghent University working paper 2012/790,
+  [PDF](http://wps-feb.ugent.be/Papers/wp_12_790.pdf)) define grocery churn as "partial and
+  progressive defection": quarterly spend falling below 40% of a reference quarter.
+- None of these forms rising/declining groups from calibration history, and none reports
+  forecast accuracy for such groups. No peer-reviewed RFM extension with a trend term was
+  found.
+
+**Our panels: the only pattern measure with information beyond frequency and recency.**
+Inside the same frequency × recency cell, rising customers return more often. Δ return
+rate in points, at three cut-offs [95% CI]:
+
+| window | cut-off 0.4 | 0.5 | 0.6 |
+|---|---|---|---|
+| cdnow 2y | +16.8 [+4.8, +28.6] | +16.2 [+5.0, +27.9] | +9.6 [−0.6, +19.9] |
+| electronics 2y | +0.9 [−10.7, +13.0] | +2.6 [−8.6, +14.4] | +2.6 [−14.5, +17.7] |
+| electronics 3y | −4.2 [−16.9, +8.2] | −11.4 [−23.0, +0.4] | +5.9 [−8.6, +18.3] |
+| electronic_5y | +6.5 [+2.8, +10.2] | +5.3 [+1.5, +9.5] | +5.7 [+0.2, +11.6] |
+| gift 2y | +9.2 [−0.4, +18.3] | +10.1 [+0.9, +19.1] | +6.6 [−5.1, +17.5] |
+| gift 3y | +6.8 [−0.2, +13.7] | +6.4 [−0.3, +13.9] | +11.3 [+3.1, +19.0] |
+| multichannel 2y | +4.1 [−13.3, +18.8] | +4.1 [−12.8, +19.4] | too few |
+| multichannel 3y | +11.6 [+1.2, +23.6] | +11.6 [−0.1, +25.6] | +10.6 [−9.8, +34.3] |
+
+- **The sign is positive on six of the eight windows at every cut-off.** The intervals
+  exclude 0 on CDNOW and electronic_5y at most cut-offs, and on gift and multichannel 3y at
+  some. So the result does not hinge on 0.5.
+- **The old electronics panel is the exception again.**
+
+**Do the models pick it up?** Gap in holdout tx / customer, rising − declining, within the
+same cells. Actual: CI over customers. Models: mean [95% CI over runs].
+
+| window | rising / declining | actual | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---|---|---|---|---|
+| cdnow 2y | 277 / 651 | +0.73 [+0.19, +1.39] | +0.42 [+0.35, +0.51] | +0.01 [−0.03, +0.04] | +0.19 [+0.19, +0.20] |
+| electronics 2y | 159 / 351 | +0.76 [−0.24, +1.69] | +0.01 [+0.00, +0.02] | +0.09 [+0.07, +0.11] | −0.12 [−0.12, −0.11] |
+| electronics 3y | 221 / 382 | −0.47 [−2.04, +1.00] | not run | +0.18 [+0.15, +0.21] | −0.17 [−0.18, −0.17] |
+| electronic_5y | 925 / 1923 | +0.17 [+0.06, +0.28] | +0.23 [+0.23, +0.24] | +0.19 [+0.18, +0.20] | +0.12 [+0.12, +0.12] |
+| gift 2y | 360 / 640 | +0.61 [+0.25, +0.94] | +0.13 [+0.11, +0.15] | +0.09 [+0.09, +0.10] | +0.03 [+0.03, +0.04] |
+| gift 3y | 500 / 668 | +0.32 [+0.15, +0.48] | not run | +0.17 [+0.16, +0.17] | +0.09 [+0.09, +0.09] |
+| multichannel 2y | 129 / 234 | +0.07 [−0.14, +0.31] | −0.00 [−0.00, +0.00] | +0.02 [+0.01, +0.02] | +0.04 [+0.04, +0.04] |
+| multichannel 3y | 152 / 289 | +0.15 [+0.01, +0.30] | not run | +0.03 [+0.02, +0.03] | +0.07 [+0.07, +0.07] |
+
+- **Pareto/NBD reproduces little of the gap.** It reads only frequency, recency and
+  tenure, and what it shows is what those still vary inside a cell.
+- **The LSTMs could reproduce it, since they read the whole sequence:**
+  - **electronic_5y:** they do, with +0.19 and +0.23 against an actual +0.17;
+  - **gift 3y:** partly, +0.17 against +0.32;
+  - **CDNOW and gift 2y:** hardly, `bounded32` +0.01 and +0.09 against +0.73 and +0.61.
+- **Momentum is information that is in the history but goes unused on short or sparse
+  windows.**
+
+**Forecasts by momentum group:**
+
+| window | group | n | return rate | actual tx / customer | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---|---:|---:|---:|---|---|---|
+| cdnow 2y | rising | 277 | 61% | 2.06 | 1.31 → **0.64×** [0.56, 0.72] | 1.09 → **0.53×** [0.51, 0.55] | 1.82 → **0.88×** [0.88, 0.89] |
+| cdnow 2y | declining | 651 | 49% | 1.50 | 0.86 → **0.57×** [0.51, 0.64] | 1.24 → **0.83×** [0.78, 0.87] | 1.36 → **0.90×** [0.89, 0.92] |
+| electronics 2y | rising | 159 | 57% | 3.29 | 2.61 → **0.79×** [0.76, 0.82] | 2.31 → **0.70×** [0.67, 0.74] | 1.26 → **0.38×** [0.38, 0.39] |
+| electronics 2y | declining | 351 | 40% | 1.76 | 2.58 → **1.46×** [1.40, 1.52] | 1.79 → **1.01×** [0.97, 1.06] | 0.84 → **0.47×** [0.47, 0.48] |
+| electronics 3y | rising | 221 | 45% | 2.86 | not run | 2.45 → **0.86×** [0.82, 0.89] | 1.08 → **0.38×** [0.38, 0.38] |
+| electronics 3y | declining | 382 | 32% | 1.74 | not run | 1.55 → **0.89×** [0.85, 0.93] | 0.71 → **0.40×** [0.40, 0.41] |
+| electronic_5y | rising | 925 | 43% | 1.08 | 1.19 → **1.10×** [1.06, 1.14] | 1.07 → **0.99×** [0.96, 1.03] | 0.86 → **0.80×** [0.80, 0.80] |
+| electronic_5y | declining | 1923 | 27% | 0.53 | 0.59 → **1.12×** [1.07, 1.17] | 0.57 → **1.08×** [1.05, 1.12] | 0.49 → **0.93×** [0.92, 0.93] |
+| gift 2y | rising | 360 | 56% | 1.28 | 0.72 → **0.56×** [0.51, 0.61] | 0.60 → **0.47×** [0.45, 0.48] | 0.81 → **0.63×** [0.63, 0.63] |
+| gift 2y | declining | 640 | 42% | 0.69 | 0.59 → **0.86×** [0.77, 0.96] | 0.52 → **0.75×** [0.72, 0.78] | 0.77 → **1.12×** [1.12, 1.13] |
+| gift 3y | rising | 500 | 51% | 1.14 | not run | 0.89 → **0.78×** [0.76, 0.80] | 0.86 → **0.76×** [0.76, 0.76] |
+| gift 3y | declining | 668 | 33% | 0.51 | not run | 0.49 → **0.96×** [0.94, 0.99] | 0.61 → **1.19×** [1.19, 1.19] |
+| multichannel 2y | rising | 129 | 26% | 0.49 | 0.27 → **0.56×** [0.48, 0.64] | 0.26 → **0.53×** [0.50, 0.57] | 0.50 → **1.01×** [1.01, 1.02] |
+| multichannel 2y | declining | 234 | 22% | 0.28 | 0.27 → **0.98×** [0.84, 1.12] | 0.21 → **0.76×** [0.72, 0.81] | 0.40 → **1.46×** [1.44, 1.47] |
+| multichannel 3y | rising | 152 | 28% | 0.41 | not run | 0.32 → **0.77×** [0.73, 0.80] | 0.43 → **1.04×** [1.03, 1.04] |
+| multichannel 3y | declining | 289 | 18% | 0.22 | not run | 0.25 → **1.13×** [1.07, 1.20] | 0.32 → **1.46×** [1.45, 1.47] |
+
+The two kinds of model fail on opposite sides:
+- **Pareto/NBD over-forecasts declining customers** on gift and multichannel (1.12–1.46×):
+  it assumes their rate is unchanged.
+- **The LSTMs under-forecast rising customers** on every window except electronic_5y
+  (0.47–0.86×).
+
+### 11.5 The groups of Valendin et al. (2022)
+
+**Definitions, from the paper (§4.1, verified in the open-access text).** Both are defined
+by the holdout outcome:
+- **At Risk:** "individuals with at least average historical transaction frequency who do
+  not return to make a single transaction in the holdout period."
+- **Opportunity:** "customers who make transactions more frequently in the holdout than
+  during the calibration period."
+
+Valendin et al. also split At Risk by calibration-frequency percentile. Here it is split by
+the §11.1 frequency groups instead, so the groups line up.
+
+These groups are kept for comparability with the paper we reproduce, not as a way to see
+what a model could have known. The paper reports that the LSTM's advantage on At Risk grows
+with how frequent those customers had been, and that Pareto/NBD and Pareto/GGG "fail to
+identify any" Opportunity customers in 5 of their 8 datasets.
+
+**At Risk: predicted tx / customer (the actual is 0, so lower is better).**
+
+| window | group | n | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---|---:|---:|---:|---:|
+| cdnow 2y | At Risk, 3–4 | 130 | 0.72 | 1.03 | 1.16 |
+| cdnow 2y | At Risk, 5+ | 43 | 1.71 | 1.84 | 2.74 |
+| electronics 2y | At Risk, 5+ | 140 | 2.58 | 1.83 | 0.85 |
+| electronics 3y | At Risk, 5+ | 136 | not run | 2.05 | 0.97 |
+| electronic_5y | At Risk, 5+ | 651 | 0.90 | 0.86 | 0.77 |
+| gift 2y | At Risk, 3–4 | 197 | 0.64 | 0.54 | 0.81 |
+| gift 2y | At Risk, 5+ | 39 | 1.17 | 0.80 | 1.48 |
+| gift 3y | At Risk, 3–4 | 280 | not run | 0.54 | 0.60 |
+| gift 3y | At Risk, 5+ | 100 | not run | 0.96 | 1.15 |
+| multichannel 2y | At Risk, 2 | 202 | 0.27 | 0.21 | 0.28 |
+| multichannel 2y | At Risk, 3–4 | 75 | 0.27 | 0.25 | 0.56 |
+| multichannel 2y | At Risk, 5+ | 11† | 0.27 | 0.25 | 0.99 |
+| multichannel 3y | At Risk, 2 | 227 | not run | 0.18 | 0.20 |
+| multichannel 3y | At Risk, 3–4 | 110 | not run | 0.34 | 0.42 |
+| multichannel 3y | At Risk, 5+ | 20† | not run | 0.48 | 0.87 |
+
+Which frequency levels appear depends on the panel's average frequency. On electronics,
+"at least average" means at least 6 purchases.
+
+Model − Pareto/NBD, predicted tx / customer on all At Risk customers (negative = closer to
+the true 0):
+
+| window | ValendinLSTM | LSTM + bounded32 |
+|---|---|---|
+| cdnow 2y | **−0.59 [−0.70, −0.46]** | **−0.32 [−0.39, −0.25]** |
+| electronics 2y | **+1.73 [+1.61, +1.83]** | **+0.98 [+0.90, +1.07]** |
+| electronics 3y | not run | **+1.08 [+0.99, +1.17]** |
+| electronic_5y | **+0.13 [+0.10, +0.17]** | **+0.09 [+0.06, +0.12]** |
+| gift 2y | **−0.20 [−0.28, −0.11]** | **−0.34 [−0.37, −0.31]** |
+| gift 3y | not run | **−0.09 [−0.11, −0.07]** |
+| multichannel 2y | **−0.11 [−0.15, −0.07]** | **−0.16 [−0.17, −0.15]** |
+| multichannel 3y | not run | **−0.06 [−0.07, −0.05]** |
+
+**Valendin's At Risk finding replicates on CDNOW, gift and multichannel but not on
+electronics.**
+- On CDNOW, gift and multichannel the LSTMs forecast less for churned customers than
+  Pareto/NBD does.
+- The gap is widest for the most frequent of them: multichannel 5+, 0.25 against 0.99.
+- On electronics Pareto/NBD forecasts less, but only because it under-forecasts the whole
+  panel (−63%).
+- A model that forecasts zero for everyone would win this table. Read it only beside the
+  Opportunity table below.
+
+**Opportunity:**
+
+| window | n | actual tx / customer | ValendinLSTM | LSTM + bounded32 | Pareto/NBD |
+|---|---:|---:|---|---|---|
+| cdnow 2y | 171 | 5.12 | 0.90 → **0.18×** [0.16, 0.20] | 1.22 → **0.24×** [0.23, 0.25] | 1.13 → **0.22×** [0.22, 0.22] |
+| electronics 2y | 81 | 7.54 | 2.58 → **0.34×** [0.33, 0.36] | 1.62 → **0.22×** [0.21, 0.22] | 0.46 → **0.06×** [0.06, 0.06] |
+| electronics 3y | 71 | 10.17 | not run | 1.62 → **0.16×** [0.15, 0.17] | 0.55 → **0.05×** [0.05, 0.05] |
+| electronic_5y | 45 | 4.27 | 0.44 → **0.10×** [0.10, 0.11] | 0.43 → **0.10×** [0.10, 0.10] | 0.24 → **0.06×** [0.06, 0.06] |
+| gift 2y | 89 | 3.99 | 0.50 → **0.12×** [0.11, 0.13] | 0.47 → **0.12×** [0.11, 0.12] | 0.51 → **0.13×** [0.13, 0.13] |
+| gift 3y | 39 | 3.15 | not run | 0.39 → **0.12×** [0.12, 0.13] | 0.30 → **0.09×** [0.09, 0.09] |
+| multichannel 2y | 20† | 2.50 | 0.27 → **0.11×** [0.09, 0.12] | 0.19 → **0.07×** [0.07, 0.08] | 0.11 → **0.04×** [0.04, 0.04] |
+| multichannel 3y | 4† | 2.25 | not run | 0.12 → **0.05×** [0.05, 0.05] | 0.05 → **0.02×** [0.02, 0.02] |
+
+Every model reaches only 2–34% of what growing customers actually buy. The LSTMs are at
+or above Pareto/NBD on every window, and well above it on electronics.
+
+### 11.6 Considered and dropped: clumpiness and regularity
+
+Both are published, well-cited measures of buying pattern. Neither works on our panels,
+and the reasons come from the papers themselves as much as from our data.
+
+| window | customers with ≥ 3 purchase weeks | burstiness B: first-half vs second-half Spearman (customers) | clumpy (C = 1) share of repeaters | within-cell Δ return, clumpy − not, pts [95% CI] |
+|---|---:|---|---:|---|
+| cdnow 2y | 20% | 0.01 (63) | 9% | −8.5 [−18.4, +2.5] |
+| electronics 2y | 37% | 0.30 (38) | 28% | −11.7 [−22.8, −0.3] |
+| electronics 3y | 48% | −0.03 (76) | 30% | −1.9 [−10.6, +7.2] |
+| electronic_5y | 56% | 0.11 (479) | 27% | −5.2 [−8.8, −1.8] |
+| gift 2y | 26% | 0.25 (38) | 10% | −4.1 [−14.2, +6.4] |
+| gift 3y | 36% | 0.17 (93) | 16% | −0.4 [−7.2, +5.7] |
+| multichannel 2y | 9% | – (4) | 20% | −10.5 [−21.5, +2.8] |
+| multichannel 3y | 13% | 0.30 (12) | 25% | +2.1 [−7.0, +11.2] |
+
+**Regularity** (even vs uneven gaps between purchases):
+- **What the literature does.** Platzer & Reutterer (2016) model gaps between purchases as
+  Gamma(k): k = 1 is random (Poisson) timing and larger k is more regular. Reutterer,
+  Platzer & Schröder (2021, doi
+  [10.1016/j.ijresmar.2020.09.002](https://doi.org/10.1016/j.ijresmar.2020.09.002)) use a
+  cohort-wide Erlang-k. Neither paper groups real customers by regularity.
+- **Why it fails here, by their own requirements:**
+  - Per-customer estimates need "sufficient transactions made by a customer (usually 10 or
+    more)".
+  - The Wheat & Morrison estimator needs at least 3 transactions and gives one value for
+    the whole cohort.
+  - On CDNOW, k "varies narrowly around 1, which confirms the validity of assuming a
+    Poisson purchase process".
+  - Regularity helps only when the cohort's k̂ is about 1.5 or higher.
+- **Our data agree.** The measure applies to 9–56% of customers. The Goh & Barabási (2008,
+  doi [10.1209/0295-5075/81/48002](https://doi.org/10.1209/0295-5075/81/48002)) burstiness
+  B of a customer's first half does not predict that of their second half (−0.03 to 0.30,
+  often on fewer than 100 customers). It is not a stable trait at this depth of history.
+
+**Clumpiness** (purchases bunched together):
+- **What the literature does.** Zhang, Bradlow & Small (2013, doi
+  [10.1080/02664763.2013.818627](https://doi.org/10.1080/02664763.2013.818627); 2015, doi
+  [10.1287/mksc.2014.0873](https://doi.org/10.1287/mksc.2014.0873)) score bunching on the
+  gaps between events, including the gap from the window's start to the first event and
+  from the last event to the window's end. A customer is flagged clumpy (C = 1) when the
+  score exceeds the 95th percentile of the same number of events placed at random. It was
+  built on Hulu viewing days: 120 days, 8.7 events per customer.
+- **Why it fails here, by the authors' own warnings:**
+  - With few events "the influence of one shock is large".
+  - There is "masking between clumpiness … and attrition": a customer who buys early and
+    then stops looks clumpy, because the end-of-window gap is long.
+  - Bradlow notes that for "historically purchased goods, clumpiness really isn't there".
+- **Our data match that warning.** Flagged customers are *less* likely to return within the
+  same frequency × recency cell (−0.4 to −11.7 points; supported on electronics 2y and
+  electronic_5y). The authors' rejoinder reports that clumpy customers buy *more*. Here the
+  flag mostly picks up customers who have left.
+- **The formula used here** is the normalised Hp of the `clumpi` reference implementation.
+  It was checked against Rao's commentary examples, not against the 2015 paper, which was
+  not reachable.
+
+### 11.7 What the groups add to the picture
+
+1. **The squeeze runs along the frequency ladder** (§11.1): over-forecast at 1 purchase,
+   under-forecast at 5+, on every 2-year window except electronics.
+2. **Frequent buyers who have gone quiet (overdue > 3×) are over-forecast by both model
+   families**, and steady buyers (on schedule) are under-forecast by the LSTMs (§11.3).
+3. **Momentum is the one pattern in the history that adds information**, and it is a blind
+   spot for both models on short or sparse windows: Pareto/NBD by construction, the LSTMs
+   in practice. With five years of history the LSTMs do capture it (§11.4).
+4. **Valendin et al.'s At Risk result replicates on three of the four panels**, and no
+   model gets near growing customers (§11.5).
 
 ## 12. Reproducing
 
@@ -555,10 +1079,15 @@ From the repo root with the project venv:
 ```
 python .scratch/customer-analysis-2/collect.py .scratch/customer-analysis-2/results/groups.pkl
 python .scratch/customer-analysis-2/tables.py  .scratch/customer-analysis-2/results/groups.pkl
+python .scratch/customer-analysis-2/tables_groups.py .scratch/customer-analysis-2/results/groups.pkl
 ```
 
-`collect.py` reads every stored forecast in §1 and writes one row per (window, model, run,
-grouping, group). `tables.py` prints every table in this doc;
-`.scratch/customer-analysis-2/results/tables.md` holds its output. The CDNOW week-by-week
-figures in §6 came from a one-off reading of the same prediction files; they are the only
-numbers here that `tables.py` does not print.
+- `collect.py` reads every stored forecast in §1 and writes one row per (window, model,
+  run, grouping, group).
+- `tables.py` prints the tables of §3–§8; its output is in
+  `.scratch/customer-analysis-2/results/tables.md`.
+- `tables_groups.py` prints every table of §11, including the actuals-only tests (seeded
+  bootstraps and seeded clumpiness thresholds); its output is in
+  `.scratch/customer-analysis-2/results/tables_groups.md`.
+- The CDNOW week-by-week figures in §6 came from a one-off reading of the same prediction
+  files; they are the only numbers here that no script prints.
