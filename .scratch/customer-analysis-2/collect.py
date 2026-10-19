@@ -33,7 +33,12 @@ for p in ("electronics", "gift", "multichannel"):
 SETS[("electronics", "5y")] = {
     "ValendinLSTM": "real_panel_benchmarks_cal5y__ValendinLSTM__electronics__r*/ValendinLSTM",
     "LSTM+bounded52": "epoch_floor_cal5y__LSTM__electronics__ar_bounded_52-nofloor__r*/LSTM",
-    "ParetoNBD": "real_panel_benchmarks_cal5y__ParetoNBD__electronics__r*/ParetoNBD"}
+    "ParetoNBD": "real_panel_benchmarks_cal5y__ParetoNBD__electronics__r*/ParetoNBD",
+    "Transformer": "attention_cal5y__Transformer__electronics__ar_bounded_52-nofloor__r*/Transformer"}
+# Transformer with the same activity flags as the LSTM column (family H, one suite holding
+# 20 forecasts); it never ran on gift, multichannel, CDNOW's current window or 3 years.
+SETS[("electronics", "2y")]["Transformer"] = \
+    "real_panel_arms__Transformer__electronics__ar_bounded-no_cluster-valendin__a/Transformer"
 
 
 def auc(score, pos):
