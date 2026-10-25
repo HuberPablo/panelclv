@@ -44,7 +44,7 @@ Three findings stand out.
    Moirai to customer panels was found; the foundation-model work on transactions (§8) is
    about representation learning for banking tasks.
 3. **The hybrid direction is live and points both ways.** Chou et al. (2022) feed BG/BB
-   estimates into a Lasso and report beating two RNNs; Xie (2019) embeds the Pareto/NBD
+   estimates into a Lasso and report beating two RNNs, by 0.001 AUC; Xie (2019) embeds the Pareto/NBD
    likelihood in a network's loss; Ghosh & Schein (2026) replace MCMC with amortised
    variational inference; Yan & Resnick (2023) ensemble "generative" and "discriminative"
    models in production. The deep-learning papers that win do so by a margin that is often
@@ -54,28 +54,36 @@ Three findings stand out.
 
 ## 2. Hybrids of BTYD models and machine learning
 
-### 2.1 Chou, Chuang, Chou & Liang (2022) — Lasso-BG/BB **[abstract and highlights only]**
+### 2.1 Chou, Chuang, Chou & Liang (2022) — Lasso-BG/BB (full text read, PDF in Papers/CLV)
 
 - *Citation.* Chou, P., Chuang, H. H.-C., Chou, Y.-C. & Liang, T.-P. (2022), "Predictive
   analytics for customer repurchase: Interdisciplinary integration of buy till you die
   modeling and machine learning", *European Journal of Operational Research* 296(2),
-  635–651, DOI 10.1016/j.ejor.2021.04.021
-  (https://ideas.repec.org/a/eee/ejores/v296y2022i2p635-651.html).
-- *Target.* Customer repurchase propensity and frequency in a discrete-time non-contractual
-  setting (same source).
-- *Model.* BG/BB estimates (parameters and predictions) are fed as inputs, with about 100
-  transaction-derived features (RFM, returns/cancellations, payment tool, device), into a
-  high-dimensional Lasso regression; a CART–ANN variant shows the same pattern (same
-  source).
-- *Benchmarks.* BG/BB alone, Lasso alone, and in robustness checks "two sophisticated
-  recurrent neural networks" (same source; names of the RNNs not accessible).
-- *Data.* "A large online retail dataset"; size and window lengths not accessible.
-- *Headline (claim).* The integrated Lasso-BG/BB improves on both BG/BB and Lasso alone,
-  stays interpretable, outperforms the two RNNs, and the BG/BB outputs are the most
-  influential of the ~100 predictors (same source). Numbers not accessible.
+  635–651, DOI 10.1016/j.ejor.2021.04.021.
+- *Target.* Binary: does the customer repurchase in the next quarter (§3). Not a count.
+- *Model.* BG/BB estimates (E[p], E[θ], P(alive) and the expected number of active months in
+  the next quarter) added to 69 or 92 transaction-derived features (RFM, cancellations,
+  returns, payment, discounts, quarter dummies) in a logit Lasso; a CART-ANN variant (§3–5).
+- *Benchmarks.* BG/BB alone (scaled to [0,1]), Lasso without BG/BB, ANN with and without
+  BG/BB, and in a robustness check LSTM and GRU (Table 7).
+- *Data.* An anonymous online clothing retailer, 532,410 members, 1,250,587 transactions,
+  33 months (May 2015 to January 2018); quarterly member panel, more than 2.2 million
+  member-quarter observations in training; test set is the temporally forward 11th quarter
+  (§3–4). For the RNN check the sample is limited to members with at least four quarters
+  (2,069,459 member-quarter observations, about 75 % of members) and the other models are
+  refitted on the same sample (§5.3, footnote 9).
+- *Headline (claims, Tables 3 and 7; 30 bootstrap test samples).* AUC / top-decile lift /
+  average precision. BG/BB 0.774 / 3.750 / 0.323; Lasso-All 0.777 / 3.728 / 0.326;
+  Lasso-All(+BG/BB) 0.784 / 3.870 / 0.342. Robustness sample: Lasso-Current(+BG/BB) 0.792 /
+  4.384 / 0.351; ANN-All(+BG/BB) 0.793 / 4.421 / 0.353; LSTM 0.791 / 4.399 / 0.350; GRU
+  0.789 / 4.356 / 0.341. The text reports the Lasso-BG/BB "significantly outperforms LSTM
+  in AUC/APS by 0.01%/0.29%" and the GRU on all three metrics.
 - *Code.* Not stated.
-- *Caveat.* Paywalled; the RNN robustness check could not be inspected, so it is unknown
-  whether the RNNs were tuned or how the target was defined for them.
+- *Caveat.* The margin over the LSTM is 0.001 in AUC and the LSTM has the higher top-decile
+  lift than the Lasso; the paper's real finding is that Lasso alone does not beat BG/BB
+  (BG/BB even wins top-decile lift) and that adding BG/BB outputs to any model helps by
+  about one point of AUC. Binary target on a very large panel; the RNNs read quarterly
+  aggregates, not raw transactions.
 
 ### 2.2 Xie (2019) — Pareto/NBD likelihood inside a neural network's loss
 
@@ -625,7 +633,7 @@ none uses a BTYD benchmark.
   with the metric is a recurring feature of this literature, which is a reason for the
   thesis's single scoring authority.
 - **Hybrids versus pure networks.** Chou et al. (2022) report a Lasso-BG/BB beating two
-  RNNs; Valendin et al. (2022) and Sarkar & De Bruyn (2026) report an LSTM beating the
+  RNNs by 0.001 to 0.003 AUC on a binary target; Valendin et al. (2022) and Sarkar & De Bruyn (2026) report an LSTM beating the
   Pareto/NBD and hierarchical-Bayes extensions. Nobody has run both designs on the same
   panel.
 - **Where the BTYD model loses most.** Every paper that tabulates it shows the probabilistic
@@ -645,7 +653,7 @@ none uses a BTYD benchmark.
 
 | Study | Target | Model | Benchmarks | Datasets | Headline result (claim) | Code |
 |---|---|---|---|---|---|---|
-| Chou et al. 2022, EJOR | Repurchase propensity/frequency (discrete) | Lasso on BG/BB outputs + ~100 features | BG/BB, Lasso, two RNNs | Large online retailer (n/r) | Lasso-BG/BB beats BG/BB, Lasso and both RNNs; BG/BB outputs most influential | not stated |
+| Chou et al. 2022, EJOR | Repurchase next quarter (binary) | Lasso on BG/BB outputs + 69–92 features | BG/BB, Lasso, ANN, LSTM, GRU | Online clothing retailer, 532,410 members, 33 months | AUC: BG/BB 0.774, Lasso 0.777, Lasso+BG/BB 0.784; vs RNNs 0.792 vs LSTM 0.791, GRU 0.789 | not stated |
 | Xie 2019, arXiv | Holdout repeat-purchase count; active status | FFNN emitting Pareto/NBD rates, likelihood in loss | Pareto/NBD MLE | CDNOW 23,570; E-tailing 24,000; 60/40 by customer | P/NBD MAE 0.690, total 4,105 vs actual 7,634; best NNA MAE 0.896, total 8,526 | not stated |
 | Ghosh & Schein 2026, arXiv | n/r ("predictive performance") | Weibull-renewal BTYD, amortised VI | MCMC state of the art | 5M retail customers; 4M donors | 8 min vs 3–4 days, "no appreciable change" | not stated |
 | Chen, Keng & Moreno 2018, ICDM-W | Time to next purchase per product (censored) | 2-layer LSTM → Weibull params | Pareto/NBD, WTTE-RNN, RF | CDNOW (1 month holdout); retailer 5 categories, 78 wk train / 4 wk test | ROC-AUC 0.84 vs P/NBD 0.80 on CDNOW | github rubikloud/matrnn |
@@ -691,9 +699,11 @@ n/r = not reported in the accessible text.
   per-customer RMSE and the aggregate bias, which `compute_forecast_metrics` already does.
 - Several papers' conclusions flip between metrics; keeping one scoring authority and
   reporting it on every model is a methodological contribution worth stating explicitly.
-- Chou et al. (2022) is the strongest counter-evidence to "deep beats BTYD": a BG/BB-fed
-  Lasso beating two RNNs on a large retailer. A hybrid arm (BTYD outputs as covariates) is
-  the cheapest extension with a literature anchor.
+- Chou et al. (2022) is the counter-evidence to "deep beats BTYD", but a weak one once the
+  full text is read: a BG/BB-fed Lasso beats an LSTM by 0.001 AUC on a binary target with
+  532,410 customers, and the robust finding is that adding BG/BB outputs to any model adds
+  about one AUC point. A hybrid arm (BTYD outputs as covariates) remains the cheapest
+  extension with a literature anchor.
 - Run-to-run variance is almost never reported in this literature (Wang et al. 2019 is the
   exception); the thesis's replication-across-seeds reporting fills a documented gap.
 - Simon (2025) establishes that Pareto/NBD timing forecasts are unusable in practice; a
