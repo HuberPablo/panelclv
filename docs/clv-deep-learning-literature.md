@@ -184,8 +184,10 @@ Three findings stand out.
   Table 4, §5.1).
 - *Headline (claims, PDF Table 5).* RMSE / MAE. UKRetail: BG/NBD 69.17 / 41.54; S2S 65.36
   / 34.55; GBM-S2S 64.95 / 30.80. Children: BG/NBD 20.14 / 8.09; GBM 12.50 / 3.42; S2S
-  12.16 / 3.91; GBM-S2S 11.65 / 3.14. Differences on Children significant at p < 10⁻⁵; on
-  UKRetail only "a clear tendency (p < 0.2)" (PDF §5.3.1).
+  12.16 / 3.91; GBM-S2S 11.65 / 3.14. All differences between the proposed models and the
+  baselines are significant on both datasets by a bootstrap test (p < 0.01); the stacked model
+  beats its own two components significantly only on Children (p < 10⁻⁵), on UKRetail it shows
+  "a clear tendency (p < 0.2)" (PDF §5.3.1).
 - *Code.* https://bitbucket.org/Josef-Bauer/clv_pred/src/master/ (PDF footnote 10).
 - *Caveat.* Revenue regression on a heavily filtered panel (20 % of UKRetail customers
   removed as wholesale); BG/NBD with Gamma-Gamma is the only probabilistic benchmark; the
@@ -648,7 +650,7 @@ none uses a BTYD benchmark.
 | Ghosh & Schein 2026, arXiv | n/r ("predictive performance") | Weibull-renewal BTYD, amortised VI | MCMC state of the art | 5M retail customers; 4M donors | 8 min vs 3–4 days, "no appreciable change" | not stated |
 | Chen, Keng & Moreno 2018, ICDM-W | Time to next purchase per product (censored) | 2-layer LSTM → Weibull params | Pareto/NBD, WTTE-RNN, RF | CDNOW (1 month holdout); retailer 5 categories, 78 wk train / 4 wk test | ROC-AUC 0.84 vs P/NBD 0.80 on CDNOW | github rubikloud/matrnn |
 | Yan & Resnick 2023, QME | Churn-staged CLV, daily refresh | Ensemble generative + discriminative | unnamed | 12 brands, 6 intervals 2020–22 | "consistently surpasses benchmarks" | not stated |
-| Bauer & Jannach 2021, TKDD | Profit per period, summed (4 wk daily / 6 mo weekly) | Enc–dec GRU + GBM stack | ACMB/ARMA, BG/NBD, Markov chain, Embeddings-RF | UKRetail 3,284; Children 1.07M | Children RMSE/MAE 11.65/3.14 vs BG/NBD 20.14/8.09 (p<10⁻⁵); UKRetail 64.95/30.80 vs 69.17/41.54 (p<0.2) | bitbucket Josef-Bauer/clv_pred |
+| Bauer & Jannach 2021, TKDD | Profit per period, summed (4 wk daily / 6 mo weekly) | Enc–dec GRU + GBM stack | ACMB/ARMA, BG/NBD, Markov chain, Embeddings-RF | UKRetail 3,284; Children 1.07M | Children RMSE/MAE 11.65/3.14 vs BG/NBD 20.14/8.09; UKRetail 64.95/30.80 vs 69.17/41.54 (both p<0.01 vs baselines) | bitbucket Josef-Bauer/clv_pred |
 | Sarkar & De Bruyn 2026, JAMS | Distribution of future value by simulation | Dual LSTM, Monte Carlo rollout | Pareto/NBD, HB extensions, deep learning (6) | 21,939 donors, 9 years | Best on 19 of 24 metrics; targeting lift up to 8.3 % | not stated |
 | Chen, Ng, Smyl & Steininger 2024, arXiv | Revenue per user, 1–26 wk | Dilated multi-cell RNN | BTYD (unnamed), LightGBM, XGBoost | Uber, Meta Quest (n/r) | aSMAPE 4 wk: BTYD 53.6 %, LGB 30.4 %, dRNN 22.9 % | not stated |
 | Chen, Guitart et al. 2018, IEEE Big Data | 365-day spend, paying players | MLP (203 features); CNN on raw series | Pareto/NBD, MBG/CNBD-k (+avg/GG) | Age of Ishtaria, 2,505 churned payers | RMSLE: P/NBD 9.35, MBG/CNBD-k 3.46, DNN 1.82, CNN 1.84 | not stated |
